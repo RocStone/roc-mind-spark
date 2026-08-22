@@ -1406,10 +1406,21 @@
   .rms-set-card{width:560px; font-family:var(--sans)}
   html.lang-zh .rms-set-card, html.lang-zh .rms-ctx{font-family:"PingFang SC",var(--sans)}
   .rms-lang{
-    min-width:120px; text-align:left;
-    padding:4px 8px; border-radius:7px;
-    border:1px solid var(--line); background:var(--paper-2);
-    font:inherit; font-size:13px; color:var(--ink); cursor:pointer;
+    display:inline-flex; padding:2px; gap:2px;
+    border-radius:8px; border:1px solid var(--line);
+    background:var(--paper-2);
+  }
+  .rms-lang button{
+    border:none; background:transparent;
+    padding:5px 12px; border-radius:6px;
+    font:inherit; font-size:13px; line-height:1.2;
+    color:var(--ink-soft); cursor:pointer;
+  }
+  .rms-lang button:hover{color:var(--ink)}
+  .rms-lang button.on{
+    background:var(--node-bg,#fff); color:var(--ink);
+    box-shadow:0 1px 2px rgba(0,0,0,.12);
+    font-weight:600;
   }
   .rms-set-sec{margin:16px 0 6px}
   .rms-set-sec h3{
@@ -1420,7 +1431,7 @@
   .rms-row>span:first-child{flex:1; font-size:13.5px}
   .rms-check{display:flex; align-items:center; gap:8px; font-size:13.5px; cursor:pointer}
   .rms-chord,.rms-chord-static{
-    min-width:92px; text-align:center;
+    min-width:108px; text-align:center;
     padding:4px 10px; border-radius:7px;
     border:1px solid var(--line); background:var(--paper-2);
     font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12px;

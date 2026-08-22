@@ -60,9 +60,9 @@
     if(spec.meta) bits.push('⌘');
     let key = spec.key || '';
     if(key===' ') key='Space';
-    if(key==='Meta'||key==='Control'||key==='Alt'||key==='Shift') return bits.join('') || '…';
+    if(key==='Meta'||key==='Control'||key==='Alt'||key==='Shift') return bits.join(' ') || '…';
     if(key.length===1) key=key.toUpperCase();
-    return bits.join('') + key;
+    return bits.length ? bits.join(' ') + ' ' + key : key;
   }
   function sameSpec(a, b){
     if(!a || !b) return false;
@@ -79,7 +79,7 @@
     const login = document.getElementById('rmsLoginToggle');
     if(login) login.checked = !!(state && state.login);
     const tog = document.getElementById('rmsToggleChord');
-    if(tog) tog.textContent = (state && state.toggleDisplay) || '⌥⇧⌘Q';
+    if(tog) tog.textContent = (state && state.toggleDisplay) || '⌥ ⇧ ⌘ Q';
   };
 
   function buttonId(el){
@@ -252,10 +252,10 @@
           <h3>${t('language')}</h3>
           <div class="rms-row">
             <span>${t('language')}</span>
-            <select id="rmsLangSelect" class="rms-lang">
-              <option value="en"${lang==='en'?' selected':''}>English</option>
-              <option value="zh"${lang==='zh'?' selected':''}>中文</option>
-            </select>
+            <div class="rms-lang" role="radiogroup" aria-label="${t('language')}">
+              <button type="button" data-lang="en"${lang==='en'?' class="on" aria-pressed="true"':' aria-pressed="false"'}>English</button>
+              <button type="button" data-lang="zh"${lang==='zh'?' class="on" aria-pressed="true"':' aria-pressed="false"'}>中文</button>
+            </div>
           </div>
         </div>
         <div class="rms-set-sec">
@@ -264,7 +264,7 @@
         </div>
         <div class="rms-set-sec">
           <h3>${t('overlay')}</h3>
-          <div class="rms-row"><span>${t('showHide')}</span><button type="button" class="rms-chord" id="rmsToggleChord" data-rec="toggle">⌥⇧⌘Q</button></div>
+          <div class="rms-row"><span>${t('showHide')}</span><button type="button" class="rms-chord" id="rmsToggleChord" data-rec="toggle">⌥ ⇧ ⌘ Q</button></div>
         </div>
         <div class="rms-set-sec">
           <h3>${t('canvas')}</h3>
@@ -281,11 +281,15 @@
     m.querySelector('.vf-close').onclick=close;
     m.querySelector('.vf-backdrop').onclick=close;
     m.querySelector('#rmsLoginToggle').onchange=ev=>nativePost({ op:'setLogin', on:ev.target.checked });
-    m.querySelector('#rmsLangSelect').onchange=ev=>{
-      if(window.rmsSetLang) window.rmsSetLang(ev.target.value);
-      m.remove();
-      openSettings();
-    };
+    m.querySelectorAll('.rms-lang [data-lang]').forEach(btn=>{
+      btn.onclick=()=>{
+        const next=btn.dataset.lang;
+        if(!next || next===(window.rmsLang ? window.rmsLang() : 'en')) return;
+        if(window.rmsSetLang) window.rmsSetLang(next);
+        m.remove();
+        openSettings();
+      };
+    });
     m.addEventListener('click', ev=>{
       const rec=ev.target && ev.target.dataset && ev.target.dataset.rec;
       if(!rec) return;
@@ -303,7 +307,7 @@
     const login=root.querySelector('#rmsLoginToggle');
     if(login) login.checked=!!native.login;
     const tog=root.querySelector('#rmsToggleChord');
-    if(tog && !listening) tog.textContent=native.toggleDisplay||'⌥⇧⌘Q';
+    if(tog && !listening) tog.textContent=native.toggleDisplay||'⌥ ⇧ ⌘ Q';
     const canvas=canvasMap();
     const box=root.querySelector('#rmsCanvasRows');
     if(box){

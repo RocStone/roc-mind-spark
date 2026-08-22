@@ -1,5 +1,7 @@
 # Roc Mind Spark
 
+[English](README.md) · [中文](README.zh.md)
+
 A **native macOS overlay** for mind mapping. Hit a hotkey from any app, any desktop, any fullscreen Space — the map comes up on top. Capture the thought, dismiss it, keep working. No browser tab to find, no Space to switch.
 
 The canvas is [MindSpark](https://github.com/prasadpatil25/MindSpark) by Prasad Patil (MIT). Roc Mind Spark wraps it in a Swift / AppKit / WKWebView shell so it behaves like a real overlay instead of a website.
@@ -18,7 +20,7 @@ Same loop for research. The overlay covers the current Space, so you do not have
 
 ## Summon it
 
-Default hotkey: **⌥⇧⌘Q** (Option + Shift + Command + Q).
+Default hotkey: **⌥⇧⌘Q** (Option + **Shift** + Command + Q). The **⇧** glyph is Shift.
 
 That chord is busy on purpose so it rarely collides with the app you are in. It is also awkward — **change it in Settings** (gear in the toolbar, or **⌘,** while the overlay is open). The menu-bar extra also has Show / Hide.
 

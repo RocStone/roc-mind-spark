@@ -1,4 +1,5 @@
 .DS_Store
+AGENTS.md
 macos/.build/
 dist/
 web/data/*.db

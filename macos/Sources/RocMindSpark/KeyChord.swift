@@ -34,12 +34,12 @@ struct KeyChord: Codable, Equatable, Hashable {
     var display: String {
         let key = Self.keyName(keyCode)
         if isHyper { return "Caps + \(key)" }
-        var out = ""
-        if control { out += "⌃" }
-        if option { out += "⌥" }
-        if shift { out += "⇧" }
-        if command { out += "⌘" }
-        return out + key
+        var bits: [String] = []
+        if control { bits.append("⌃") }
+        if option { bits.append("⌥") }
+        if shift { bits.append("⇧") }
+        if command { bits.append("⌘") }
+        return bits.isEmpty ? key : bits.joined(separator: " ") + " " + key
     }
 
     var webSpec: [String: Any] {
