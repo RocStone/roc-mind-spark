@@ -7,7 +7,7 @@ macOS **原生浮层**思维导图。任意 App、任意桌面、任意全屏 Sp
 画布来自 Prasad Patil 的 [MindSpark](https://github.com/prasadpatil25/MindSpark)（MIT）。Roc Mind Spark 用 Swift / AppKit / WKWebView 包了一层壳，让它像系统浮层，而不是一个网页。
 
 <p align="center">
-  <img src="docs/screenshot.png" alt="Roc Mind Spark 浮层，In progress 图：Daily notes、Cursor Ultra、按日期记的 vibe coding，以及笔记编辑。" width="1024">
+  <img src="docs/screenshot.png" alt="Roc Mind Spark 浮层：左边 Markdown，右边 In progress 导图，日期和 vibe coding 节点能看清字。" width="1024">
 </p>
 
 **目前只有 macOS 14+。** 不管 Windows。

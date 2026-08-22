@@ -7,7 +7,7 @@ A **native macOS overlay** for mind mapping. Hit a hotkey from any app, any desk
 The canvas is [MindSpark](https://github.com/prasadpatil25/MindSpark) by Prasad Patil (MIT). Roc Mind Spark wraps it in a Swift / AppKit / WKWebView shell so it behaves like a real overlay instead of a website.
 
 <p align="center">
-  <img src="docs/screenshot.png" alt="Roc Mind Spark overlay on the In progress map: Daily notes, Cursor Ultra, dated vibe-coding cards, and a note editor." width="1024">
+  <img src="docs/screenshot.png" alt="Roc Mind Spark overlay: Markdown on the left, the In progress mind map on the right, with dated vibe-coding cards." width="1024">
 </p>
 
 **macOS 14+ only.** Windows is not supported.
