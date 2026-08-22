@@ -1,0 +1,14 @@
+{
+  "v": 1,
+  "id": "grid-two-column",
+  "name": "Grid (2 columns)",
+  "desc": "Top-level topics as two columns of cards with indented outlines",
+  "strategy": "grid",
+  "params": {
+    "columns": 2,
+    "gapX": 80,
+    "gapY": 70,
+    "rowGap": 14,
+    "indent": 24
+  }
+}

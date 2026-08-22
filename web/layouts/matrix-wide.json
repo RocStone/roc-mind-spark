@@ -1,0 +1,13 @@
+{
+  "v": 1,
+  "id": "matrix-wide",
+  "name": "Matrix (roomy)",
+  "desc": "Matrix with generous spacing, for cells holding longer text",
+  "strategy": "matrix",
+  "params": {
+    "colGap": 90,
+    "rowGap": 48,
+    "cellGap": 14,
+    "headGap": 90
+  }
+}

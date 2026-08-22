@@ -1,0 +1,18 @@
+{
+  "v": 1,
+  "id": "timeline-reverse",
+  "name": "Timeline (right to left)",
+  "desc": "Sequence running leftward, for right-to-left reading",
+  "strategy": "chain",
+  "params": {
+    "axis": "x",
+    "dir": -1,
+    "gap": 70,
+    "stem": 30,
+    "indent": 26,
+    "alternate": true,
+    "start": "above",
+    "gapMain": 70,
+    "gapCross": 22
+  }
+}

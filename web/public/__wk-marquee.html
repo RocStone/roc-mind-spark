@@ -1,0 +1,35 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>wk-marquee-probe</title>
+<style>
+  html,body{margin:0;overflow:hidden;background:#ddd}
+  .app{width:calc(100vw / 0.9);height:calc(100vh / 0.9);zoom:0.9;background:#ccc}
+  .stage{position:absolute;inset:0 0 0 200px;background:#eee}
+  .marquee{position:fixed;pointer-events:none;box-sizing:border-box;border:2px solid red}
+</style>
+<div class="app"><div class="stage" id="stage"></div></div>
+<script>
+function updateMarqueeEl(m){
+  let el=document.getElementById('marquee');
+  if(!el){
+    el=document.createElement('div');
+    el.id='marquee'; el.className='marquee';
+    document.body.appendChild(el);
+  }
+  el.style.position='fixed';
+  el.style.left=Math.min(m.x0,m.x1)+'px';
+  el.style.top=Math.min(m.y0,m.y1)+'px';
+  el.style.width=Math.abs(m.x1-m.x0)+'px';
+  el.style.height=Math.abs(m.y1-m.y0)+'px';
+  return el;
+}
+const el=updateMarqueeEl({x0:120,y0:80,x1:320,y1:220});
+const r=el.getBoundingClientRect();
+window.__PROBE__={
+  htmlZoom: document.documentElement.style.zoom||getComputedStyle(document.documentElement).zoom,
+  appZoom: getComputedStyle(document.querySelector('.app')).zoom,
+  left:r.left, top:r.top, width:r.width, height:r.height,
+  match: Math.abs(r.left-120)<1 && Math.abs(r.top-80)<1 && Math.abs(r.width-200)<1 && Math.abs(r.height-140)<1
+};
+document.title=JSON.stringify(window.__PROBE__);
+</script>

@@ -1,0 +1,18 @@
+{
+  "v": 1,
+  "id": "timeline-vertical",
+  "name": "Timeline (vertical)",
+  "desc": "Sequence running downward, sub-topics alternating left and right",
+  "strategy": "chain",
+  "params": {
+    "axis": "y",
+    "dir": 1,
+    "gap": 70,
+    "stem": 30,
+    "indent": 26,
+    "alternate": true,
+    "start": "above",
+    "gapMain": 70,
+    "gapCross": 22
+  }
+}

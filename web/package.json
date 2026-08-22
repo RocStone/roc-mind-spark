@@ -1,0 +1,35 @@
+{
+  "name": "mindspark",
+  "version": "1.0.0",
+  "description": "macOS overlay mind map, based on MindSpark. Summon a full canvas over any Space with a global hotkey.",
+  "license": "MIT",
+  "main": "server.js",
+  "bin": "launcher.js",
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning server.js",
+    "dev": "node --disable-warning=ExperimentalWarning --watch server.js",
+    "test": "node --test \"test/*.test.mjs\"",
+    "deploy": "wrangler deploy",
+    "preview": "wrangler dev",
+    "build:exe": "pkg . --output dist/mindspark",
+    "build:win": "pkg . --target node22-win-x64 --output dist/mindspark.exe",
+    "build:mac": "pkg . --target node22-macos-x64 --output dist/mindspark-macos",
+    "build:linux": "pkg . --target node22-linux-x64 --output dist/mindspark-linux"
+  },
+  "pkg": {
+    "assets": [
+      "public/**/*"
+    ],
+    "targets": [
+      "node22-win-x64"
+    ],
+    "outputPath": "dist"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "@yao-pkg/pkg": "^6.0.0",
+    "wrangler": "^4.100.0"
+  }
+}

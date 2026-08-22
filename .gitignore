@@ -1,0 +1,12 @@
+.DS_Store
+macos/.build/
+dist/
+web/data/*.db
+web/data/*.db-wal
+web/data/*.db-shm
+web/server.log
+web/node_modules/
+*.xcuserstate
+.idea/
+*.log
+

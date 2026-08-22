@@ -1,0 +1,12 @@
+{
+  "v": 1,
+  "id": "radial-fan",
+  "name": "Radial fan",
+  "desc": "Half-circle radial, useful when a map only needs to spread one way",
+  "strategy": "radial",
+  "params": {
+    "ring": 200,
+    "startAngle": -90,
+    "sweep": 180
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "v": 1,
+  "id": "matrix-table",
+  "name": "Matrix",
+  "desc": "Columns with rows aligned across them, read like a table",
+  "strategy": "matrix",
+  "params": {
+    "colGap": 40,
+    "rowGap": 24,
+    "cellGap": 10,
+    "headGap": 60
+  }
+}

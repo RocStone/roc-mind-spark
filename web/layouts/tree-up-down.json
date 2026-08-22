@@ -1,0 +1,15 @@
+{
+  "v": 1,
+  "id": "tree-up-down",
+  "name": "Up & down",
+  "desc": "Branches split above and below the root, the vertical twin of Balanced",
+  "strategy": "tree",
+  "params": {
+    "axis": "y",
+    "dir": 1,
+    "split": "balanced",
+    "rootAnchor": "origin",
+    "gapMain": 22,
+    "gapCross": 70
+  }
+}

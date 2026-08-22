@@ -1,0 +1,12 @@
+{
+  "v": 1,
+  "id": "radial-wide",
+  "name": "Radial (wide)",
+  "desc": "Full circle with generous ring spacing for dense maps",
+  "strategy": "radial",
+  "params": {
+    "ring": 300,
+    "startAngle": -90,
+    "sweep": 360
+  }
+}

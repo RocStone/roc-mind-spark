@@ -1,0 +1,15 @@
+{
+  "v": 1,
+  "id": "org-chart-up",
+  "name": "Org chart (up)",
+  "desc": "Reporting lines running upward from the root",
+  "strategy": "tree",
+  "params": {
+    "axis": "y",
+    "dir": -1,
+    "split": "one-side",
+    "rootAnchor": "centered",
+    "gapMain": 22,
+    "gapCross": 70
+  }
+}

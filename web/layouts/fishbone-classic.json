@@ -1,0 +1,19 @@
+{
+  "v": 1,
+  "id": "fishbone-classic",
+  "name": "Fishbone",
+  "desc": "Spine with angled ribs, the usual shape for cause-and-effect analysis",
+  "strategy": "chain",
+  "params": {
+    "axis": "x",
+    "dir": 1,
+    "gap": 70,
+    "stem": 30,
+    "indent": 26,
+    "alternate": true,
+    "start": "above",
+    "angle": 35,
+    "gapMain": 70,
+    "gapCross": 22
+  }
+}

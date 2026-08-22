@@ -1,0 +1,15 @@
+Roc Mind Spark
+==============
+
+This project is a macOS overlay app derived from MindSpark, an open-source
+mind-mapping editor by Prasad Patil and contributors:
+
+    https://github.com/prasadpatil25/MindSpark
+
+The canvas (`web/public/`), local Node server (`web/server.js`), optional
+Cloudflare worker, templates, and most of the editing UI come from that
+project. Roc Mind Spark adds a native macOS shell (Swift / AppKit / WKWebView)
+so the map can be summoned over any Space with a global hotkey.
+
+MindSpark is MIT-licensed. This repository keeps that license and the original
+copyright. See LICENSE and `web/LICENSE`.

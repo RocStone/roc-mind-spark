@@ -1,0 +1,14 @@
+{
+  "v": 1,
+  "id": "grid-single-column",
+  "name": "Outline",
+  "desc": "One column of cards \u2014 the whole map as a plain indented outline",
+  "strategy": "grid",
+  "params": {
+    "columns": 1,
+    "gapX": 60,
+    "gapY": 50,
+    "rowGap": 12,
+    "indent": 28
+  }
+}

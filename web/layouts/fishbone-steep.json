@@ -1,0 +1,19 @@
+{
+  "v": 1,
+  "id": "fishbone-steep",
+  "name": "Fishbone (steep)",
+  "desc": "Steeper ribs, which keeps a long spine narrower",
+  "strategy": "chain",
+  "params": {
+    "axis": "x",
+    "dir": 1,
+    "gap": 70,
+    "stem": 30,
+    "indent": 26,
+    "alternate": true,
+    "start": "above",
+    "angle": 60,
+    "gapMain": 70,
+    "gapCross": 22
+  }
+}
