@@ -2,7 +2,7 @@
 
 [English](README.md) · [中文](README.zh.md)
 
-A **native macOS overlay** for mind mapping. Hit a hotkey from any app, any desktop, any fullscreen Space — the map comes up on top. Capture the thought, dismiss it, keep working. No browser tab to find, no Space to switch.
+A **native macOS overlay** for mind mapping. Hit a hotkey from any app, any desktop, any fullscreen Space — the map comes up on top. Capture the thought, dismiss it, keep working. **No need to open browser, no Space to switch.**
 
 The canvas is [MindSpark](https://github.com/prasadpatil25/MindSpark) by Prasad Patil (MIT). Roc Mind Spark wraps it in a Swift / AppKit / WKWebView shell so it behaves like a real overlay instead of a website.
 
