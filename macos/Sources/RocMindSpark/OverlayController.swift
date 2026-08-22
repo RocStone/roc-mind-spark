@@ -1,4 +1,5 @@
 import AppKit
+import CoreGraphics
 import WebKit
 
 @MainActor
@@ -16,6 +17,10 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
     private var parkedSize: CGSize = .zero
     private var keepAlive: NSObjectProtocol?
     private var previousApp: NSRunningApplication?
+    private var hudWatch: Timer?
+    private var duckedUnderHud = false
+    private var duckedHudId: UInt32 = 0
+    private var ignoreActivateUntil: Date?
 
     private(set) var isVisible = false
 
@@ -111,6 +116,8 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
     func hide(restorePrevious: Bool = true) {
         if isVisible { Paths.opsLog("overlay-hide") }
         pendingShow = false
+        restoreCoverStack(orderFront: false)
+        stopHudWatch()
         guard isVisible else {
             parkOffscreen()
             return
@@ -290,11 +297,16 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
             previousApp = NSWorkspace.shared.frontmostApplication
         }
         NSApp.activate()
+        panel.applyCoverLevel()
         panel.orderFrontRegardless()
         panel.makeKey()
         panel.makeFirstResponder(webView)
         isVisible = true
+        duckedUnderHud = false
+        duckedHudId = 0
+        ignoreActivateUntil = nil
         installClickMonitor()
+        startHudWatch()
     }
 
     private func installClickMonitor() {
@@ -331,21 +343,191 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
         if isVisible { hide() }
     }
 
-    /// Raycast / Alfred / Cmd-Tab otherwise stay behind this full-screen panel.
-    /// Do not steal focus back — the other app is already frontmost.
+    /// Raycast closing reactivates the app behind the overlay. That is not
+    /// a user switching away — keep the map up. Cmd-Tab to a different app
+    /// still hides.
+    static func shouldHideOnActivation(
+        overlayVisible: Bool,
+        activatedBundleId: String?,
+        overlayBundleId: String,
+        previousAppBundleId: String?,
+        duckedUnderHud: Bool,
+        now: Date,
+        ignoreUntil: Date?,
+        isScreenshot: Bool,
+        isLauncher: Bool
+    ) -> Bool {
+        if !overlayVisible { return false }
+        if isScreenshot || isLauncher { return false }
+        if let activatedBundleId, activatedBundleId == overlayBundleId { return false }
+        if let ignoreUntil, now < ignoreUntil { return false }
+        if duckedUnderHud { return false }
+        if let activatedBundleId, let previousAppBundleId, activatedBundleId == previousAppBundleId {
+            return false
+        }
+        return true
+    }
+
     @objc private func anotherAppActivated(_ note: Notification) {
         guard isVisible else { return }
         let app = (note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication)
             ?? NSWorkspace.shared.frontmostApplication
-        guard Self.shouldYield(to: app) else { return }
+        let shouldHide = Self.shouldHideOnActivation(
+            overlayVisible: isVisible,
+            activatedBundleId: app?.bundleIdentifier,
+            overlayBundleId: AppConfig.bundleId,
+            previousAppBundleId: previousApp?.bundleIdentifier,
+            duckedUnderHud: duckedUnderHud,
+            now: Date(),
+            ignoreUntil: ignoreActivateUntil,
+            isScreenshot: Self.isScreenshotApp(app),
+            isLauncher: Self.isLauncherHudOwner(
+                name: app?.localizedName ?? "",
+                bundleId: app?.bundleIdentifier
+            )
+        )
+        if !shouldHide {
+            if app?.bundleIdentifier == AppConfig.bundleId { return }
+            if Self.isScreenshotApp(app) { return }
+            if Self.isLauncherHudOwner(name: app?.localizedName ?? "", bundleId: app?.bundleIdentifier) {
+                return
+            }
+            Paths.log("activation keep overlay app=\(app?.bundleIdentifier ?? "?")")
+            reclaimAfterLauncher()
+            return
+        }
         hide(restorePrevious: false)
     }
 
-    static func shouldYield(to app: NSRunningApplication?) -> Bool {
-        guard let app else { return false }
-        if app.bundleIdentifier == AppConfig.bundleId { return false }
-        if isScreenshotApp(app) { return false }
-        return true
+    /// Raycast's search HUD is a non-activating panel, so
+    /// `didActivateApplication` never fires. Keep the map up and stack
+    /// under the HUD instead of hiding.
+    private func startHudWatch() {
+        guard hudWatch == nil else { return }
+        let timer = Timer(timeInterval: 0.15, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                self?.syncLauncherHudStack()
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        hudWatch = timer
+        syncLauncherHudStack()
+    }
+
+    private func stopHudWatch() {
+        hudWatch?.invalidate()
+        hudWatch = nil
+    }
+
+    private func restoreCoverStack(orderFront: Bool = true) {
+        guard duckedUnderHud else { return }
+        duckedUnderHud = false
+        duckedHudId = 0
+        ignoreActivateUntil = Date().addingTimeInterval(0.8)
+        panel.applyCoverLevel()
+        if orderFront, isVisible {
+            panel.orderFrontRegardless()
+        }
+        Paths.log("hud-watch restore cover")
+    }
+
+    private func reclaimAfterLauncher() {
+        restoreCoverStack()
+        ignoreActivateUntil = Date().addingTimeInterval(0.8)
+        guard isVisible else { return }
+        NSApp.activate()
+        panel.makeKey()
+        panel.makeFirstResponder(webView)
+        Paths.log("hud-watch reclaim")
+    }
+
+    private func syncLauncherHudStack() {
+        guard isVisible else { return }
+        let huds = Self.launcherSnaps().filter(\.isHud)
+        guard let hud = huds.max(by: { $0.layer < $1.layer }) else {
+            restoreCoverStack()
+            return
+        }
+        if duckedUnderHud, duckedHudId == hud.id { return }
+        if !duckedUnderHud {
+            Paths.log("hud-watch duck \(Self.describeLauncherSnaps([hud]))")
+            ignoreActivateUntil = Date().addingTimeInterval(0.8)
+        }
+        duckedUnderHud = true
+        duckedHudId = hud.id
+        panel.duck(belowHudLayer: Int(hud.layer), windowNumber: Int(hud.id))
+    }
+
+    static func isLauncherHudOwner(name: String, bundleId: String?) -> Bool {
+        if let bundleId {
+            let id = bundleId.lowercased()
+            if id == "com.raycast.macos" { return true }
+            if id.contains("alfred") { return true }
+            if id == "com.apple.spotlight" { return true }
+        }
+        let owner = name.lowercased()
+        if owner.contains("raycast") { return true }
+        if owner.contains("alfred") { return true }
+        if owner == "spotlight" { return true }
+        return false
+    }
+
+    /// Menu extras are tiny. The search HUD is a wide bar / results list.
+    /// Zero size means the system redacted bounds (TCC); a window below
+    /// status-window level is treated as the HUD in that case.
+    static func isLauncherHudMetrics(width: Double, height: Double, alpha: Double) -> Bool {
+        if alpha < 0.05 { return false }
+        if width <= 0 || height <= 0 { return false }
+        return width >= 280 && height >= 48
+    }
+
+    private static func launcherSnaps() -> [(id: UInt32, isHud: Bool, owner: String, layer: Int32, width: Double, height: Double, pid: pid_t)] {
+        onScreenWindows().compactMap { info in
+            guard isLauncherOwned(info) else { return nil }
+            guard let num = info[kCGWindowNumber as String] as? NSNumber else { return nil }
+            let alpha = (info[kCGWindowAlpha as String] as? NSNumber)?.doubleValue ?? 1
+            let bounds = info[kCGWindowBounds as String] as? [String: Any]
+            let width = (bounds?["Width"] as? NSNumber)?.doubleValue ?? 0
+            let height = (bounds?["Height"] as? NSNumber)?.doubleValue ?? 0
+            let layer = (info[kCGWindowLayer as String] as? NSNumber)?.int32Value ?? 0
+            let owner = (info[kCGWindowOwnerName as String] as? String) ?? ""
+            let pid = pid_t((info[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value ?? 0)
+            let statusLevel = Int32(CGWindowLevelForKey(.statusWindow))
+            var isHud = isLauncherHudMetrics(width: width, height: height, alpha: alpha)
+            // Screen Recording off: bounds are 0. Menu extras still sit at
+            // status-window level; the search HUD is lower (floating / overlay).
+            if !isHud, alpha >= 0.05, width <= 0 || height <= 0, layer < statusLevel {
+                isHud = true
+            }
+            return (
+                id: num.uint32Value,
+                isHud: isHud,
+                owner: owner,
+                layer: layer,
+                width: width,
+                height: height,
+                pid: pid
+            )
+        }
+    }
+
+    private static func describeLauncherSnaps(_ snaps: [(id: UInt32, isHud: Bool, owner: String, layer: Int32, width: Double, height: Double, pid: pid_t)]) -> String {
+        snaps.map { snap in
+            "\(snap.owner)#\(snap.id) \(Int(snap.width))x\(Int(snap.height)) layer=\(snap.layer) hud=\(snap.isHud)"
+        }.joined(separator: "; ")
+    }
+
+    private static func isLauncherOwned(_ info: [String: Any]) -> Bool {
+        let name = (info[kCGWindowOwnerName as String] as? String) ?? ""
+        let pid = (info[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value ?? 0
+        let bundle = pid > 0 ? NSRunningApplication(processIdentifier: pid_t(pid))?.bundleIdentifier : nil
+        if bundle == AppConfig.bundleId { return false }
+        return isLauncherHudOwner(name: name, bundleId: bundle)
+    }
+
+    private static func onScreenWindows() -> [[String: Any]] {
+        let opts = CGWindowListOption(arrayLiteral: .optionOnScreenOnly, .excludeDesktopElements)
+        return (CGWindowListCopyWindowInfo(opts, kCGNullWindowID) as? [[String: Any]]) ?? []
     }
 
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {

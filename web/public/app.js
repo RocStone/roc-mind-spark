@@ -4335,6 +4335,7 @@ function startBlockEdit(id, el){
   _liveEditing=true;
   armEditorHost(box); box.focus();
   const finish=(commit)=>{
+    _commitOpenEdit=null;
     _liveEditing=false;
     disarmEditorHost(box); el.classList.remove('editing','editing-block');
     if(blurTimer){ clearTimeout(blurTimer); blurTimer=0; }
@@ -4377,12 +4378,16 @@ function startBlockEdit(id, el){
   const onKey=e=>{
     if(clipboardEditAction(e)) return;
     if(isImeEvent(e) || composing || isImeSwitchEvent(e)) return;
-    if(e.key==='Escape'){ e.preventDefault(); e.stopPropagation(); finish(false); box.blur(); }
+    if(e.key==='Escape'){
+      if(!shouldCommitEditOnEscape(e)) return;
+      e.preventDefault(); e.stopPropagation(); finish(true); box.blur();
+    }
     else if(e.key==='Enter' && (e.ctrlKey||e.metaKey)){ e.preventDefault(); e.stopPropagation(); finish(true); box.blur(); }
   };
   box.addEventListener('blur',onBlur); box.addEventListener('keydown',onKey);
   box.addEventListener('compositionstart',onCompositionStart);
   box.addEventListener('compositionend',onCompositionEnd);
+  _commitOpenEdit=()=>finish(true);
 }
 // ---- Formula function autocomplete: Excel-style "=SU" suggests SUM(...) while typing ----
 let _formulaAC = null;   // { el, matches, replaceStart, replaceEnd, activeIndex, textEl, nodeId }
@@ -4538,6 +4543,25 @@ function shouldCommitEditOnBlur({composing, activeInside, pointerOutside}){
   if(composing) return false;
   if(activeInside) return false;
   if(!pointerOutside) return false;
+  return true;
+}
+// Clicking another node (or the canvas) must save the open editor. Toolbar /
+// picker / the editor itself are not a click-away.
+function shouldCommitEditOnPointerTarget(target, editingEl){
+  if(!editingEl || !target) return false;
+  if(typeof editingEl.contains==='function' && editingEl.contains(target)) return false;
+  if(typeof isEditSessionChrome==='function' && isEditSessionChrome(target)) return false;
+  return true;
+}
+function shouldCommitEditOnEscape(e){
+  if(!e || e.key!=='Escape') return false;
+  if(e.isComposing || e.keyCode===229) return false;
+  return true;
+}
+let _commitOpenEdit=null;
+function commitOpenEdit(){
+  if(typeof _commitOpenEdit!=='function') return false;
+  _commitOpenEdit();
   return true;
 }
 function isEditSessionChrome(ae){
@@ -4701,6 +4725,7 @@ function discardEditOverlay(){
 // Close an in-progress node edit without writing the draft. Used when ⌘Z
 // should undo the map (add node, drop) rather than WebKit's editor stack.
 function cancelOpenEdit(){
+  _commitOpenEdit=null;
   const el = typeof document!=='undefined' && document.querySelector && document.querySelector('.node.editing');
   if(el){
     const textEl=el.querySelector('.node-text')||el.querySelector('.node-block');
@@ -5061,8 +5086,11 @@ if(typeof document!=='undefined' && document.addEventListener){
   document.addEventListener('pointerdown', e=>{
     const editing=document.querySelector('.node.editing');
     if(!editing) return;
-    if(isEditSessionChrome(e.target) || editing.contains(e.target)) return;
+    if(!shouldCommitEditOnPointerTarget(e.target, editing)) return;
     armEditBlurCommit();
+    // WK stage mousedown preventDefault keeps the editor focused, so blur
+    // never commits. Save now, then the click can select the other node.
+    commitOpenEdit();
   }, true);
   document.addEventListener('keydown', onEditorClipboardKeydown, true);
   document.addEventListener('paste', onEditorPaste, true);
@@ -5082,6 +5110,7 @@ function startEdit(id){
   if(READONLY) return;
   const already=typeof document!=='undefined' && document.querySelector && document.querySelector('.node.editing');
   if(already && already.dataset.id===id && _liveEditing) return;
+  if(_liveEditing || (already && already.dataset.id && already.dataset.id!==id)) commitOpenEdit();
   opLog('editStart', {id});
   if(_nodeBarTimer){ clearTimeout(_nodeBarTimer); _nodeBarTimer=0; }
   if(map.nodes[id] && map.nodes[id].hr) return;   // dividers aren't editable
@@ -5125,6 +5154,7 @@ function startEdit(id){
     _editRAF=requestAnimationFrame(()=>{ _editRAF=0; relayoutDuringEdit(id); });
   };
   const finish=(commit)=>{
+    _commitOpenEdit=null;
     closeFormulaAutocomplete();
     if(commit){
       applyNodeEditCapture(map.nodes[id], captureNodeEditText(host));
@@ -5204,7 +5234,10 @@ function startEdit(id){
       addNode(id, createAction==='sibling');
       return;
     }
-    if(e.key==='Escape'){e.preventDefault();e.stopPropagation();host.textContent=map.nodes[id].text;finish(false);host.blur();}
+    if(e.key==='Escape'){
+      if(!shouldCommitEditOnEscape(e)) return;
+      e.preventDefault();e.stopPropagation();finish(true);host.blur();
+    }
   };
   const onPointer=()=>{ clearEditReplaceAll(); };
   host.addEventListener('mousedown', onPointer);
@@ -5212,6 +5245,7 @@ function startEdit(id){
   host.addEventListener('input',onInput);
   host.addEventListener('compositionstart',onCompositionStart);
   host.addEventListener('compositionend',onCompositionEnd);
+  _commitOpenEdit=()=>finish(true);
   positionNodeBar();
 }
 
@@ -10645,7 +10679,7 @@ function showKeyboardHelp(){
       ['Tab',            tr('kbSaveChild','Save and add a child node')],
       ['Ctrl/⌘ + Enter', tr('kbSaveSibling','Save and add a sibling node')],
       ['Enter / Shift + Enter', tr('kbNewline','Newline within the node text')],
-      ['Esc',            tr('kbEsc','Cancel an edit / close a popup')],
+      ['Esc',            tr('kbEsc','Save the edit / close a popup')],
     ]],
     [tr('kbHistory','History'),[
       ['Ctrl/⌘ + Z',     tr('kbUndo','Undo')],

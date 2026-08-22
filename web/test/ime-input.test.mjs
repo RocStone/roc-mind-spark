@@ -2,9 +2,11 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { loadFns } from './helpers/load-app-fns.mjs';
 
-const { isImeEvent, shouldCommitEditOnBlur, isEditSessionChrome, shouldFinishNodeEditOnEnter, isImeSwitchEvent, editSessionCreateAction, editSessionUndoAction } = loadFns([
+const { isImeEvent, shouldCommitEditOnBlur, shouldCommitEditOnPointerTarget, shouldCommitEditOnEscape, isEditSessionChrome, shouldFinishNodeEditOnEnter, isImeSwitchEvent, editSessionCreateAction, editSessionUndoAction } = loadFns([
   'isImeEvent',
   'shouldCommitEditOnBlur',
+  'shouldCommitEditOnPointerTarget',
+  'shouldCommitEditOnEscape',
   'isEditSessionChrome',
   'shouldFinishNodeEditOnEnter',
   'isImeSwitchEvent',
@@ -52,6 +54,44 @@ describe('shouldCommitEditOnBlur — only a real click-away commits', () => {
 
   test('commit a real click-away', () => {
     assert.equal(shouldCommitEditOnBlur({ composing: false, activeInside: false, pointerOutside: true }), true);
+  });
+});
+
+describe('shouldCommitEditOnPointerTarget — click another node saves the open editor', () => {
+  test('click inside the editing node does not commit', () => {
+    const inner = {};
+    const editing = { contains: (n) => n === inner };
+    assert.equal(shouldCommitEditOnPointerTarget(inner, editing), false);
+  });
+
+  test('click on the format toolbar / picker does not commit', () => {
+    const editing = { contains: () => false };
+    const bar = { closest(sel) { return String(sel).includes('nodebar') ? this : null; } };
+    assert.equal(shouldCommitEditOnPointerTarget(bar, editing), false);
+  });
+
+  test('click on another node or the canvas commits', () => {
+    const editing = { contains: () => false };
+    const other = { closest() { return null; } };
+    assert.equal(shouldCommitEditOnPointerTarget(other, editing), true);
+    assert.equal(shouldCommitEditOnPointerTarget(null, editing), false);
+    assert.equal(shouldCommitEditOnPointerTarget(other, null), false);
+  });
+});
+
+describe('shouldCommitEditOnEscape — Esc saves, IME composition does not', () => {
+  test('bare Escape commits', () => {
+    assert.equal(shouldCommitEditOnEscape({ key: 'Escape' }), true);
+  });
+
+  test('composing Escape stays with the IME', () => {
+    assert.equal(shouldCommitEditOnEscape({ key: 'Escape', isComposing: true }), false);
+    assert.equal(shouldCommitEditOnEscape({ key: 'Escape', keyCode: 229 }), false);
+  });
+
+  test('other keys do not commit', () => {
+    assert.equal(shouldCommitEditOnEscape({ key: 'Enter' }), false);
+    assert.equal(shouldCommitEditOnEscape(null), false);
   });
 });
 

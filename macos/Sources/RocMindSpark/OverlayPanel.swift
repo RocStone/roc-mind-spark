@@ -17,8 +17,9 @@ final class OverlayPanel: NSPanel {
         isFloatingPanel = true
         becomesKeyOnlyIfNeeded = false
         hidesOnDeactivate = false
-        // Cover fullscreen Spaces, but sit below popup HUDs (Raycast, Spotlight).
-        level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.mainMenuWindow)))
+        // Cover normal / floating windows. Raycast's search HUD is a
+        // modal-panel (layer 8); sitting at mainMenu (24) painted over it.
+        level = Self.coverLevel
         // Do not use .transient: macOS hides those panels when they lose key
         // (screenshot UI, ⌘,). We hide from the hotkey, outside clicks, Space
         // changes, and the menu bar.
@@ -37,5 +38,34 @@ final class OverlayPanel: NSPanel {
         isMovable = false
         hidesOnDeactivate = false
         collectionBehavior.insert(.fullScreenDisallowsTiling)
+    }
+
+    /// Just under `modalPanel` (8). High enough to cover other apps, low
+    /// enough that Raycast / Alfred / Spotlight HUDs stack above us.
+    static var coverLevel: NSWindow.Level {
+        NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.modalPanelWindow)) - 1)
+    }
+
+    /// Drop under a HUD that is at or below `coverLevel` without going
+    /// under normal app windows.
+    static func level(belowHudLayer hudLayer: Int) -> NSWindow.Level {
+        let floor = Int(CGWindowLevelForKey(.normalWindow))
+        let raw = min(coverLevel.rawValue, max(floor, hudLayer - 1))
+        return NSWindow.Level(rawValue: raw)
+    }
+
+    func applyCoverLevel() {
+        level = Self.coverLevel
+        collectionBehavior.insert(.fullScreenAuxiliary)
+    }
+
+    func duck(belowHudLayer hudLayer: Int, windowNumber: Int) {
+        level = Self.level(belowHudLayer: hudLayer)
+        // fullScreenAuxiliary can still cover a higher-level HUD on a
+        // fullscreen Space; drop it only while the HUD is up.
+        collectionBehavior.remove(.fullScreenAuxiliary)
+        if windowNumber != 0 {
+            order(.below, relativeTo: windowNumber)
+        }
     }
 }
