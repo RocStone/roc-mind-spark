@@ -45,7 +45,7 @@
       saved: 'Saved',
 
       settings: 'Settings',
-      settingsSub: '⌘, works while the overlay is open. Show / hide is the only global hotkey.',
+      settingsSub: '⌘, opens settings while the overlay is up. Show / hide is the only global hotkey (default Caps + Q if Caps Lock is Hyper).',
       close: 'Close',
       language: 'Language',
       startup: 'Startup',
@@ -176,7 +176,7 @@
       saved: '已保存',
 
       settings: '设置',
-      settingsSub: '⌘, 只在浮层打开时有效。显示 / 隐藏是唯一的全局快捷键。',
+      settingsSub: '浮层打开时 ⌘, 打开设置。显示 / 隐藏是唯一的全局快捷键（Caps 映射成 Hyper 时默认 Caps + Q）。',
       close: '关闭',
       language: '语言',
       startup: '启动',

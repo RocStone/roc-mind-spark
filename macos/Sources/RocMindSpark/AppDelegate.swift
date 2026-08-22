@@ -24,13 +24,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             name: .rmsLanguageDidChange,
             object: nil
         )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(shortcutsDidChangeNote),
+            name: .rmsShortcutsDidChange,
+            object: nil
+        )
         Paths.log("launch arguments=\(CommandLine.arguments)")
         enableLoginItemOnce()
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.overlay.attachWebView()
             self.overlay.preload()
-            if CommandLine.arguments.contains("--show") {
+            if CommandLine.arguments.contains("--show") || CommandLine.arguments.contains("--demo-shot") {
                 self.overlay.show()
             }
         }
@@ -115,6 +121,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func languageDidChange() {
         rebuildMenu()
+    }
+
+    @objc private func shortcutsDidChangeNote() {
+        shortcutsDidChange()
     }
 
     @objc private func toggleOverlay() {

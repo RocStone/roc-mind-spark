@@ -74,13 +74,30 @@
     try{ window.webkit.messageHandlers.rmsNative.postMessage(payload); }catch(e){}
   }
 
+  let ctx=null, listening=null;
+
   window.__rmsNativeState = function(state){
     window.__RMS_NATIVE__ = state || {};
     const login = document.getElementById('rmsLoginToggle');
     if(login) login.checked = !!(state && state.login);
     const tog = document.getElementById('rmsToggleChord');
-    if(tog) tog.textContent = (state && state.toggleDisplay) || '⌥ ⇧ ⌘ Q';
+    if(tog && !(listening && listening.kind==='toggle')) tog.textContent = (state && state.toggleDisplay) || 'Caps + Q';
   };
+
+  window.__rmsToggleListenDone = function(){
+    listening=null;
+    paintSettings();
+  };
+
+  function hasNativeBridge(){
+    try{ return !!(window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.rmsNative); }
+    catch(e){ return false; }
+  }
+  function isReservedToggleSpec(spec){
+    if(!spec) return false;
+    const comma = spec.code==='Comma' || spec.key===',';
+    return !!(comma && spec.meta && !spec.ctrl && !spec.alt && !spec.shift);
+  }
 
   function buttonId(el){
     if(!el) return '';
@@ -126,8 +143,6 @@
     const el = findButton(id);
     if(el) el.click();
   }
-
-  let ctx=null, listening=null;
 
   function closeCtx(){
     if(ctx){ ctx.remove(); ctx=null; }
@@ -187,7 +202,10 @@
       return;
     }
     if(listening){
-      if(e.key==='Escape'){ closeCtx(); listening=null; return; }
+      if(e.key==='Escape'){
+        if(listening.kind==='toggle') nativePost({ op:'cancelToggleListen' });
+        closeCtx(); listening=null; paintSettings(); return;
+      }
       if(e.key==='Meta'||e.key==='Control'||e.key==='Alt'||e.key==='Shift') return;
       e.preventDefault(); e.stopPropagation();
       const spec=specFromEvent(e);
@@ -197,6 +215,10 @@
         return;
       }
       if(listening.kind==='toggle'){
+        // Native shell records Command / Hyper. JS keydown often never sees them
+        // on an accessory overlay, or drops Control from a Caps-as-Hyper chord.
+        if(hasNativeBridge()) return;
+        if(isReservedToggleSpec(spec) || !hasMod(spec)) return;
         nativePost(Object.assign({ op:'setToggle' }, spec));
       } else if(listening.kind==='canvas'){
         const all=loadJSON(CANVAS_KEY, {});
@@ -235,7 +257,7 @@
 
   function openSettings(){
     const existing=document.querySelector('.rms-settings');
-    if(existing){ existing.remove(); return; }
+    if(existing){ nativePost({ op:'cancelToggleListen' }); listening=null; existing.remove(); return; }
     nativePost({ op:'getState' });
     applyCanvas();
     document.querySelectorAll('.rms-settings').forEach(n=>n.remove());
@@ -264,7 +286,7 @@
         </div>
         <div class="rms-set-sec">
           <h3>${t('overlay')}</h3>
-          <div class="rms-row"><span>${t('showHide')}</span><button type="button" class="rms-chord" id="rmsToggleChord" data-rec="toggle">⌥ ⇧ ⌘ Q</button></div>
+          <div class="rms-row"><span>${t('showHide')}</span><button type="button" class="rms-chord" id="rmsToggleChord" data-rec="toggle">Caps + Q</button></div>
         </div>
         <div class="rms-set-sec">
           <h3>${t('canvas')}</h3>
@@ -277,7 +299,7 @@
         </div>
       </div>`;
     document.body.appendChild(m);
-    const close=()=>m.remove();
+    const close=()=>{ nativePost({ op:'cancelToggleListen' }); listening=null; m.remove(); };
     m.querySelector('.vf-close').onclick=close;
     m.querySelector('.vf-backdrop').onclick=close;
     m.querySelector('#rmsLoginToggle').onchange=ev=>nativePost({ op:'setLogin', on:ev.target.checked });
@@ -286,6 +308,8 @@
         const next=btn.dataset.lang;
         if(!next || next===(window.rmsLang ? window.rmsLang() : 'en')) return;
         if(window.rmsSetLang) window.rmsSetLang(next);
+        nativePost({ op:'cancelToggleListen' });
+        listening=null;
         m.remove();
         openSettings();
       };
@@ -293,7 +317,13 @@
     m.addEventListener('click', ev=>{
       const rec=ev.target && ev.target.dataset && ev.target.dataset.rec;
       if(!rec) return;
-      listening = rec==='toggle' ? { kind:'toggle' } : { kind:'canvas', id:rec };
+      if(rec==='toggle'){
+        listening = { kind:'toggle' };
+        ev.target.textContent=t('pressKey');
+        nativePost({ op:'listenToggle' });
+        return;
+      }
+      listening = { kind:'canvas', id:rec };
       ev.target.textContent=t('pressKey');
     });
     paintSettings();
@@ -307,7 +337,7 @@
     const login=root.querySelector('#rmsLoginToggle');
     if(login) login.checked=!!native.login;
     const tog=root.querySelector('#rmsToggleChord');
-    if(tog && !listening) tog.textContent=native.toggleDisplay||'⌥ ⇧ ⌘ Q';
+    if(tog && !listening) tog.textContent=native.toggleDisplay||'Caps + Q';
     const canvas=canvasMap();
     const box=root.querySelector('#rmsCanvasRows');
     if(box){

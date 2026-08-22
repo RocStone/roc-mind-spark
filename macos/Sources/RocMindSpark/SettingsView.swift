@@ -137,6 +137,10 @@ struct SettingsView: View {
                     listening = nil
                     return
                 }
+                if id == .toggleOverlay && chord == .commandComma {
+                    listening = nil
+                    return
+                }
                 if let other = store.conflict(for: id, chord: chord) {
                     conflictText = String(format: L10n.t("settings.conflict"), other.title)
                     listening = nil

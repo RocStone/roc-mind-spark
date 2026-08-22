@@ -29,8 +29,18 @@ if npids="$(lsof -tiTCP:3034 -sTCP:LISTEN 2>/dev/null)"; then
   sleep 0.2
 fi
 
-rm -rf "$DEST"
-ditto "$SRC" "$DEST"
+can_write_dest() {
+  [[ -w "$PREFIX" ]] && { [[ ! -e "$DEST" ]] || [[ -w "$DEST" ]]; }
+}
+
+if can_write_dest; then
+  rm -rf "$DEST"
+  mv "$SRC" "$DEST"
+else
+  echo "Need your password to install into $PREFIX"
+  sudo rm -rf "$DEST"
+  sudo mv "$SRC" "$DEST"
+fi
 touch "$DEST"
 
 if [[ -x "$LSREGISTER" ]]; then
@@ -40,7 +50,7 @@ mdimport "$DEST" >/dev/null 2>&1 || true
 
 echo "$DEST"
 
-# Bring the overlay back so the user does not have to hit the hotkey.
+# LaunchServices, so the process survives the install script exiting.
 sleep 0.3
-nohup "$DEST/Contents/MacOS/RocMindSpark" --show >/dev/null 2>&1 &
+open "$DEST" --args --show
 echo "relaunched"

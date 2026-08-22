@@ -7,7 +7,7 @@ macOS **原生浮层**思维导图。任意 App、任意桌面、任意全屏 Sp
 画布来自 Prasad Patil 的 [MindSpark](https://github.com/prasadpatil25/MindSpark)（MIT）。Roc Mind Spark 用 Swift / AppKit / WKWebView 包了一层壳，让它像系统浮层，而不是一个网页。
 
 <p align="center">
-  <img src="docs/screenshot.png" alt="Roc Mind Spark 浮层：一张名为 In progress 的研究与工程思维导图。" width="980">
+  <img src="docs/screenshot.png" alt="Roc Mind Spark 浮层，In progress 图：Daily notes、Cursor Ultra、按日期记的 vibe coding，以及笔记编辑。" width="1024">
 </p>
 
 **目前只有 macOS 14+。** 不管 Windows。
@@ -20,9 +20,9 @@ Vibe coding 一天会在编辑器、模型、论文、终端之间跳。贵的�
 
 ## 唤出
 
-默认快捷键：**⌥⇧⌘Q**（Option + Shift + Command + Q）。中间那个 **⇧ 就是 Shift**。
+默认快捷键：**⌃⌥⇧⌘Q**。如果你把 Caps Lock 映射成 Hyper（Command + Control + Option + Shift），那就是 **Caps + Q**。
 
-这组键比较满，故意少跟当前 App 打架，按着也别扭——**到设置里改**（工具栏齿轮，或浮层打开时按 **⌘,**）。菜单栏图标也有显示 / 隐藏。
+这组键比较满，故意少跟当前 App 打架——**到设置里改**（工具栏齿轮，或浮层打开时按 **⌘,**）。菜单栏图标也有显示 / 隐藏。
 
 点菜单栏、Dock 或另一块屏幕会收起。Escape 留给画布（取消编辑），不会关浮层。
 
@@ -60,7 +60,9 @@ cd roc-mind-spark
 make install
 ```
 
-编好后拷到 `/Applications/Roc Mind Spark.app` 并打开浮层。之后用快捷键。图存在 `~/Library/Application Support/RocMindSpark/`。
+编完会把 App `mv` 进 `/Applications/Roc Mind Spark.app`。目录写不了时终端会要密码。装完浮层会自己打开。
+
+图存在 `~/Library/Application Support/RocMindSpark/`。
 
 ```bash
 make test    # 画布单测

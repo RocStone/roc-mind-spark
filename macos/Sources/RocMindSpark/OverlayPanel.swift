@@ -17,10 +17,12 @@ final class OverlayPanel: NSPanel {
         becomesKeyOnlyIfNeeded = false
         hidesOnDeactivate = false
         level = .statusBar
+        // Do not use .transient: macOS hides those panels when they lose key
+        // (screenshot UI, ⌘,). We hide from the hotkey, outside clicks, Space
+        // changes, and the menu bar.
         collectionBehavior = [
             .canJoinAllSpaces,
             .fullScreenAuxiliary,
-            .transient,
             .ignoresCycle,
         ]
         isOpaque = true

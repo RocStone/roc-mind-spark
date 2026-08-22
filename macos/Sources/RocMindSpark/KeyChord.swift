@@ -2,7 +2,7 @@ import AppKit
 import Carbon
 import Foundation
 
-struct KeyChord: Codable, Equatable, Hashable {
+struct KeyChord: Codable, Equatable, Hashable, Sendable {
     var keyCode: UInt32
     var command: Bool
     var control: Bool
@@ -258,7 +258,7 @@ enum ShortcutID: String, CaseIterable, Codable, Identifiable {
 
     var defaultChord: KeyChord {
         switch self {
-        case .toggleOverlay: return .optionShiftCommandQ
+        case .toggleOverlay: return .hyperQ
         case .openSettings: return .commandComma
         case .addChild: return .tab
         case .addSibling: return .enter

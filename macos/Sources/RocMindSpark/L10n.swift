@@ -28,6 +28,7 @@ enum AppLanguage: String {
 
 extension Notification.Name {
     static let rmsLanguageDidChange = Notification.Name("com.roc.mindspark.language")
+    static let rmsShortcutsDidChange = Notification.Name("com.roc.mindspark.shortcuts")
 }
 
 enum L10n {
@@ -47,7 +48,7 @@ enum L10n {
         "settings.login": "Launch at login",
         "settings.login.help": "Starts the menu bar extra and warms the canvas after you log in. The hotkey only brings the already-painted window forward.",
         "settings.overlay": "Overlay",
-        "settings.overlay.help": "Default is ⌥ ⇧ ⌘ Q (Option-Shift-Command-Q). It is a busy chord on purpose — change it here if you want something simpler.",
+        "settings.overlay.help": "Default is Caps + Q when Caps Lock is Hyper (⌃⌥⇧⌘Q). Change it here if you want a different chord.",
         "settings.canvas": "Canvas",
         "settings.reset": "Restore defaults",
         "settings.press": "Press a key…",
@@ -80,7 +81,7 @@ enum L10n {
         "settings.login": "登录时启动",
         "settings.login.help": "登录后菜单栏会自己起来并预热页面。热键只把已经画好的窗口推到前面。",
         "settings.overlay": "浮层",
-        "settings.overlay.help": "默认 ⌥ ⇧ ⌘ Q（Option + Shift + Command + Q）。和弦比较满，可在这里改成更好按的组合。",
+        "settings.overlay.help": "Caps Lock 映射成 Hyper（⌃⌥⇧⌘）时，默认是 Caps + Q。可在这里改成别的组合。",
         "settings.canvas": "画布",
         "settings.reset": "恢复默认",
         "settings.press": "按下新按键…",

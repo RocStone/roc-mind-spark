@@ -20,6 +20,17 @@ final class ShortcutStore {
         } else {
             chords = Dictionary(uniqueKeysWithValues: ShortcutID.allCases.map { ($0, $0.defaultChord) })
         }
+        migrateBrokenToggleIfNeeded()
+    }
+
+    /// ⌥⇧⌘Q was a short-lived public default that never matched Caps-as-Hyper
+    /// (all four modifiers). ⌘, is reserved for in-overlay settings and was
+    /// bindable by accident, which then toggled the whole overlay.
+    private func migrateBrokenToggleIfNeeded() {
+        guard let toggle = chords[.toggleOverlay] else { return }
+        guard toggle == .optionShiftCommandQ || toggle == .commandComma else { return }
+        chords[.toggleOverlay] = .hyperQ
+        persist()
     }
 
     func chord(for id: ShortcutID) -> KeyChord {
@@ -28,13 +39,16 @@ final class ShortcutStore {
 
     func setChord(_ chord: KeyChord, for id: ShortcutID) {
         if id.isGlobal && !chord.hasModifier { return }
+        if id == .toggleOverlay && chord == .commandComma { return }
         chords[id] = chord
         persist()
+        NotificationCenter.default.post(name: .rmsShortcutsDidChange, object: nil)
     }
 
     func resetDefaults() {
         chords = Dictionary(uniqueKeysWithValues: ShortcutID.allCases.map { ($0, $0.defaultChord) })
         persist()
+        NotificationCenter.default.post(name: .rmsShortcutsDidChange, object: nil)
     }
 
     func conflict(for id: ShortcutID, chord: KeyChord) -> ShortcutID? {

@@ -1703,6 +1703,36 @@ function resolveOverlaps(anchorId){
     anchorId
   });
 }
+// Visible cards that are not in a parent/child chain. Used on map load to
+// decide whether stale x/y (translated text that wrapped, zoom, font) need a
+// full tree relayout. Sibling-only nudges leave cousin branches stacked.
+function mapHasCardOverlap(nodes, opts){
+  if(!nodes) return false;
+  opts=opts||{};
+  const hidden=opts.hidden||new Set();
+  const ids=[];
+  for(const id in nodes){
+    if(hidden.has(id)) continue;
+    if(nodes[id]) ids.push(id);
+  }
+  for(let i=0;i<ids.length;i++){
+    for(let j=i+1;j<ids.length;j++){
+      const A=ids[i], B=ids[j];
+      if(nodeIsAncestor(nodes, A, B) || nodeIsAncestor(nodes, B, A)) continue;
+      if(boxesOverlap(nodeLayoutBox(nodes[A]), nodeLayoutBox(nodes[B]), 0)) return true;
+    }
+  }
+  return false;
+}
+function nodeIsAncestor(nodes, ancestorId, id){
+  let p=nodes[id] && nodes[id].parent;
+  while(p){
+    if(p===ancestorId) return true;
+    p=nodes[p] && nodes[p].parent;
+  }
+  return false;
+}
+
 // Only same-parent, same-side siblings. A dense map has many unrelated
 // branches whose boxes happen to overlap in 2D; shoving those apart would
 // scatter the whole canvas. The overlap the user actually sees is two
@@ -6957,7 +6987,10 @@ async function loadMap(id){
   $('#mapTitle').value=map.title;
   opLog('open', {id:map.id, text:map.title||''});
   if(_imported){ balanceRootSides(); autoLayout(); }
-  render();
+  else {
+    render();
+    if(mapHasCardOverlap(map.nodes, { hidden: hiddenSet() })) autoLayout();
+  }
   // Restore this map's saved camera if it has one; otherwise preserve the
   // session zoom across switches; otherwise auto-fit a fresh map.
   const saved=loadMapView(map.id);

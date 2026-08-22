@@ -11,12 +11,13 @@ const {
   layoutSizesGrew,
   resolveNodeOverlaps,
   resolveSiblingOverlaps,
+  mapHasCardOverlap,
   nodeLayoutBox,
 } = loadFns(
   [
     'layoutTree', 'treeLayoutOpts',
     'boxesOverlap', 'layoutSizesGrew', 'resolveNodeOverlaps', 'resolveSiblingOverlaps',
-    'nodeLayoutBox', 'collectSubtreeIds', 'shiftSubtreeNodes',
+    'mapHasCardOverlap', 'nodeIsAncestor', 'nodeLayoutBox', 'collectSubtreeIds', 'shiftSubtreeNodes',
   ],
   {
     TREE_LAYOUTS: {
@@ -112,5 +113,35 @@ describe('resolveSiblingOverlaps', () => {
     assert.ok(!boxesOverlap(nodeLayoutBox(nodes.a), nodeLayoutBox(nodes.b), 16));
     assert.ok(nodes.b.y >= nodes.a.y + nodes.a.h + 16);
     assert.equal(nodes.other.y, 1240, 'a node from another parent is left alone');
+  });
+});
+
+describe('mapHasCardOverlap', () => {
+  test('true for cousin cards that share pixels after a text-size jump', () => {
+    const nodes = {
+      root: { id:'root', parent:null, w:100, h:40, x:0, y:0 },
+      p1: { id:'p1', parent:'root', w:120, h:40, x:200, y:0, side:'right' },
+      p2: { id:'p2', parent:'root', w:120, h:40, x:200, y:80, side:'right' },
+      a: { id:'a', parent:'p1', w:250, h:80, x:400, y:100, side:'right' },
+      b: { id:'b', parent:'p2', w:250, h:80, x:400, y:120, side:'right' },
+    };
+    assert.equal(mapHasCardOverlap(nodes, {}), true);
+  });
+
+  test('false for a parent sitting next to its child', () => {
+    const nodes = {
+      root: { id:'root', parent:null, w:140, h:50, x:0, y:0 },
+      a: { id:'a', parent:'root', w:120, h:40, x:10, y:5 },
+    };
+    assert.equal(mapHasCardOverlap(nodes, {}), false);
+  });
+
+  test('false when siblings already have a gap', () => {
+    const nodes = {
+      root: { id:'root', parent:null, w:140, h:50, x:0, y:0 },
+      a: { id:'a', parent:'root', w:220, h:80, x:200, y:0, side:'right' },
+      b: { id:'b', parent:'root', w:220, h:70, x:200, y:100, side:'right' },
+    };
+    assert.equal(mapHasCardOverlap(nodes, {}), false);
   });
 });

@@ -7,6 +7,9 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
     private var webView: WKWebView!
     private let server: ServerSupervisor
     private var clickMonitor: Any?
+    private var toggleListenLocal: Any?
+    private var toggleListenGlobal: Any?
+    private var toggleListenArmed = false
     private var didStartLoad = false
     private var isWarm = false
     private var pendingShow = false
@@ -107,6 +110,9 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
             return
         }
         removeClickMonitor()
+        if toggleListenArmed {
+            cancelToggleListen(rebind: true)
+        }
         isVisible = false
         parkOffscreen()
         let restore = previousApp
@@ -205,6 +211,51 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
                 self.isWarm = true
                 Paths.log("webview warm ready")
                 if self.pendingShow { self.presentNow() }
+                if CommandLine.arguments.contains("--demo-shot") {
+                    self.runDemoShot()
+                }
+            }
+        }
+    }
+
+    /// Frame a readable cluster for docs/screenshot.png. Does not persist camera.
+    private func runDemoShot() {
+        if !isVisible { show() }
+        let js = """
+        (function(){
+          function go(){
+            if(!window.map || !window.map.nodes || typeof applyView!=='function'){
+              setTimeout(go, 80);
+              return;
+            }
+            try{
+              window.saveMapView=function(){};
+              window._saveMapViewNow=function(){};
+            }catch(e){}
+            var side=document.getElementById('side');
+            if(side){
+              side.classList.add('collapsed');
+              document.documentElement.classList.add('side-collapsed');
+            }
+            var hit=null;
+            Object.keys(map.nodes).forEach(function(id){
+              var t=map.nodes[id].text||'';
+              if(/Mid-layer exploration|model has the right answer|GPT-5\\.6 Pro/.test(t)) hit=map.nodes[id];
+            });
+            if(!hit) hit=map.nodes[map.rootId];
+            view.k=1.12;
+            var sw=window.innerWidth, sh=window.innerHeight;
+            view.x = sw/2 - (hit.x+(hit.w||140)/2)*view.k;
+            view.y = sh/2 - (hit.y+(hit.h||50)/2)*view.k;
+            applyView();
+          }
+          go();
+        })();
+        """
+        webView.evaluateJavaScript(js) { _, error in
+            if let error { Paths.log("demo-shot js \(error.localizedDescription)") }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) {
+                Paths.log("demo-shot framed")
             }
         }
     }
@@ -252,12 +303,18 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
         }
     }
 
-    private func hideIfClickOutside(_ event: NSEvent) {
+    private func hideIfClickOutside(_: NSEvent) {
         guard isVisible else { return }
+        if Self.isScreenshotApp(NSWorkspace.shared.frontmostApplication) { return }
         let point = NSEvent.mouseLocation
         if !panel.frame.contains(point) {
             hide()
         }
+    }
+
+    private static func isScreenshotApp(_ app: NSRunningApplication?) -> Bool {
+        guard let id = app?.bundleIdentifier?.lowercased(), !id.isEmpty else { return false }
+        return id.contains("screencapture") || id.contains("screenshot")
     }
 
     @objc private func spaceChanged() {
@@ -296,20 +353,91 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
             AppLanguage.current = AppLanguage.from(spec["lang"] as? String)
             return
         }
+        if op == "listenToggle" {
+            startToggleListen()
+            return
+        }
+        if op == "cancelToggleListen" {
+            cancelToggleListen(rebind: true)
+            return
+        }
         if op == "setToggle" {
             if let chord = KeyChord.fromWeb(spec) {
-                if !chord.hasModifier { return }
                 ShortcutStore.shared.setChord(chord, for: .toggleOverlay)
-                HotKeyCenter.shared.register(id: ShortcutID.toggleOverlay.carbonHotKeyID, chord: chord) { [weak self] in
-                    if Thread.isMainThread {
-                        MainActor.assumeIsolated { self?.toggle() }
-                    } else {
-                        DispatchQueue.main.async { self?.toggle() }
-                    }
-                }
                 pushNativeState()
             }
         }
+    }
+
+    private func startToggleListen() {
+        toggleListenArmed = false
+        stopToggleListenMonitors()
+        toggleListenArmed = true
+        HotKeyCenter.shared.unregister(id: ShortcutID.toggleOverlay.carbonHotKeyID)
+        NSApp.activate()
+        panel.makeKey()
+        panel.makeFirstResponder(webView)
+        toggleListenLocal = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self else { return event }
+            let keyCode = event.keyCode
+            let chord = KeyChord.from(event: event)
+            let swallow = MainActor.assumeIsolated {
+                self.applyToggleListen(keyCode: keyCode, chord: chord)
+            }
+            return swallow ? nil : event
+        }
+        toggleListenGlobal = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            let keyCode = event.keyCode
+            let chord = KeyChord.from(event: event)
+            Task { @MainActor in
+                _ = self?.applyToggleListen(keyCode: keyCode, chord: chord)
+            }
+        }
+    }
+
+    private func applyToggleListen(keyCode: UInt16, chord: KeyChord?) -> Bool {
+        guard toggleListenArmed else { return false }
+        if keyCode == 53 {
+            cancelToggleListen(rebind: true)
+            return true
+        }
+        guard let chord else { return true }
+        if chord == .commandComma { return true }
+        if !chord.hasModifier { return true }
+        toggleListenArmed = false
+        stopToggleListenMonitors()
+        ShortcutStore.shared.setChord(chord, for: .toggleOverlay)
+        notifyToggleListenDone(ok: true)
+        return true
+    }
+
+    private func cancelToggleListen(rebind: Bool) {
+        let wasArmed = toggleListenArmed
+        toggleListenArmed = false
+        stopToggleListenMonitors()
+        guard wasArmed else { return }
+        if rebind {
+            NotificationCenter.default.post(name: .rmsShortcutsDidChange, object: nil)
+        }
+        notifyToggleListenDone(ok: false)
+    }
+
+    private func stopToggleListenMonitors() {
+        let local = toggleListenLocal
+        let global = toggleListenGlobal
+        toggleListenLocal = nil
+        toggleListenGlobal = nil
+        guard local != nil || global != nil else { return }
+        DispatchQueue.main.async {
+            if let local { NSEvent.removeMonitor(local) }
+            if let global { NSEvent.removeMonitor(global) }
+        }
+    }
+
+    private func notifyToggleListenDone(ok: Bool) {
+        pushNativeState()
+        let flag = ok ? "true" : "false"
+        webView.evaluateJavaScript("window.__rmsToggleListenDone&&window.__rmsToggleListenDone(\(flag))")
     }
 
     private func bool(_ value: Any?) -> Bool {

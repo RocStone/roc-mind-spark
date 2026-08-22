@@ -7,7 +7,7 @@ A **native macOS overlay** for mind mapping. Hit a hotkey from any app, any desk
 The canvas is [MindSpark](https://github.com/prasadpatil25/MindSpark) by Prasad Patil (MIT). Roc Mind Spark wraps it in a Swift / AppKit / WKWebView shell so it behaves like a real overlay instead of a website.
 
 <p align="center">
-  <img src="docs/screenshot.png" alt="Roc Mind Spark overlay showing a research-and-engineering mind map titled In progress, with branches for Cursor Ultra, research (Trans Emb, J-Space), and daily notes." width="980">
+  <img src="docs/screenshot.png" alt="Roc Mind Spark overlay on the In progress map: Daily notes, Cursor Ultra, dated vibe-coding cards, and a note editor." width="1024">
 </p>
 
 **macOS 14+ only.** Windows is not supported.
@@ -20,9 +20,9 @@ Same loop for research. The overlay covers the current Space, so you do not have
 
 ## Summon it
 
-Default hotkey: **⌥⇧⌘Q** (Option + **Shift** + Command + Q). The **⇧** glyph is Shift.
+Default hotkey: **⌃⌥⇧⌘Q**. If Caps Lock is remapped to Hyper (Command + Control + Option + Shift), that is **Caps + Q**.
 
-That chord is busy on purpose so it rarely collides with the app you are in. It is also awkward — **change it in Settings** (gear in the toolbar, or **⌘,** while the overlay is open). The menu-bar extra also has Show / Hide.
+It is a busy chord on purpose so it rarely collides with the app you are in. **Change it in Settings** (gear in the toolbar, or **⌘,** while the overlay is open). The menu-bar extra also has Show / Hide.
 
 Click the menu bar, the Dock, or another display to put it away. Escape stays with the canvas (cancel an edit) and does not close the overlay.
 
@@ -60,7 +60,9 @@ cd roc-mind-spark
 make install
 ```
 
-That builds the app, copies it to `/Applications/Roc Mind Spark.app`, and opens the overlay. After that, use the hotkey. Maps are stored in `~/Library/Application Support/RocMindSpark/`.
+That builds the app and moves it to `/Applications/Roc Mind Spark.app`. If the folder is not writable, the terminal asks for your password. The overlay opens when it is done.
+
+Maps live in `~/Library/Application Support/RocMindSpark/`.
 
 ```bash
 make test    # canvas unit tests
