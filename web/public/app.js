@@ -933,20 +933,6 @@ function render(){
       pb.addEventListener('click',ev=>ev.stopPropagation());
       el.appendChild(pb);
     }
-    // Token-count badge — shown for nodes whose text + notes are non-trivial.
-    // Rough ~4 chars/token estimate (matches Anthropic & OpenAI tokenizer averages
-    // for English; treat as ±20%). Helps when building prompts to keep an eye on
-    // token budgets.
-    const tokens = estimateTokens(n.text, n.notes);
-    if(shouldShowNodeTokenBadge(tokens, !!noteText)){
-      const tb = document.createElement('span');
-      tb.className = 'token-badge';
-      tb.textContent = '~'+tokens+'t';
-      tb.title = `Approximately ${tokens} tokens (text${noteText?' + notes':''}). Rough estimate using ~4 chars/token.`;
-      tb.addEventListener('mousedown',ev=>ev.stopPropagation());
-      tb.addEventListener('click',ev=>ev.stopPropagation());
-      el.appendChild(tb);
-    }
     viewport.appendChild(el);
     toMeasure.push({el, n});
   }
@@ -2548,8 +2534,8 @@ function ensureMdPane(){
   ed.addEventListener('keydown',e=>{
     if(e.key==='Escape'){ e.preventDefault(); toggleMdMode(false); return; }
     if((e.ctrlKey||e.metaKey) && !e.altKey){ const k=(e.key||'').toLowerCase();
-      if(k==='z' && !e.shiftKey){ e.preventDefault(); undo(); return; }
-      if(k==='y' || (k==='z' && e.shiftKey)){ e.preventDefault(); redo(); return; }
+      if(k==='z' && !e.shiftKey){ e.preventDefault(); performHistoryChord('undo'); return; }
+      if(k==='y' || (k==='z' && e.shiftKey)){ e.preventDefault(); performHistoryChord('redo'); return; }
       if(k==='b'){ e.preventDefault(); mdFormat('bold'); return; }
       if(k==='i'){ e.preventDefault(); mdFormat('italic'); return; } }
     if(e.key==='Tab'){ e.preventDefault(); const a=ed.selectionStart,b=ed.selectionEnd; ed.value=ed.value.slice(0,a)+'  '+ed.value.slice(b); ed.selectionStart=ed.selectionEnd=a+2; mdAfterEdit(); }
@@ -3248,8 +3234,42 @@ function restore(s){
   if(typeof discardEditOverlay==='function') discardEditOverlay();
   const o=JSON.parse(s); map.nodes=o.nodes; map.rootId=o.rootId; map.title=o.title; map.color=o.color; if(o.links) map.links=o.links; if(o.layout) map.layout=o.layout; if(o.vars) map.vars=o.vars; $('#mapTitle').value=map.title; autoLayout(); if(mdMode && !_mdSyncing) syncTextFromMap();
 }
+let _historyChordAt=0;
 function undo(){ if(hpos>0){hpos--;restore(history[hpos]);updateUndo(); opLog('undo');} }
 function redo(){ if(hpos<history.length-1){hpos++;restore(history[hpos]);updateUndo(); opLog('redo');} }
+// Native performKeyEquivalent and the page keydown both see ⌘Z. One chord
+// must move history once. Fresh edit sessions have a WK undo stack that is
+// not the user's typing — execCommand('undo') there looks like paste/revert.
+function resolveHistoryChordTarget(state){
+  if(!state) return 'map';
+  if(state.notesOpen) return 'editor';
+  if(state.editing && state.typed) return 'editor';
+  return 'map';
+}
+function performHistoryChord(which){
+  const now=Date.now();
+  if(now-_historyChordAt<50) return true;
+  _historyChordAt=now;
+  if(typeof isAppTextField==='function' && typeof document!=='undefined' && isAppTextField(document.activeElement)
+     && !(typeof openClipboardTarget==='function' && openClipboardTarget())){
+    return !!(typeof execCmd==='function' && execCmd(which==='redo'?'redo':'undo'));
+  }
+  const notes=typeof openNotesEditorEl==='function' && openNotesEditorEl();
+  const editing=!!(typeof document!=='undefined' && document.querySelector && document.querySelector('.node.editing'))
+    || (typeof _editFloat!=='undefined' && !!_editFloat);
+  const target=resolveHistoryChordTarget({
+    notesOpen:!!notes,
+    editing: editing && !notes,
+    typed: typeof _editTyped!=='undefined' && !!_editTyped
+  });
+  if(target==='editor'){
+    return !!(typeof execCmd==='function' && execCmd(which==='redo'?'redo':'undo'));
+  }
+  if(editing && typeof cancelOpenEdit==='function') cancelOpenEdit();
+  if(which==='redo'){ if(typeof redo==='function') redo(); }
+  else if(typeof undo==='function') undo();
+  return true;
+}
 
 function addNode(parentId,asSibling){
   if(READONLY) return;
@@ -3321,7 +3341,7 @@ function deleteNode(id){
   autoLayout();      // re-tidy first…
   pushHistory();     // …then snapshot the clean, balanced state
 }
-function select(id,edit){
+function select(id,edit,fromPointer){
   // Toggle .sel class on existing elements rather than re-rendering — so the
   // DOM element identity is preserved across clicks (required for dblclick).
   document.querySelectorAll('.node.sel').forEach(n=>n.classList.remove('sel'));
@@ -3330,7 +3350,16 @@ function select(id,edit){
     const el=document.querySelector(`.node[data-id="${id}"]`);
     if(el) el.classList.add('sel');
   }
-  positionNodeBar();
+  // A pointer select must not put the format toolbar under the second click of
+  // a double-click (that click otherwise hits ＋ / paste-looking "New topic" /
+  // delete). Keyboard select can show the bar immediately.
+  if(fromPointer && !edit){
+    $('#nodebar')?.remove();
+    scheduleNodeBar();
+  } else {
+    if(_nodeBarTimer){ clearTimeout(_nodeBarTimer); _nodeBarTimer=0; }
+    positionNodeBar();
+  }
   updateBreadcrumb();
   if(mdMode && !_mdSelSync && id) mdHighlightNode(id);   // node click -> highlight its Markdown line
   if(edit) setTimeout(()=>startEdit(id),0);
@@ -4606,6 +4635,7 @@ function openEditorTextEl(){
 // number is not the space position:absolute-on-stage (or position:fixed) uses.
 let _liveEditing=false;
 let _editFloat=null;
+let _editTyped=false;
 function _csPx(cs, key, k){
   const n=parseFloat(cs[key]);
   return (isFinite(n)?n:0)*(k||1);
@@ -4667,6 +4697,22 @@ function discardEditOverlay(){
   }
   if(typeof closeFormulaAutocomplete==='function') closeFormulaAutocomplete();
   _liveEditing=false;
+}
+// Close an in-progress node edit without writing the draft. Used when ⌘Z
+// should undo the map (add node, drop) rather than WebKit's editor stack.
+function cancelOpenEdit(){
+  const el = typeof document!=='undefined' && document.querySelector && document.querySelector('.node.editing');
+  if(el){
+    const textEl=el.querySelector('.node-text')||el.querySelector('.node-block');
+    if(typeof discardEditOverlay==='function') discardEditOverlay();
+    el.classList.remove('editing');
+    if(textEl && typeof disarmEditorHost==='function') disarmEditorHost(textEl);
+  } else if(typeof discardEditOverlay==='function'){
+    discardEditOverlay();
+  }
+  _liveEditing=false;
+  _editTyped=false;
+  if(typeof clearEditReplaceAll==='function') clearEditReplaceAll();
 }
 function mountEditFloat(el, textEl){
   if(!el || !textEl || typeof document==='undefined') return textEl;
@@ -4922,14 +4968,10 @@ function rmsClipboardSelectAll(){
   return true;
 }
 function rmsClipboardUndo(){
-  if(openClipboardTarget()) return !!(typeof execCmd==='function' && execCmd('undo'));
-  if(typeof undo==='function'){ undo(); return true; }
-  return false;
+  return performHistoryChord('undo');
 }
 function rmsClipboardRedo(){
-  if(openClipboardTarget()) return !!(typeof execCmd==='function' && execCmd('redo'));
-  if(typeof redo==='function'){ redo(); return true; }
-  return false;
+  return performHistoryChord('redo');
 }
 if(typeof window !== 'undefined'){
   window.__rmsClipboardCopy = rmsClipboardCopy;
@@ -5038,7 +5080,10 @@ if(typeof document!=='undefined' && document.addEventListener){
 }
 function startEdit(id){
   if(READONLY) return;
+  const already=typeof document!=='undefined' && document.querySelector && document.querySelector('.node.editing');
+  if(already && already.dataset.id===id && _liveEditing) return;
   opLog('editStart', {id});
+  if(_nodeBarTimer){ clearTimeout(_nodeBarTimer); _nodeBarTimer=0; }
   if(map.nodes[id] && map.nodes[id].hr) return;   // dividers aren't editable
   const el=document.querySelector(`.node[data-id="${id}"]`); if(!el) return;
   if(map.nodes[id] && map.nodes[id].html){ startBlockEdit(id, el); return; }   // edit code/table in place
@@ -5055,6 +5100,7 @@ function startEdit(id){
   }
   el.classList.add('editing');
   _liveEditing=true;
+  _editTyped=false;
   armEditorHost(textEl);
   const host=mountEditFloat(el, textEl);
   // Keep the format toolbar visible — it's what makes inline B/I/U work
@@ -5099,6 +5145,7 @@ function startEdit(id){
     host.removeEventListener('mousedown',onPointer);
     host.removeEventListener('compositionstart',onCompositionStart);
     host.removeEventListener('compositionend',onCompositionEnd);
+    _editTyped=false;
     // Tidy the branch so the (grown/shrunk) node and its siblings stay neatly
     // laid out after editing — mirrors GitMind, which keeps the map tidy both
     // during and after typing. autoLayout() re-renders internally.
@@ -5123,6 +5170,7 @@ function startEdit(id){
   };
   const onInput=()=>{
     if(composing) return;
+    _editTyped=true;
     // macOS IME fires input BEFORE compositionstart on the first pinyin key.
     // A same-frame layout move dismisses the candidate window. Wait one extra
     // frame so compositionstart can cancel this.
@@ -5140,7 +5188,7 @@ function startEdit(id){
   const onKey=e=>{
     if(clipboardEditAction(e)) return;
     const undoAct=editSessionUndoAction(e);
-    if(undoAct){ e.preventDefault(); e.stopPropagation(); execCmd(undoAct); return; }
+    if(undoAct){ e.preventDefault(); e.stopPropagation(); performHistoryChord(undoAct); return; }
     if(!e.ctrlKey && !e.metaKey && !e.altKey && e.key && e.key.length===1) clearEditReplaceAll();
     if(isImeEvent(e) || composing || isImeSwitchEvent(e)) return;
     if(formulaAutocompleteKeydown(e)) return;   // popup open: let it handle nav/select/dismiss first
@@ -5164,6 +5212,7 @@ function startEdit(id){
   host.addEventListener('input',onInput);
   host.addEventListener('compositionstart',onCompositionStart);
   host.addEventListener('compositionend',onCompositionEnd);
+  positionNodeBar();
 }
 
 /* ---------- node context toolbar ---------- */
@@ -5267,6 +5316,16 @@ function positionAndClampNodeBar(bar, n){
     bar.style.left=(pos.left+dx/(k*z))+'px';
     bar.style.top=(pos.top+dy/(k*z))+'px';
   }
+}
+
+const NODE_DBLCLICK_MS=450;
+let _nodeBarTimer=0;
+function scheduleNodeBar(){
+  if(_nodeBarTimer) clearTimeout(_nodeBarTimer);
+  _nodeBarTimer=setTimeout(()=>{
+    _nodeBarTimer=0;
+    positionNodeBar();
+  }, NODE_DBLCLICK_MS);
 }
 
 // Cheap alternative to positionNodeBar() for continuous gestures (dragging a node,
@@ -5378,6 +5437,7 @@ function positionNodeBar(){
   bar.querySelectorAll('button').forEach(b=>{
     b.onclick=(ev)=>{
       ev.stopPropagation();
+      if(shouldIgnoreTransientToolbarClick(ev.detail, Date.now(), _nodeClickStamp && _nodeClickStamp.t, NODE_DBLCLICK_MS)) return;
       const a=b.dataset.a;
       if(a==='child') addNode(sel,false);
       else if(a==='sibling') addNode(sel,true);
@@ -5421,11 +5481,22 @@ let dragRoots=null;    // move-roots for the active drag (group or single)
 let marquee=null;      // ⌘/Ctrl box-select gesture
 let resizing=null;     // {id, sx, sy, sw, sh}
 let dropTarget=null;   // id of node currently hovered as a reparent target
+let _nodeClickStamp={id:null,t:0};
+
+function cancelNodeDrag(){
+  document.body.classList.remove('node-dragging');
+  if(typeof setDropTarget==='function') setDropTarget(null);
+  dragNode=null;
+  dragRoots=null;
+  moved=false;
+  if(typeof clearDragGhosts==='function') clearDragGhosts();
+}
 
 // Snapshot positions of `id` and all its descendants so the whole subtree
 // can move together during a drag, then reset cleanly on cancel.
 function beginSubtreeDrag(idOrIds, mx, my){
   document.body.classList.add('node-dragging');   // suspend the position transition below while actively dragging (must track the pointer 1:1, not ease into place)
+  clearCanvasTextSelection();
   const roots=Array.isArray(idOrIds) ? idOrIds : [idOrIds];
   const subtree={};
   withChildIndex(()=>{
@@ -5675,6 +5746,10 @@ function clearDragGhosts(){
   document.querySelectorAll('.node.drag-ghost').forEach(n=>n.classList.remove('drag-ghost'));
 }
 function finishNodeDrop(){
+  if(typeof _liveEditing!=='undefined' && _liveEditing){
+    cancelNodeDrag();
+    return;
+  }
   const roots=(dragRoots && dragRoots.length) ? dragRoots : (dragNode && dragNode!==map.rootId ? [dragNode] : []);
   let did=false;
   if(dropTarget && roots.length){
@@ -5702,6 +5777,15 @@ if(typeof window!=='undefined' && window.addEventListener){
     // WKWebView starts a native HTML5 drag on nodes; mouseup never reaches us,
     // so nest / reorder looks like it "disappeared". Chrome respects user-select.
     if(e.target && e.target.closest && e.target.closest('.node, #stage, #viewport')){
+      e.preventDefault();
+    }
+  }, true);
+  window.addEventListener('selectstart', e=>{
+    const editing = e.target && e.target.closest && e.target.closest('.node.editing, .edit-float');
+    if(editing) return;
+    if(canvasGestureBlocksTextSelection({dragNode, marquee, resizing, panning})
+       || document.body.classList.contains('node-dragging')
+       || document.body.classList.contains('marquee-selecting')){
       e.preventDefault();
     }
   }, true);
@@ -5749,11 +5833,27 @@ stage.addEventListener('mousedown',e=>{
     const inGroup = multiSel.size && (multiSel.has(id) || id===sel);
     if(!inGroup){
       if(multiSel.size) clearMultiSelect();
-      select(id,false);
+      select(id,false,true);
     } else {
-      select(id,false);
+      select(id,false,true);
     }
+    const now=Date.now();
+    if(isNodeDoubleClick(_nodeClickStamp, id, now, NODE_DBLCLICK_MS)){
+      _nodeClickStamp={id:null,t:0};
+      e.preventDefault();
+      cancelNodeDrag();
+      if(!READONLY) startEdit(id);
+      return;
+    }
+    _nodeClickStamp={id,t:now};
     if(READONLY) return;          // view-only: allow selection, no dragging/editing
+    if(!shouldStartNodeDrag(e.detail)){
+      e.preventDefault();
+      cancelNodeDrag();
+      return;
+    }
+    e.preventDefault();           // WK otherwise starts a text selection across every card
+    clearCanvasTextSelection();
     dragNode=id; moved=false;
     if(id===map.rootId) dragRoots=[];
     else if(inGroup){
@@ -5769,6 +5869,8 @@ stage.addEventListener('mousedown',e=>{
   } else {
     if(reparentMode){ reparentMode=false; hideBulkBar(); updateMultiSelUI(); }
     if(linkMode) cancelLinkMode();
+    e.preventDefault();
+    clearCanvasTextSelection();
     panning=true; panStart={x:pt.x,y:pt.y,vx:view.x,vy:view.y};
     if(sel){
       sel=null;
@@ -5830,12 +5932,14 @@ window.addEventListener('mousemove',e=>{
     return;
   }
   if(panning){                       // pan is GPU-only + cheap: keep it immediate
+    e.preventDefault();
     const z=_uiZ();
     view.x=panStart.vx+(pt.x-panStart.x)/z; view.y=panStart.vy+(pt.y-panStart.y)/z;
     applyView();
     return;
   }
   if(!resizing && !dragNode) return;
+  e.preventDefault();
   // Move-threshold check stays on the raw event so a tiny nudge still registers.
   if(dragNode && !moved){
     const sc=view.k*_uiZ();
@@ -5845,7 +5949,7 @@ window.addEventListener('mousemove',e=>{
   _movePt={x:pt.x, y:pt.y, rawX:pt.rawX, rawY:pt.rawY};
   if(!_moveRAF) _moveRAF=requestAnimationFrame(_applyMove);   // coalesce to one update / frame
 });
-window.addEventListener('mouseup',()=>{
+window.addEventListener('mouseup',e=>{
   document.body.classList.remove('node-dragging');
   if(_moveRAF){ cancelAnimationFrame(_moveRAF); _moveRAF=0; _applyMove(); }
   _movePt=null; _dragHidden=null;
@@ -5873,7 +5977,8 @@ window.addEventListener('mouseup',()=>{
     pushHistory();
   }
   if(dragNode){
-    finishNodeDrop();
+    if((e.detail|0)>=2) cancelNodeDrag();
+    else finishNodeDrop();
   }
   if(panning){ panning=false; saveMapView(); }
 });
@@ -6205,8 +6310,8 @@ window.addEventListener('keydown',e=>{
   if(clipboardEditAction(e)) return;
   if(['INPUT','TEXTAREA'].includes(e.target.tagName)||e.target.isContentEditable||document.querySelector('.node.editing')) return;
   if(isImeEvent(e)) return;
-  if(rms('undo', e, (e.ctrlKey||e.metaKey)&&!e.shiftKey&&e.key.toLowerCase()==='z')){e.preventDefault();undo();return;}
-  if(rms('redo', e, (e.ctrlKey||e.metaKey)&&e.shiftKey&&e.key.toLowerCase()==='z') || ((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='y')){e.preventDefault();redo();return;}
+  if(rms('undo', e, (e.ctrlKey||e.metaKey)&&!e.shiftKey&&e.key.toLowerCase()==='z')){e.preventDefault();performHistoryChord('undo');return;}
+  if(rms('redo', e, (e.ctrlKey||e.metaKey)&&e.shiftKey&&e.key.toLowerCase()==='z') || ((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='y')){e.preventDefault();performHistoryChord('redo');return;}
   if(e.key==='Escape'){
     if(marquee){ e.preventDefault(); endMarquee(true); return; }
     if(linkMode){ e.preventDefault(); cancelLinkMode(); return; }
@@ -6248,7 +6353,13 @@ window.addEventListener('keydown',e=>{
     });
   }
 });
-stage.addEventListener('dblclick',e=>{const n=e.target.closest('.node');if(n)startEdit(n.dataset.id);});
+stage.addEventListener('dblclick',e=>{
+  const n=e.target.closest('.node');
+  if(!n) return;
+  e.preventDefault();
+  cancelNodeDrag();
+  if(!READONLY) startEdit(n.dataset.id);
+});
 // The stage clips overflow, but the browser can still programmatically scroll it
 // to bring a focused/oversized node's caret into view (e.g. after pasting a large
 // block while editing). Panning is done entirely via the #viewport transform, so
@@ -8327,12 +8438,38 @@ function nodeTextPlain(text){
   tpl.content.querySelectorAll('br').forEach(br=>br.replaceWith(document.createTextNode('\n')));
   return (tpl.content.textContent||'').replace(/\u00A0/g,' ').trim();
 }
-// Rough token count: ~4 chars per token (English avg for GPT/Claude tokenizers).
-// Adds notes content to the total so the badge reflects what would actually be
-// included if the user exports this node to a prompt.
-function shouldShowNodeTokenBadge(tokens, hasNotes){
-  if(hasNotes) return false;
-  return tokens >= 25;
+// Per-node ~Nt corner badge. Always off: the count sat on the card and
+// read as debug chrome. Map-wide total in the toolbar still uses estimateTokens.
+function shouldShowNodeTokenBadge(_tokens, _hasNotes){
+  return false;
+}
+// While a canvas gesture is in progress, WKWebView paints a native text
+// selection across every card the pointer crosses (sibling-drop hover is
+// the usual trigger). Editing must keep selectable text.
+function canvasGestureBlocksTextSelection(state){
+  if(!state || state.editing) return false;
+  return !!(state.dragNode || state.marquee || state.resizing || state.panning);
+}
+function isNodeDoubleClick(stamp, id, now, windowMs){
+  if(!stamp || stamp.id==null || id==null) return false;
+  const dt=now-stamp.t;
+  const win=windowMs==null?450:windowMs;
+  return stamp.id===id && dt>=0 && dt<=win;
+}
+function shouldStartNodeDrag(detail){
+  return (detail|0)<2;
+}
+function shouldIgnoreTransientToolbarClick(detail, now, nodeDownAt, windowMs){
+  if((detail|0)>=2) return true;
+  const win=windowMs==null?450:windowMs;
+  if(nodeDownAt && now-nodeDownAt>=0 && now-nodeDownAt<=win) return true;
+  return false;
+}
+function clearCanvasTextSelection(){
+  try{
+    const s = typeof window!=='undefined' && window.getSelection && window.getSelection();
+    if(s && s.rangeCount) s.removeAllRanges();
+  }catch(_){}
 }
 function estimateTokens(text, notes){
   const tParts = nodeTextPlain(text||'');
@@ -9308,11 +9445,6 @@ async function exportPNG(){
     if(prog.total>0 && !n.task){
       const complete = prog.done===prog.total;
       drawPillBadge(`\u2713 ${prog.done}/${prog.total}`, n.x-6, n.y-9, complete?'#4a9d5b':themeInk, '#fff');
-    }
-    // Token-count badge — bottom-left pill, same threshold as the on-screen version
-    const tokens = estimateTokens(n.text, n.notes);
-    if(tokens>=25){
-      drawPillBadge(`~${tokens}t`, n.x-6, n.y+h-6, themeInk, '#fff');
     }
     // Reference/citation mark — top-left circle with a 📖 glyph
     if(n.ref){

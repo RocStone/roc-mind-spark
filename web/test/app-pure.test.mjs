@@ -4,10 +4,11 @@
 // here loudly instead of silently passing against a stale copy.
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { loadFns, extractConst } from './helpers/load-app-fns.mjs';
 
-const { prettyUrl, pickContrast, escapeHtml, shade, edgePath, shouldShowNodeTokenBadge, shouldCloseNotesOnPointerLeave, notesPopupPosition } =
-  loadFns(['prettyUrl', 'pickContrast', 'escapeHtml', 'shade', 'edgePath', 'shouldShowNodeTokenBadge', 'shouldCloseNotesOnPointerLeave', 'notesPopupPosition']);
+const { prettyUrl, pickContrast, escapeHtml, shade, edgePath, shouldShowNodeTokenBadge, canvasGestureBlocksTextSelection, resolveHistoryChordTarget, isNodeDoubleClick, shouldStartNodeDrag, shouldIgnoreTransientToolbarClick, shouldCloseNotesOnPointerLeave, notesPopupPosition } =
+  loadFns(['prettyUrl', 'pickContrast', 'escapeHtml', 'shade', 'edgePath', 'shouldShowNodeTokenBadge', 'canvasGestureBlocksTextSelection', 'resolveHistoryChordTarget', 'isNodeDoubleClick', 'shouldStartNodeDrag', 'shouldIgnoreTransientToolbarClick', 'shouldCloseNotesOnPointerLeave', 'notesPopupPosition']);
 const URL_RE = extractConst('URL_RE');
 
 describe('prettyUrl — shortens link labels for display', () => {
@@ -150,14 +151,66 @@ describe('notesPopupPosition', () => {
 });
 
 describe('shouldShowNodeTokenBadge', () => {
-  test('hides the corner count when the node has a note', () => {
+  test('never shows the per-node ~Nt corner count', () => {
     assert.equal(shouldShowNodeTokenBadge(57, true), false);
     assert.equal(shouldShowNodeTokenBadge(80, true), false);
+    assert.equal(shouldShowNodeTokenBadge(57, false), false);
+    assert.equal(shouldShowNodeTokenBadge(10, false), false);
   });
 
-  test('still shows a count on long nodes with no note', () => {
-    assert.equal(shouldShowNodeTokenBadge(57, false), true);
-    assert.equal(shouldShowNodeTokenBadge(10, false), false);
+  test('does not mount a token-badge or PNG ~Nt pill', () => {
+    const src = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8');
+    assert.equal(src.includes('token-badge'), false);
+    assert.equal(src.includes("'~'+tokens+'t'"), false);
+    assert.equal(src.includes('~${tokens}t'), false);
+  });
+});
+
+describe('canvasGestureBlocksTextSelection', () => {
+  test('blocks native text selection while dragging or dropping on a sibling', () => {
+    assert.equal(canvasGestureBlocksTextSelection({dragNode: 'n1'}), true);
+    assert.equal(canvasGestureBlocksTextSelection({marquee: {}}), true);
+    assert.equal(canvasGestureBlocksTextSelection({resizing: {}}), true);
+    assert.equal(canvasGestureBlocksTextSelection({panning: true}), true);
+  });
+
+  test('leaves text selectable while editing a node', () => {
+    assert.equal(canvasGestureBlocksTextSelection({editing: true, dragNode: 'n1'}), false);
+    assert.equal(canvasGestureBlocksTextSelection({}), false);
+    assert.equal(canvasGestureBlocksTextSelection(null), false);
+  });
+});
+
+describe('resolveHistoryChordTarget', () => {
+  test('map undo when not editing', () => {
+    assert.equal(resolveHistoryChordTarget({}), 'map');
+    assert.equal(resolveHistoryChordTarget(null), 'map');
+    assert.equal(resolveHistoryChordTarget({editing: true, typed: false}), 'map');
+  });
+
+  test('editor undo only after the user has typed in this session', () => {
+    assert.equal(resolveHistoryChordTarget({editing: true, typed: true}), 'editor');
+    assert.equal(resolveHistoryChordTarget({notesOpen: true, typed: false}), 'editor');
+  });
+});
+
+describe('double-click vs drag / toolbar', () => {
+  test('second click on the same node within the window is a double-click', () => {
+    assert.equal(isNodeDoubleClick({id: 'n1', t: 1000}, 'n1', 1200, 450), true);
+    assert.equal(isNodeDoubleClick({id: 'n1', t: 1000}, 'n1', 1600, 450), false);
+    assert.equal(isNodeDoubleClick({id: 'n1', t: 1000}, 'n2', 1100, 450), false);
+    assert.equal(isNodeDoubleClick(null, 'n1', 1100, 450), false);
+  });
+
+  test('the second click of a double-click does not start a drag', () => {
+    assert.equal(shouldStartNodeDrag(1), true);
+    assert.equal(shouldStartNodeDrag(2), false);
+  });
+
+  test('toolbar ignores the click that is actually a double-click', () => {
+    assert.equal(shouldIgnoreTransientToolbarClick(2, 1300, 1000, 450), true);
+    assert.equal(shouldIgnoreTransientToolbarClick(1, 1100, 1000, 450), true);
+    assert.equal(shouldIgnoreTransientToolbarClick(1, 2000, 1000, 450), false);
   });
 });
 

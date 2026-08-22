@@ -32,6 +32,12 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
             name: NSWorkspace.activeSpaceDidChangeNotification,
             object: nil
         )
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(anotherAppActivated),
+            name: NSWorkspace.didActivateApplicationNotification,
+            object: nil
+        )
     }
 
     /// Must run after `applicationDidFinishLaunching` returns. Creating a
@@ -102,7 +108,7 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
         presentNow()
     }
 
-    func hide() {
+    func hide(restorePrevious: Bool = true) {
         if isVisible { Paths.opsLog("overlay-hide") }
         pendingShow = false
         guard isVisible else {
@@ -115,10 +121,14 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
         }
         isVisible = false
         parkOffscreen()
-        let restore = previousApp
-        previousApp = nil
-        if let restore, restore.bundleIdentifier != AppConfig.bundleId {
-            restore.activate()
+        if restorePrevious {
+            let restore = previousApp
+            previousApp = nil
+            if let restore, restore.bundleIdentifier != AppConfig.bundleId {
+                restore.activate()
+            }
+        } else {
+            previousApp = nil
         }
     }
 
@@ -308,7 +318,7 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
         if Self.isScreenshotApp(NSWorkspace.shared.frontmostApplication) { return }
         let point = NSEvent.mouseLocation
         if !panel.frame.contains(point) {
-            hide()
+            hide(restorePrevious: false)
         }
     }
 
@@ -319,6 +329,23 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
 
     @objc private func spaceChanged() {
         if isVisible { hide() }
+    }
+
+    /// Raycast / Alfred / Cmd-Tab otherwise stay behind this full-screen panel.
+    /// Do not steal focus back — the other app is already frontmost.
+    @objc private func anotherAppActivated(_ note: Notification) {
+        guard isVisible else { return }
+        let app = (note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication)
+            ?? NSWorkspace.shared.frontmostApplication
+        guard Self.shouldYield(to: app) else { return }
+        hide(restorePrevious: false)
+    }
+
+    static func shouldYield(to app: NSRunningApplication?) -> Bool {
+        guard let app else { return false }
+        if app.bundleIdentifier == AppConfig.bundleId { return false }
+        if isScreenshotApp(app) { return false }
+        return true
     }
 
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {

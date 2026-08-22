@@ -1,4 +1,5 @@
 import AppKit
+import CoreGraphics
 
 /// Non-activating panel that can sit on top of another app's fullscreen Space
 /// without creating or switching Spaces.
@@ -16,7 +17,8 @@ final class OverlayPanel: NSPanel {
         isFloatingPanel = true
         becomesKeyOnlyIfNeeded = false
         hidesOnDeactivate = false
-        level = .statusBar
+        // Cover fullscreen Spaces, but sit below popup HUDs (Raycast, Spotlight).
+        level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.mainMenuWindow)))
         // Do not use .transient: macOS hides those panels when they lose key
         // (screenshot UI, ⌘,). We hide from the hotkey, outside clicks, Space
         // changes, and the menu bar.
