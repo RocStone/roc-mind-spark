@@ -4110,6 +4110,8 @@ function failImageAttach(id){
   const parent=n.parent;
   delete map.nodes[id];
   if(sel===id) sel=parent||map.rootId;
+  if(typeof render==='function') render();
+  if(typeof autoLayout==='function') autoLayout();
 }
 function dataUrlToBlob(dataUrl){
   const m = String(dataUrl||'').match(/^data:([^;]+);base64,(.+)$/);
@@ -5138,6 +5140,20 @@ function rmsClipboardCopy(){
   if(!shouldTakeNodeClipboard()) return '';
   return editorClipboardPayload(null) || '';
 }
+function rmsClipboardCopyImageUrl(){
+  if(typeof openClipboardTarget==='function' && openClipboardTarget()) return '';
+  if(typeof shouldTakeNodeClipboard==='function' && !shouldTakeNodeClipboard()) return '';
+  if(typeof map==='undefined' || !map || !map.nodes || typeof sel==='undefined') return '';
+  const n = map.nodes[sel];
+  if(!n || !n.image) return '';
+  return typeof nodeImageSrc==='function' ? nodeImageSrc(n) : String(n.image);
+}
+function rmsClipboardCopyPayload(){
+  return JSON.stringify({
+    text: rmsClipboardCopy() || '',
+    image: rmsClipboardCopyImageUrl() || ''
+  });
+}
 function rmsClipboardCut(){
   const text = rmsClipboardCopy();
   const textEl = openClipboardTarget();
@@ -5206,6 +5222,8 @@ function rmsClipboardRedo(){
 }
 if(typeof window !== 'undefined'){
   window.__rmsClipboardCopy = rmsClipboardCopy;
+  window.__rmsClipboardCopyPayload = rmsClipboardCopyPayload;
+  window.__rmsClipboardCopyImageUrl = rmsClipboardCopyImageUrl;
   window.__rmsClipboardCut = rmsClipboardCut;
   window.__rmsClipboardPaste = rmsClipboardPaste;
   window.__rmsClipboardPasteImage = rmsClipboardPasteImage;
@@ -7174,15 +7192,17 @@ async function duplicateMap(id){
   copy.titleAuto = false;
   copy.updated = Date.now();
   await Store.save(copy);
+  let imgOk = true;
   try{
-    await fetch('/api/maps/'+encodeURIComponent(copy.id)+'/images/duplicate', {
+    const r = await fetch('/api/maps/'+encodeURIComponent(copy.id)+'/images/duplicate', {
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({ from: id })
     });
-  }catch(_){}
+    if(!r.ok) imgOk = false;
+  }catch(_){ imgOk = false; }
   await loadMap(copy.id);
   refreshList();
-  toast('Map duplicated');
+  toast(imgOk ? 'Map duplicated' : 'Map copied, but images could not be copied');
 }
 
 // ===== Save current map as a reusable template =====
@@ -9251,12 +9271,48 @@ function renderMathForExport(text, fontPx, color){
   out += plain(text.slice(last));
   return out;
 }
-function buildDoc(){
+function imageSrcNeedsInline(src){
+  if(!src) return false;
+  if(/^(data:|https?:|\/\/)/i.test(src)) return false;
+  return true;
+}
+function blobToDataUrl(blob){
+  return new Promise((resolve, reject)=>{
+    if(typeof FileReader!=='function'){ reject(new Error('no FileReader')); return; }
+    const fr = new FileReader();
+    fr.onload = ()=>resolve(String(fr.result||''));
+    fr.onerror = ()=>reject(fr.error||new Error('read failed'));
+    fr.readAsDataURL(blob);
+  });
+}
+async function inlineNodeImageSrc(n, mapObj){
+  const src = nodeImageSrc(n, mapObj);
+  if(!src || !imageSrcNeedsInline(src)) return src;
+  if(typeof fetch!=='function') return src;
+  try{
+    const r = await fetch(src);
+    if(!r.ok) return src;
+    const blob = await r.blob();
+    return await blobToDataUrl(blob);
+  }catch(_){ return src; }
+}
+async function inlineAllMapImages(){
+  const out = {};
+  if(!map || !map.nodes) return out;
+  await Promise.all(Object.keys(map.nodes).map(async id=>{
+    const n = map.nodes[id];
+    if(!n || !n.image) return;
+    out[id] = await inlineNodeImageSrc(n);
+  }));
+  return out;
+}
+function buildDoc(inlined){
   const title = (map.title || 'Mind Map').replace(/[<>]/g,'');
+  const imgSrc = n => (inlined && n && inlined[n.id]) || nodeImageSrc(n);
   let body = `<h1>${escapeHtml(title)}</h1>`;
   // Root's image, if any
   const rootN = map.nodes[map.rootId];
-  if(rootN && rootN.image){ body += `<img src="${nodeImageSrc(rootN)}" alt="${escapeHtml(rootN.imageAlt||'attachment')}" style="max-width:320px;max-height:220px;display:block;margin-bottom:10px;border-radius:8px">`; }
+  if(rootN && rootN.image){ body += `<img src="${imgSrc(rootN)}" alt="${escapeHtml(rootN.imageAlt||'attachment')}" style="max-width:320px;max-height:220px;display:block;margin-bottom:10px;border-radius:8px">`; }
   // Add root's notes under the title
   const rn = rootN?.notes;
   if(rn){ body += `<p><em>${renderMathForExport(rn, 13, '#6a6258') ?? sanitizeInlineHTML(rn)}</em></p>`; }
@@ -9271,7 +9327,7 @@ function buildDoc(){
         ?? (INLINE_HTML_RE.test(n.text||'') ? sanitizeInlineHTML(n.text) : escapeHtml(n.text||'').replace(/\n/g,'<br>'));
       const taskMark = n.task ? (n.task==='done' ? '\u2611\uFE0F ' : n.task==='doing' ? '\u25D0 ' : '\u2610 ') : '';
       out += `<li>`;
-      if(n.image) out += `<img src="${nodeImageSrc(n)}" alt="${escapeHtml(n.imageAlt||'attachment')}" style="max-width:280px;max-height:200px;display:block;margin-bottom:4px;border-radius:6px"><br>`;
+      if(n.image) out += `<img src="${imgSrc(n)}" alt="${escapeHtml(n.imageAlt||'attachment')}" style="max-width:280px;max-height:200px;display:block;margin-bottom:4px;border-radius:6px"><br>`;
       out += `${taskMark}${n.task==='done'?`<span style="text-decoration:line-through;opacity:.65">${txt}</span>`:txt}`;
       if(n.notes){ out += `<br><em style="color:#666">${renderMathForExport(n.notes, 13, '#6a6258') ?? sanitizeInlineHTML(n.notes)}</em>`; }
       out += renderChildren(cid, depth+1);
@@ -9300,9 +9356,10 @@ function buildDoc(){
 <body>${body}</body>
 </html>`;
 }
-function exportDoc(){
+async function exportDoc(){
   if(!map) return;
-  const html = buildDoc();
+  const inlined = await inlineAllMapImages();
+  const html = buildDoc(inlined);
   // .doc extension + msword MIME → Word, Google Docs, LibreOffice all open it
   const filename = (map.title||'mindmap')+'.doc';
   const blob = new Blob(['\ufeff', html], {type:'application/msword'});

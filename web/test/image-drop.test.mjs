@@ -403,6 +403,17 @@ describe('eventOnNodeImage', () => {
   });
 });
 
+describe('imageSrcNeedsInline', () => {
+  const { imageSrcNeedsInline } = loadFns(['imageSrcNeedsInline']);
+  test('inlines local map files, not data URLs or http', () => {
+    assert.equal(imageSrcNeedsInline('/api/maps/m1/images/001.png'), true);
+    assert.equal(imageSrcNeedsInline('001.png'), true);
+    assert.equal(imageSrcNeedsInline('data:image/png;base64,xx'), false);
+    assert.equal(imageSrcNeedsInline('https://example.com/a.png'), false);
+    assert.equal(imageSrcNeedsInline(''), false);
+  });
+});
+
 describe('nodeImageSrc', () => {
   const { nodeImageSrc } = loadFns(['nodeImageSrc']);
 

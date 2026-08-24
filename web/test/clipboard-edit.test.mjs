@@ -355,5 +355,49 @@ describe('rmsClipboardPasteImage — native shell image paste', () => {
     const src = readFileSync(join(here, '..', 'public', 'app.js'), 'utf8');
     assert.match(src, /window\.__rmsClipboardPasteImage\s*=\s*rmsClipboardPasteImage/);
     assert.match(src, /window\.__rmsClipboardPasteImageFile\s*=\s*rmsClipboardPasteImageFile/);
+    assert.match(src, /window\.__rmsClipboardCopyPayload\s*=\s*rmsClipboardCopyPayload/);
+  });
+});
+
+describe('rmsClipboardCopyImageUrl — copy a selected image node', () => {
+  test('returns the map image URL for a file-backed node', () => {
+    global.document = { querySelector: () => null, activeElement: { tagName: 'BODY' } };
+    const { rmsClipboardCopyImageUrl } = loadFns(
+      ['nodeImageSrc', 'openNotesEditorEl', 'openEditorTextEl', 'openClipboardTarget', 'isAppTextField', 'shouldTakeNodeClipboard', 'rmsClipboardCopyImageUrl'],
+      {
+        sel: 'n1',
+        map: { id: 'm1', nodes: { n1: { id: 'n1', text: '', image: '001.png' } } },
+      }
+    );
+    assert.equal(rmsClipboardCopyImageUrl(), '/api/maps/m1/images/001.png');
+  });
+
+  test('an image-only node still has a copy payload when text is empty', () => {
+    global.document = { querySelector: () => null, activeElement: { tagName: 'BODY' } };
+    const { rmsClipboardCopyPayload } = loadFns(
+      [
+        'nodeImageSrc',
+        'openNotesEditorEl',
+        'openEditorTextEl',
+        'openClipboardTarget',
+        'isAppTextField',
+        'shouldTakeNodeClipboard',
+        'nodeClipboardPlain',
+        'editorCopyPayload',
+        'editorSelectedText',
+        'peekEditReplaceAll',
+        'editorClipboardPayload',
+        'rmsClipboardCopy',
+        'rmsClipboardCopyImageUrl',
+        'rmsClipboardCopyPayload',
+      ],
+      {
+        sel: 'n1',
+        map: { id: 'm1', nodes: { n1: { id: 'n1', text: '', image: '001.png' } } },
+      }
+    );
+    const payload = JSON.parse(rmsClipboardCopyPayload());
+    assert.equal(payload.text, '');
+    assert.equal(payload.image, '/api/maps/m1/images/001.png');
   });
 });

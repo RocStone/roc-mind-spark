@@ -856,21 +856,67 @@ private final class MapWebView: WKWebView {
     }
 
     private func nativeCopy() {
-        evaluateJavaScript("window.__rmsClipboardCopy&&window.__rmsClipboardCopy()") { result, _ in
-            guard let text = result as? String, !text.isEmpty else { return }
-            let board = NSPasteboard.general
-            board.clearContents()
-            board.setString(text, forType: .string)
+        evaluateJavaScript("window.__rmsClipboardCopyPayload&&window.__rmsClipboardCopyPayload()") { result, _ in
+            self.writeClipboard(from: result)
         }
     }
 
     private func nativeCut() {
         evaluateJavaScript("window.__rmsClipboardCut&&window.__rmsClipboardCut()") { result, _ in
-            guard let text = result as? String, !text.isEmpty else { return }
+            let text = result as? String ?? ""
+            self.evaluateJavaScript("window.__rmsClipboardCopyImageUrl&&window.__rmsClipboardCopyImageUrl()") { image, _ in
+                self.writeClipboard(text: text, image: image as? String ?? "")
+            }
+        }
+    }
+
+    private func writeClipboard(from result: Any?) {
+        var text = ""
+        var image = ""
+        if let s = result as? String, let data = s.data(using: .utf8),
+           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            text = obj["text"] as? String ?? ""
+            image = obj["image"] as? String ?? ""
+        } else if let s = result as? String {
+            text = s
+        }
+        writeClipboard(text: text, image: image)
+    }
+
+    private func writeClipboard(text: String, image: String) {
+        if image.isEmpty {
+            guard !text.isEmpty else { return }
             let board = NSPasteboard.general
             board.clearContents()
             board.setString(text, forType: .string)
+            return
         }
+        Task { @MainActor in
+            let board = NSPasteboard.general
+            board.clearContents()
+            if let data = await self.imageData(from: image) {
+                let jpeg = image.lowercased().contains(".jpg") || image.lowercased().contains("image/jpeg")
+                board.setData(data, forType: jpeg ? Self.jpegType : .png)
+            }
+            if !text.isEmpty {
+                board.setString(text, forType: .string)
+            }
+        }
+    }
+
+    private func imageData(from ref: String) async -> Data? {
+        if ref.hasPrefix("data:") {
+            guard let comma = ref.firstIndex(of: ",") else { return nil }
+            return Data(base64Encoded: String(ref[ref.index(after: comma)...]))
+        }
+        guard let url = absoluteURL(ref) else { return nil }
+        return try? await URLSession.shared.data(for: URLRequest(url: url)).0
+    }
+
+    private func absoluteURL(_ ref: String) -> URL? {
+        if ref.hasPrefix("http://") || ref.hasPrefix("https://") { return URL(string: ref) }
+        if ref.hasPrefix("/") { return URL(string: "http://127.0.0.1:\(AppConfig.port)\(ref)") }
+        return nil
     }
 
     private func nativePaste() {
