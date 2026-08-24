@@ -385,6 +385,9 @@ const MARKERS=[
   {c:'\u2705',    label:'Approved'}, {c:'\u26A0',    label:'Risk'},
   {c:'\u{1F3AF}', label:'Goal'},     {c:'\u{1F4CC}', label:'Pinned'},
   {c:'\u23F3',    label:'In progress'},
+  {c:'\u{1F511}', label:'Key takeaway'},
+  {c:'\u{1F48E}', label:'Finding'},
+  {c:'\u{1F3C1}', label:'Conclusion'},
 ];
 const NODE_COLORS=['#ffffff','#ffe2d6','#ffedc2','#dcefce','#cfe9e6','#d8e0fb','#efd9f2','#e9e2d6'];
 const PALETTE=['#e0613a','#2f6f6a','#c98a1a','#5a7d3a','#3a6ea5','#9b4f96','#8a8175'];
