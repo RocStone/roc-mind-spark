@@ -306,19 +306,85 @@ describe('paste image as a child of the selected node', () => {
     assert.equal(message, 'Could not read image');
   });
 
-  test('commitImageData stores the data-URL on the given node', () => {
+  test('commitImageData stores a filename on the given node', () => {
     const map = { rootId: 'root', nodes: nodes() };
     let laidOut = false;
+    let message = '';
     const { commitImageData } = loadFns(['commitImageData'], {
       map,
       MODE: 'server',
       pushHistory() {},
       render() {},
       autoLayout() { laidOut = true; },
-      toast() {},
+      toast(m) { message = m; },
     });
-    commitImageData('n1', 'data:image/jpeg;base64,xx');
-    assert.equal(map.nodes.n1.image, 'data:image/jpeg;base64,xx');
+    commitImageData('n1', '001.png');
+    assert.equal(map.nodes.n1.image, '001.png');
     assert.equal(laidOut, true);
+    assert.equal(message, 'Image saved as 001.png');
+  });
+
+  test('pasteImageAsChild with a saved filename does not put the image on the parent', () => {
+    const map = { rootId: 'root', nodes: nodes() };
+    const { pasteImageAsChild } = loadFns(
+      ['insertChildNode', 'resolveImagePasteParentId', 'beginImagePasteAsChild', 'pasteImageAsChild'],
+      {
+        READONLY: false,
+        map,
+        sel: 'n1',
+        NODE_COLORS: ['#ffffff', '#ffe2d6'],
+        uid: () => 'img1',
+        childrenOf: id => Object.values(map.nodes).filter(n => n.parent === id).map(n => n.id),
+        opLog() {},
+        commitOpenEdit() { return false; },
+        isAppTextField: () => false,
+        openClipboardTarget: () => null,
+        toast() {},
+        commitImageData(id, name) { map.nodes[id].image = name; },
+        readImageFile() { throw new Error('file path should not run'); },
+        readImageDataUrl() { throw new Error('data-url path should not run'); },
+      }
+    );
+    global.document = { activeElement: { tagName: 'BODY' }, querySelector: () => null };
+    assert.equal(pasteImageAsChild(null, null, '001.png'), true);
+    assert.equal(map.nodes.n1.image, undefined);
+    assert.equal(map.nodes.img1.image, '001.png');
+  });
+});
+
+describe('nodeImageSrc', () => {
+  const { nodeImageSrc } = loadFns(['nodeImageSrc']);
+
+  test('keeps data URLs and http URLs as-is', () => {
+    assert.equal(nodeImageSrc({ image: 'data:image/png;base64,xx' }), 'data:image/png;base64,xx');
+    assert.equal(nodeImageSrc({ image: 'https://example.com/a.png' }), 'https://example.com/a.png');
+  });
+
+  test('turns a filename into the map image URL', () => {
+    assert.equal(
+      nodeImageSrc({ image: '001.png' }, { id: 'abc' }),
+      '/api/maps/abc/images/001.png'
+    );
+  });
+});
+
+describe('image lightbox zoom / click-to-close', () => {
+  const { imageLightboxZoomAt, imageLightboxShouldCloseOnPointerUp } = loadFns([
+    'imageLightboxZoomAt',
+    'imageLightboxShouldCloseOnPointerUp',
+  ]);
+
+  test('zoom keeps the point under the cursor stable', () => {
+    const next = imageLightboxZoomAt({ scale: 1, x: 0, y: 0 }, 150, 50, 2, 200, 100);
+    assert.equal(next.scale, 2);
+    assert.equal(next.x, -50);
+    assert.equal(next.y, 0);
+  });
+
+  test('a click with no drag closes; a drag does not', () => {
+    assert.equal(imageLightboxShouldCloseOnPointerUp(0, 6), true);
+    assert.equal(imageLightboxShouldCloseOnPointerUp(5, 6), true);
+    assert.equal(imageLightboxShouldCloseOnPointerUp(6, 6), false);
+    assert.equal(imageLightboxShouldCloseOnPointerUp(40, 6), false);
   });
 });

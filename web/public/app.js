@@ -785,9 +785,10 @@ function render(){
     if(n.image){
       el.classList.add('has-image');
       const img=document.createElement('img');
-      img.className='node-image'; img.src=n.image; img.alt=n.imageAlt||'attachment';
+      const src=nodeImageSrc(n);
+      img.className='node-image'; img.src=src; img.alt=n.imageAlt||'attachment';
       img.addEventListener('mousedown',ev=>ev.stopPropagation());
-      img.addEventListener('dblclick',ev=>{ ev.stopPropagation(); window.open(n.image,'_blank'); });
+      img.addEventListener('dblclick',ev=>{ ev.stopPropagation(); openImageLightbox(src); });
       // If the image can't load, fall back to its alt text so the node isn't a broken icon
       img.addEventListener('error',()=>{
         img.remove(); el.classList.remove('has-image'); el.classList.add('img-missing');
@@ -4060,8 +4061,18 @@ function exportReferences(){
 }
 
 /* ============================================================
-   IMAGE ATTACHMENTS — stored as down-scaled data-URLs on the node
+   IMAGE ATTACHMENTS — files on disk, one folder per map
    ============================================================ */
+function nodeImageSrc(n, mapObj){
+  const src = n && n.image;
+  if(!src) return '';
+  if(/^(data:|blob:|https?:|\/\/)/i.test(src)) return src;
+  if(src.charAt(0)==='/') return src;
+  const mapId = (mapObj|| (typeof map!=='undefined' ? map : null));
+  const id = mapId && mapId.id;
+  if(!id) return src;
+  return '/api/maps/' + encodeURIComponent(id) + '/images/' + encodeURIComponent(src);
+}
 function attachImageToNode(id){
   const inp=document.createElement('input'); inp.type='file'; inp.accept='image/*';
   inp.onchange=()=>{ const f=inp.files[0]; if(f) readImageFile(f,id); };
@@ -4074,16 +4085,7 @@ function commitImageData(id, data){
   // its neighbours' positions were computed for the old, smaller size —
   // without a re-tidy the enlarged node overlaps them.
   pushHistory(); render(); autoLayout();
-  const kb=Math.round(data.length/1024);
-  toast(`Image attached (~${kb} KB)`+(kb>500 && MODE==='cloud'?' — large images slow cloud sync':''));
-}
-function downscaleImageToDataUrl(img, fallbackData){
-  const MAX=360;
-  let w=img.width,h=img.height;
-  if(w>MAX){ h=Math.round(h*MAX/w); w=MAX; }
-  const cv=document.createElement('canvas'); cv.width=w; cv.height=h;
-  cv.getContext('2d').drawImage(img,0,0,w,h);
-  try{ return cv.toDataURL('image/jpeg',0.82); }catch(e){ return fallbackData; }
+  toast(/^data:/i.test(data) ? 'Image attached' : 'Image saved as '+data);
 }
 function failImageAttach(id){
   toast('Could not read image');
@@ -4094,30 +4096,42 @@ function failImageAttach(id){
   delete map.nodes[id];
   if(sel===id) sel=parent||map.rootId;
 }
+function dataUrlToBlob(dataUrl){
+  const m = String(dataUrl||'').match(/^data:([^;]+);base64,(.+)$/);
+  if(!m) return null;
+  const bin = atob(m[2]);
+  const arr = new Uint8Array(bin.length);
+  for(let i=0;i<bin.length;i++) arr[i]=bin.charCodeAt(i);
+  return new Blob([arr], { type: m[1] });
+}
+async function uploadMapImage(blob, mime){
+  if(!map || !map.id) throw new Error('no map');
+  if(typeof fetch!=='function') throw new Error('no fetch');
+  const r = await fetch('/api/maps/' + encodeURIComponent(map.id) + '/images', {
+    method: 'POST',
+    headers: { 'Content-Type': mime || blob.type || 'application/octet-stream' },
+    body: blob
+  });
+  let j=null;
+  try{ j = await r.json(); }catch(_){ }
+  if(!r.ok || !j || !j.name) throw new Error((j && j.error) || 'upload failed');
+  return j.name;
+}
 function readImageFile(file,id){
-  if(!file.type.startsWith('image/')){ toast('Not an image file'); return; }
-  const reader=new FileReader();
-  reader.onload=()=>{
-    const img=new Image();
-    img.onload=()=>commitImageData(id, downscaleImageToDataUrl(img, reader.result));
-    img.onerror=()=>failImageAttach(id);
-    img.src=reader.result;
-  };
-  reader.onerror=()=>failImageAttach(id);
-  reader.readAsDataURL(file);
+  if(!file || !file.type || !file.type.startsWith('image/')){ toast('Not an image file'); return; }
+  Promise.resolve(uploadMapImage(file, file.type)).then(
+    name => commitImageData(id, name),
+    () => failImageAttach(id)
+  );
 }
 function readImageDataUrl(dataUrl,id){
   if(!dataUrl || !map || !map.nodes[id]) return;
-  // Native paste already down-scales to a JPEG data-URL. Attach it as-is so
-  // the WK bridge does not also need a live Image() decode.
-  if(/^data:image\/(jpeg|jpg|png|gif|webp);base64,/i.test(dataUrl)){
-    commitImageData(id, dataUrl);
-    return;
-  }
-  const img=new Image();
-  img.onload=()=>commitImageData(id, downscaleImageToDataUrl(img, dataUrl));
-  img.onerror=()=>failImageAttach(id);
-  img.src=dataUrl;
+  const blob = dataUrlToBlob(dataUrl);
+  if(!blob){ failImageAttach(id); return; }
+  Promise.resolve(uploadMapImage(blob, blob.type)).then(
+    name => commitImageData(id, name),
+    () => failImageAttach(id)
+  );
 }
 function resolveImagePasteParentId(state){
   const editingId = state && Object.prototype.hasOwnProperty.call(state, 'editingId')
@@ -4142,7 +4156,7 @@ function beginImagePasteAsChild(parentId){
   sel=id;
   return id;
 }
-function pasteImageAsChild(file, dataUrl){
+function pasteImageAsChild(file, dataUrl, fileName){
   if(typeof READONLY!=='undefined' && READONLY) return false;
   if(typeof document!=='undefined' && typeof isAppTextField==='function' && isAppTextField(document.activeElement)
      && !(typeof openClipboardTarget==='function' && openClipboardTarget())) return false;
@@ -4150,7 +4164,8 @@ function pasteImageAsChild(file, dataUrl){
   if(!parentId){ toast('Select a topic first, then paste the image'); return false; }
   const id=beginImagePasteAsChild(parentId);
   if(!id) return false;
-  if(file) readImageFile(file, id);
+  if(fileName) commitImageData(id, fileName);
+  else if(file) readImageFile(file, id);
   else if(dataUrl) readImageDataUrl(dataUrl, id);
   else return false;
   return true;
@@ -4161,9 +4176,8 @@ function pasteImageAsChild(file, dataUrl){
    Paste (Cmd+V / Edit → Paste) creates a child of the selected node
    and puts the image on that child.
 
-   Both paths funnel into readImageFile() / readImageDataUrl() above, so
-   the down-scale, size warning and cloud-sync caveat are shared rather
-   than reimplemented.
+   Both paths save the original file into the map's image folder and
+   store only the filename on the node.
 
    Note these use the HTML5 drag events (dragover/drop), which are a
    completely separate channel from the mousedown/mousemove dragging
@@ -4251,6 +4265,115 @@ function handleImagePasteEvent(e){
   return true;
 }
 window.addEventListener('paste', handleImagePasteEvent);
+
+/* ------------------------------------------------------------
+   Fullscreen image viewer — double-click a node image.
+   Wheel zooms, drag pans, a click with no drag or Escape closes.
+   ------------------------------------------------------------ */
+const IMAGE_LIGHTBOX_CLICK_PX = 6;
+let _imgLb = { open:false, scale:1, x:0, y:0, ptr:null, moved:0 };
+function imageLightboxZoomAt(state, clientX, clientY, nextScale, vw, vh){
+  const scale = Math.min(16, Math.max(0.05, nextScale));
+  const cx = clientX - vw/2;
+  const cy = clientY - vh/2;
+  const k = scale / (state.scale || 1);
+  return { scale, x: cx - (cx - (state.x||0)) * k, y: cy - (cy - (state.y||0)) * k };
+}
+function imageLightboxShouldCloseOnPointerUp(movedPx, threshold){
+  return (movedPx||0) < (threshold==null ? IMAGE_LIGHTBOX_CLICK_PX : threshold);
+}
+function isImageLightboxOpen(){
+  return !!(_imgLb && _imgLb.open);
+}
+function applyImageLightboxTransform(){
+  const img = typeof document!=='undefined' && document.getElementById && document.getElementById('imgLightboxPic');
+  if(!img) return;
+  img.style.transform = 'translate('+_imgLb.x+'px,'+_imgLb.y+'px) scale('+_imgLb.scale+')';
+}
+function closeImageLightbox(){
+  const box = typeof document!=='undefined' && document.getElementById && document.getElementById('imgLightbox');
+  if(box) box.hidden = true;
+  if(box && box.classList) box.classList.remove('dragging');
+  _imgLb.open = false;
+  _imgLb.ptr = null;
+  _imgLb.moved = 0;
+}
+function openImageLightbox(src){
+  if(!src || typeof document==='undefined') return;
+  const box = document.getElementById('imgLightbox');
+  const img = document.getElementById('imgLightboxPic');
+  if(!box || !img) return;
+  img.style.transform = 'none';
+  img.onload = ()=>{
+    const vw = window.innerWidth || 1;
+    const vh = window.innerHeight || 1;
+    const nw = img.naturalWidth || 1;
+    const nh = img.naturalHeight || 1;
+    _imgLb.scale = Math.min(1, (vw*0.92)/nw, (vh*0.92)/nh);
+    _imgLb.x = 0; _imgLb.y = 0;
+    applyImageLightboxTransform();
+  };
+  img.src = src;
+  box.hidden = false;
+  _imgLb.open = true;
+  _imgLb.ptr = null;
+  _imgLb.moved = 0;
+}
+function armImageLightbox(){
+  if(typeof document==='undefined') return;
+  const box = document.getElementById('imgLightbox');
+  const img = document.getElementById('imgLightboxPic');
+  if(!box || !img || box.dataset.armed) return;
+  box.dataset.armed = '1';
+  img.addEventListener('dragstart', e=>e.preventDefault());
+  box.addEventListener('wheel', e=>{
+    if(!_imgLb.open) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const factor = e.deltaY > 0 ? 0.9 : 1.1;
+    const next = imageLightboxZoomAt(_imgLb, e.clientX, e.clientY, _imgLb.scale * factor, window.innerWidth, window.innerHeight);
+    _imgLb.scale = next.scale; _imgLb.x = next.x; _imgLb.y = next.y;
+    applyImageLightboxTransform();
+  }, { passive:false });
+  box.addEventListener('pointerdown', e=>{
+    if(!_imgLb.open) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if(e.target !== img){ closeImageLightbox(); return; }
+    _imgLb.ptr = { x:e.clientX, y:e.clientY };
+    _imgLb.moved = 0;
+    try{ img.setPointerCapture(e.pointerId); }catch(_){}
+  });
+  box.addEventListener('pointermove', e=>{
+    if(!_imgLb.open || !_imgLb.ptr) return;
+    const dx = e.clientX - _imgLb.ptr.x;
+    const dy = e.clientY - _imgLb.ptr.y;
+    _imgLb.ptr = { x:e.clientX, y:e.clientY };
+    _imgLb.moved += Math.hypot(dx, dy);
+    if(_imgLb.moved >= IMAGE_LIGHTBOX_CLICK_PX){
+      _imgLb.x += dx; _imgLb.y += dy;
+      box.classList.add('dragging');
+      applyImageLightboxTransform();
+    }
+  });
+  const endPtr = e=>{
+    if(!_imgLb.open) return;
+    const moved = _imgLb.moved;
+    _imgLb.ptr = null;
+    box.classList.remove('dragging');
+    if(e && e.target === img && imageLightboxShouldCloseOnPointerUp(moved)) closeImageLightbox();
+  };
+  box.addEventListener('pointerup', endPtr);
+  box.addEventListener('pointercancel', endPtr);
+}
+if(typeof document!=='undefined' && document.addEventListener){
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', armImageLightbox);
+  else armImageLightbox();
+  window.addEventListener('keydown', e=>{
+    if(!_imgLb.open) return;
+    if(e.key==='Escape'){ e.preventDefault(); e.stopPropagation(); closeImageLightbox(); }
+  }, true);
+}
 
 /* ============================================================
    SEARCH ACROSS ALL MAPS
@@ -5017,6 +5140,12 @@ function rmsClipboardPasteImage(dataUrl){
   if(!str) return false;
   return pasteImageAsChild(null, str);
 }
+function rmsClipboardPasteImageFile(name){
+  if(typeof READONLY !== 'undefined' && READONLY) return false;
+  const fileName = String(name == null ? '' : name);
+  if(!fileName) return false;
+  return pasteImageAsChild(null, null, fileName);
+}
 function rmsClipboardPaste(text){
   if(typeof READONLY !== 'undefined' && READONLY) return false;
   const str = String(text == null ? '' : text);
@@ -5065,6 +5194,7 @@ if(typeof window !== 'undefined'){
   window.__rmsClipboardCut = rmsClipboardCut;
   window.__rmsClipboardPaste = rmsClipboardPaste;
   window.__rmsClipboardPasteImage = rmsClipboardPasteImage;
+  window.__rmsClipboardPasteImageFile = rmsClipboardPasteImageFile;
   window.__rmsClipboardSelectAll = rmsClipboardSelectAll;
   window.__rmsClipboardUndo = rmsClipboardUndo;
   window.__rmsClipboardRedo = rmsClipboardRedo;
@@ -6404,6 +6534,10 @@ window.addEventListener('keydown', e=>{
 }, true);
 
 window.addEventListener('keydown',e=>{
+  if(isImageLightboxOpen()){
+    if(e.key==='Escape'){ e.preventDefault(); e.stopPropagation(); closeImageLightbox(); }
+    return;
+  }
   if(clipboardEditAction(e)) return;
   if(['INPUT','TEXTAREA'].includes(e.target.tagName)||e.target.isContentEditable||document.querySelector('.node.editing')) return;
   if(isImeEvent(e)) return;
@@ -7017,6 +7151,12 @@ async function duplicateMap(id){
   copy.titleAuto = false;
   copy.updated = Date.now();
   await Store.save(copy);
+  try{
+    await fetch('/api/maps/'+encodeURIComponent(copy.id)+'/images/duplicate', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ from: id })
+    });
+  }catch(_){}
   await loadMap(copy.id);
   refreshList();
   toast('Map duplicated');
@@ -9291,7 +9431,7 @@ async function exportPNG(){
     img.src=src;
   });
   const imgMap={};
-  await Promise.all(ids.filter(i=>map.nodes[i].image).map(async i=>{ imgMap[i]=await loadImg(map.nodes[i].image); }));
+  await Promise.all(ids.filter(i=>map.nodes[i].image).map(async i=>{ imgMap[i]=await loadImg(nodeImageSrc(map.nodes[i])); }));
 
   // Favicons for link nodes, so the export matches what the live canvas shows.
   // crossOrigin='anonymous' is the whole safety story here: favicons come from

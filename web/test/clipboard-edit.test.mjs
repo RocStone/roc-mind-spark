@@ -354,5 +354,6 @@ describe('rmsClipboardPasteImage — native shell image paste', () => {
   test('window.__rmsClipboardPasteImage is the native image entry', () => {
     const src = readFileSync(join(here, '..', 'public', 'app.js'), 'utf8');
     assert.match(src, /window\.__rmsClipboardPasteImage\s*=\s*rmsClipboardPasteImage/);
+    assert.match(src, /window\.__rmsClipboardPasteImageFile\s*=\s*rmsClipboardPasteImageFile/);
   });
 });

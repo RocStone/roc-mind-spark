@@ -1601,6 +1601,20 @@
   }
   .node.has-image{ max-width:400px; }
   .node.has-image .node-text:empty{ display:none; }
+  .img-lightbox{
+    position:fixed; inset:0; z-index:20000;
+    background:rgba(18,16,14,.88);
+    display:flex; align-items:center; justify-content:center;
+    overflow:hidden; cursor:zoom-out;
+  }
+  .img-lightbox[hidden]{ display:none !important; }
+  .img-lightbox img{
+    max-width:none; max-height:none;
+    transform-origin:center center;
+    user-select:none; -webkit-user-drag:none;
+    cursor:grab; will-change:transform;
+  }
+  .img-lightbox.dragging img{ cursor:grabbing; }
   /* Marker badge — sits beside the task checkbox and uses the same
      flex-shrink:0 / vertical-align treatment so the two line up when a node
      has both. font-size is nudged up because emoji render smaller than

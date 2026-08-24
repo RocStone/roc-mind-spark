@@ -874,8 +874,8 @@ private final class MapWebView: WKWebView {
     }
 
     private func nativePaste() {
-        if let image = pasteboardImage(), let dataURL = jpegDataURL(from: image) {
-            evaluateJavaScript("window.__rmsClipboardPasteImage&&window.__rmsClipboardPasteImage(\(Self.jsonString(dataURL)))")
+        if let payload = pasteboardImagePayload() {
+            pasteImage(payload)
             return
         }
         let text = NSPasteboard.general.string(forType: .string) ?? ""
@@ -883,85 +883,107 @@ private final class MapWebView: WKWebView {
         evaluateJavaScript("window.__rmsClipboardPaste&&window.__rmsClipboardPaste(\(Self.jsonString(text)))")
     }
 
-    private static let imagePasteTypes: Set<NSPasteboard.PasteboardType> = [
-        .png,
-        .tiff,
-        NSPasteboard.PasteboardType("public.jpeg"),
-        NSPasteboard.PasteboardType("public.jpg"),
-        NSPasteboard.PasteboardType("public.heic"),
-        NSPasteboard.PasteboardType("public.heif"),
-        NSPasteboard.PasteboardType("public.webp"),
-        NSPasteboard.PasteboardType("public.gif"),
-        NSPasteboard.PasteboardType("com.compuserve.gif"),
-    ]
+    private struct PasteImage {
+        let data: Data
+        let mime: String
+    }
+
+    private static let jpegType = NSPasteboard.PasteboardType("public.jpeg")
+    private static let gifType = NSPasteboard.PasteboardType("public.gif")
+    private static let webpType = NSPasteboard.PasteboardType("public.webp")
 
     private static let imageFileExtensions: Set<String> = [
         "png", "jpg", "jpeg", "gif", "webp", "heic", "heif", "tif", "tiff", "bmp",
     ]
 
-    private func pasteboardImage() -> NSImage? {
+    private func pasteboardImagePayload() -> PasteImage? {
         let board = NSPasteboard.general
-        let types = Set(board.types ?? [])
-        if !types.isDisjoint(with: Self.imagePasteTypes),
-           let image = NSImage(pasteboard: board),
-           image.size.width > 0,
-           image.size.height > 0 {
-            return image
+        if let png = board.data(forType: .png), png.count > 32 {
+            return PasteImage(data: png, mime: "image/png")
+        }
+        if let jpeg = board.data(forType: Self.jpegType), jpeg.count > 32 {
+            return PasteImage(data: jpeg, mime: "image/jpeg")
+        }
+        if let gif = board.data(forType: Self.gifType), gif.count > 32 {
+            return PasteImage(data: gif, mime: "image/gif")
+        }
+        if let webp = board.data(forType: Self.webpType), webp.count > 32 {
+            return PasteImage(data: webp, mime: "image/webp")
         }
         if let urls = board.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) {
             for case let url as URL in urls {
-                guard Self.imageFileExtensions.contains(url.pathExtension.lowercased()) else { continue }
-                if let image = NSImage(contentsOf: url), image.size.width > 0, image.size.height > 0 {
-                    return image
+                let ext = url.pathExtension.lowercased()
+                guard Self.imageFileExtensions.contains(ext) else { continue }
+                if ["heic", "heif", "tif", "tiff", "bmp"].contains(ext),
+                   let image = NSImage(contentsOf: url),
+                   let png = Self.pngData(from: image) {
+                    return PasteImage(data: png, mime: "image/png")
                 }
+                guard let data = try? Data(contentsOf: url), data.count > 32 else { continue }
+                return PasteImage(data: data, mime: Self.mime(for: ext))
             }
+        }
+        if let tiff = board.data(forType: .tiff),
+           let image = NSImage(data: tiff),
+           let png = Self.pngData(from: image) {
+            return PasteImage(data: png, mime: "image/png")
         }
         return nil
     }
 
-    /// Match `readImageFile()`: cap width at 360px, JPEG quality 0.82, so the
-    /// WK script argument stays small enough to evaluate.
-    private func jpegDataURL(from image: NSImage, maxWidth: CGFloat = 360, quality: CGFloat = 0.82) -> String? {
-        guard let tiff = image.tiffRepresentation, let src = NSBitmapImageRep(data: tiff) else { return nil }
-        let pw = CGFloat(src.pixelsWide)
-        let ph = CGFloat(src.pixelsHigh)
-        guard pw > 1, ph > 1 else { return nil }
-        var w = pw
-        var h = ph
-        if w > maxWidth {
-            h = (h * maxWidth / w).rounded()
-            w = maxWidth
+    private static func mime(for ext: String) -> String {
+        switch ext {
+        case "jpg", "jpeg": return "image/jpeg"
+        case "gif": return "image/gif"
+        case "webp": return "image/webp"
+        default: return "image/png"
         }
-        let iw = max(1, Int(w))
-        let ih = max(1, Int(h))
-        guard let dest = NSBitmapImageRep(
-            bitmapDataPlanes: nil,
-            pixelsWide: iw,
-            pixelsHigh: ih,
-            bitsPerSample: 8,
-            samplesPerPixel: 4,
-            hasAlpha: true,
-            isPlanar: false,
-            colorSpaceName: .deviceRGB,
-            bytesPerRow: 0,
-            bitsPerPixel: 0
-        ) else { return nil }
-        dest.size = NSSize(width: iw, height: ih)
-        NSGraphicsContext.saveGraphicsState()
-        defer { NSGraphicsContext.restoreGraphicsState() }
-        guard let ctx = NSGraphicsContext(bitmapImageRep: dest) else { return nil }
-        NSGraphicsContext.current = ctx
-        ctx.imageInterpolation = .high
-        NSColor.white.setFill()
-        NSRect(x: 0, y: 0, width: iw, height: ih).fill()
-        image.draw(
-            in: NSRect(x: 0, y: 0, width: iw, height: ih),
-            from: NSRect(origin: .zero, size: image.size),
-            operation: .sourceOver,
-            fraction: 1
-        )
-        guard let jpeg = dest.representation(using: .jpeg, properties: [.compressionFactor: quality]) else { return nil }
-        return "data:image/jpeg;base64,\(jpeg.base64EncodedString())"
+    }
+
+    private static func pngData(from image: NSImage) -> Data? {
+        guard let tiff = image.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff) else { return nil }
+        return rep.representation(using: .png, properties: [:])
+    }
+
+    private func pasteImage(_ payload: PasteImage) {
+        evaluateJavaScript("(window.map&&window.map.id)||''") { [weak self] result, _ in
+            guard let self else { return }
+            let mapId = result as? String ?? ""
+            Task { @MainActor in
+                if !mapId.isEmpty, let name = try? await self.uploadMapImage(mapId: mapId, payload: payload) {
+                    _ = try? await self.evaluateJavaScript(
+                        "window.__rmsClipboardPasteImageFile&&window.__rmsClipboardPasteImageFile(\(Self.jsonString(name)))"
+                    )
+                    return
+                }
+                let dataURL = "data:\(payload.mime);base64,\(payload.data.base64EncodedString())"
+                _ = try? await self.evaluateJavaScript(
+                    "window.__rmsClipboardPasteImage&&window.__rmsClipboardPasteImage(\(Self.jsonString(dataURL)))"
+                )
+            }
+        }
+    }
+
+    private func uploadMapImage(mapId: String, payload: PasteImage) async throws -> String {
+        guard let url = URL(string: "http://127.0.0.1:\(AppConfig.port)/api/maps/\(mapId)/images") else {
+            throw URLError(.badURL)
+        }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue(payload.mime, forHTTPHeaderField: "Content-Type")
+        req.httpBody = payload.data
+        req.timeoutInterval = 30
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        guard let http = resp as? HTTPURLResponse, (200 ..< 300).contains(http.statusCode) else {
+            throw URLError(.badServerResponse)
+        }
+        guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let name = obj["name"] as? String,
+              !name.isEmpty
+        else {
+            throw URLError(.cannotParseResponse)
+        }
+        return name
     }
 
     private static func jsonString(_ text: String) -> String {

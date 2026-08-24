@@ -30,6 +30,7 @@ rsync -a \
   --exclude 'package-lock.json' \
   "$ROOT/web/server.js" "$CONTENTS/Resources/web/server.js"
 cp "$ROOT/web/ops-log.js" "$CONTENTS/Resources/web/ops-log.js"
+cp "$ROOT/web/map-images.js" "$CONTENTS/Resources/web/map-images.js"
 rsync -a "$ROOT/web/public/" "$CONTENTS/Resources/web/public/"
 
 if [[ -f "$ROOT/web/public/icon-512.png" ]]; then

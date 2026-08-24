@@ -19,6 +19,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { DatabaseSync } = require('node:sqlite');
 const opsLog = require('./ops-log');
+const mapImages = require('./map-images');
 
 const PORT = process.env.PORT || 3000;
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'data', 'mindspark.db');
@@ -130,7 +131,8 @@ function buildMapFromSpec(spec) {
 
 // ---- tiny helpers --------------------------------------------------------
 const MIME = { '.html':'text/html', '.js':'text/javascript', '.css':'text/css',
-  '.json':'application/json', '.svg':'image/svg+xml', '.png':'image/png', '.ico':'image/x-icon',
+  '.json':'application/json', '.svg':'image/svg+xml', '.png':'image/png', '.jpg':'image/jpeg',
+  '.jpeg':'image/jpeg', '.gif':'image/gif', '.webp':'image/webp', '.ico':'image/x-icon',
   '.webmanifest':'application/manifest+json' };
 const send = (res, code, body, type='application/json') => {
   res.writeHead(code, { 'Content-Type': type });
@@ -140,6 +142,17 @@ const readBody = (req) => new Promise((resolve, reject) => {
   let d = '';
   req.on('data', c => { d += c; if (d.length > 8e6) { req.destroy(); reject(new Error('payload too large')); } });
   req.on('end', () => { try { resolve(d ? JSON.parse(d) : {}); } catch (e) { reject(e); } });
+  req.on('error', reject);
+});
+const readRaw = (req, limit) => new Promise((resolve, reject) => {
+  const chunks = [];
+  let n = 0;
+  req.on('data', c => {
+    n += c.length;
+    if (n > limit) { req.destroy(); reject(new Error('payload too large')); return; }
+    chunks.push(c);
+  });
+  req.on('end', () => resolve(Buffer.concat(chunks)));
   req.on('error', reject);
 });
 
@@ -202,7 +215,42 @@ const server = http.createServer(async (req, res) => {
         const m = await readBody(req); m.id = id; upsert(m);
         return send(res, 200, { ok: true, id });
       }
-      if (req.method === 'DELETE') { Q.del.run(id); Q.vDelAll.run(id); res.writeHead(204); return res.end(); }
+      if (req.method === 'DELETE') {
+        Q.del.run(id); Q.vDelAll.run(id);
+        mapImages.deleteMapImages(DB_PATH, id);
+        res.writeHead(204); return res.end();
+      }
+    }
+
+    const imgDup = p.match(/^\/api\/maps\/([\w-]+)\/images\/duplicate$/);
+    if (imgDup && req.method === 'POST') {
+      const body = await readBody(req);
+      const from = body && body.from;
+      try {
+        const result = mapImages.copyMapImages(DB_PATH, from, imgDup[1]);
+        return send(res, 200, { ok: true, copied: result.copied });
+      } catch (e) {
+        return send(res, 400, { error: String(e && e.message || e) });
+      }
+    }
+
+    const imgPost = p.match(/^\/api\/maps\/([\w-]+)\/images$/);
+    if (imgPost && req.method === 'POST') {
+      const buf = await readRaw(req, mapImages.MAX_IMAGE_BYTES);
+      try {
+        const saved = mapImages.saveMapImage(DB_PATH, imgPost[1], buf, req.headers['content-type']);
+        return send(res, 201, { ok: true, name: saved.name });
+      } catch (e) {
+        return send(res, 400, { error: String(e && e.message || e) });
+      }
+    }
+
+    const imgGet = p.match(/^\/api\/maps\/([\w-]+)\/images\/([^/]+)$/);
+    if (imgGet && req.method === 'GET') {
+      const file = mapImages.readMapImage(DB_PATH, imgGet[1], decodeURIComponent(imgGet[2]));
+      if (!file) return send(res, 404, { error: 'not found' });
+      res.setHeader('Cache-Control', 'private, max-age=31536000, immutable');
+      return send(res, 200, file.buf, file.mime);
     }
 
     // ----- version history -----
