@@ -4393,7 +4393,11 @@ function armImageLightbox(){
     if(!_imgLb.open) return;
     e.preventDefault();
     e.stopPropagation();
-    const factor = e.deltaY > 0 ? 0.9 : 1.1;
+    const speed = typeof wheelSpeed!=='undefined' ? wheelSpeed : 40;
+    const factor = typeof wheelZoomFactor==='function'
+      ? wheelZoomFactor(e.deltaY, speed)
+      : (e.deltaY > 0 ? 0.9 : 1.1);
+    if(factor===1) return;
     const next = imageLightboxZoomAt(_imgLb, e.clientX, e.clientY, _imgLb.scale * factor, window.innerWidth, window.innerHeight);
     _imgLb.scale = next.scale; _imgLb.x = next.x; _imgLb.y = next.y;
     applyImageLightboxTransform();

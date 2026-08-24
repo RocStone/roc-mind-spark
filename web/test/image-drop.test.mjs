@@ -5,7 +5,12 @@
 // empty canvas or on a node that no longer exists).
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { loadFns } from './helpers/load-app-fns.mjs';
+
+const here = dirname(fileURLToPath(import.meta.url));
 
 // No jsdom: this project has zero runtime dependencies and CI deliberately
 // runs no `npm ci`, so the tests must not need an install either. These two
@@ -442,6 +447,14 @@ describe('image lightbox zoom / click-to-close', () => {
     assert.equal(next.scale, 2);
     assert.equal(next.x, -50);
     assert.equal(next.y, 0);
+  });
+
+  test('the viewer wheel uses the same speed curve as the canvas', () => {
+    const src = readFileSync(join(here, '..', 'public', 'app.js'), 'utf8');
+    assert.match(src, /wheelZoomFactor\(e\.deltaY,\s*speed\)/);
+    const css = readFileSync(join(here, '..', 'public', 'styles.css'), 'utf8');
+    assert.match(css, /\.node\s+\.node-image\{[^}]*max-width:\s*360px/);
+    assert.match(css, /\.node\.has-image\{\s*max-width:\s*390px/);
   });
 
   test('a click with no drag closes; a drag does not', () => {
