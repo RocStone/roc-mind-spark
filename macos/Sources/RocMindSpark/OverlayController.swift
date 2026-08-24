@@ -944,37 +944,52 @@ private final class MapWebView: WKWebView {
 
     private func pasteboardImagePayload() -> PasteImage? {
         let board = NSPasteboard.general
-        if let png = board.data(forType: .png), png.count > 32 {
-            return PasteImage(data: png, mime: "image/png")
+        var best: (data: Data, mime: String, pixels: Int)?
+
+        func consider(_ data: Data?, mime: String) {
+            guard let data, data.count > 32 else { return }
+            let pixels: Int
+            if let rep = NSBitmapImageRep(data: data) {
+                pixels = max(0, rep.pixelsWide * rep.pixelsHigh)
+            } else {
+                pixels = 0
+            }
+            if pixels > (best?.pixels ?? -1) || (pixels == (best?.pixels ?? -1) && data.count > (best?.data.count ?? 0)) {
+                best = (data, mime, pixels)
+            }
         }
-        if let jpeg = board.data(forType: Self.jpegType), jpeg.count > 32 {
-            return PasteImage(data: jpeg, mime: "image/jpeg")
+
+        consider(board.data(forType: .png), mime: "image/png")
+        consider(board.data(forType: Self.jpegType), mime: "image/jpeg")
+        consider(board.data(forType: Self.gifType), mime: "image/gif")
+        consider(board.data(forType: Self.webpType), mime: "image/webp")
+        if let tiff = board.data(forType: .tiff), let png = Self.pngData(from: tiff) {
+            consider(png, mime: "image/png")
         }
-        if let gif = board.data(forType: Self.gifType), gif.count > 32 {
-            return PasteImage(data: gif, mime: "image/gif")
-        }
-        if let webp = board.data(forType: Self.webpType), webp.count > 32 {
-            return PasteImage(data: webp, mime: "image/webp")
+        if let image = NSImage(pasteboard: board) {
+            for rep in image.representations {
+                guard let bitmap = rep as? NSBitmapImageRep,
+                      let png = bitmap.representation(using: .png, properties: [:]) else { continue }
+                consider(png, mime: "image/png")
+            }
         }
         if let urls = board.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) {
             for case let url as URL in urls {
                 let ext = url.pathExtension.lowercased()
                 guard Self.imageFileExtensions.contains(ext) else { continue }
-                if ["heic", "heif", "tif", "tiff", "bmp"].contains(ext),
-                   let image = NSImage(contentsOf: url),
-                   let png = Self.pngData(from: image) {
-                    return PasteImage(data: png, mime: "image/png")
+                if ["heic", "heif", "tif", "tiff", "bmp"].contains(ext) {
+                    if let data = try? Data(contentsOf: url), let png = Self.pngData(from: data) {
+                        consider(png, mime: "image/png")
+                    } else if let image = NSImage(contentsOf: url), let png = Self.pngData(from: image) {
+                        consider(png, mime: "image/png")
+                    }
+                    continue
                 }
-                guard let data = try? Data(contentsOf: url), data.count > 32 else { continue }
-                return PasteImage(data: data, mime: Self.mime(for: ext))
+                consider(try? Data(contentsOf: url), mime: Self.mime(for: ext))
             }
         }
-        if let tiff = board.data(forType: .tiff),
-           let image = NSImage(data: tiff),
-           let png = Self.pngData(from: image) {
-            return PasteImage(data: png, mime: "image/png")
-        }
-        return nil
+        guard let best else { return nil }
+        return PasteImage(data: best.data, mime: best.mime)
     }
 
     private static func mime(for ext: String) -> String {
@@ -987,7 +1002,20 @@ private final class MapWebView: WKWebView {
     }
 
     private static func pngData(from image: NSImage) -> Data? {
-        guard let tiff = image.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff) else { return nil }
+        var best: NSBitmapImageRep?
+        for rep in image.representations {
+            guard let bitmap = rep as? NSBitmapImageRep else { continue }
+            if best == nil || bitmap.pixelsWide * bitmap.pixelsHigh > best!.pixelsWide * best!.pixelsHigh {
+                best = bitmap
+            }
+        }
+        if let best, let png = best.representation(using: .png, properties: [:]) { return png }
+        guard let tiff = image.tiffRepresentation else { return nil }
+        return pngData(from: tiff)
+    }
+
+    private static func pngData(from data: Data) -> Data? {
+        guard let rep = NSBitmapImageRep(data: data) else { return nil }
         return rep.representation(using: .png, properties: [:])
     }
 
