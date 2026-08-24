@@ -437,9 +437,10 @@ describe('nodeImageSrc', () => {
 });
 
 describe('image lightbox zoom / click-to-close', () => {
-  const { imageLightboxZoomAt, imageLightboxShouldCloseOnPointerUp } = loadFns([
+  const { imageLightboxZoomAt, imageLightboxShouldCloseOnPointerUp, imageLightboxClickCloseAllowed } = loadFns([
     'imageLightboxZoomAt',
     'imageLightboxShouldCloseOnPointerUp',
+    'imageLightboxClickCloseAllowed',
   ]);
 
   test('zoom keeps the point under the cursor stable', () => {
@@ -455,6 +456,12 @@ describe('image lightbox zoom / click-to-close', () => {
     const css = readFileSync(join(here, '..', 'public', 'styles.css'), 'utf8');
     assert.match(css, /\.node\s+\.node-image\{[^}]*max-width:\s*360px/);
     assert.match(css, /\.node\.has-image\{\s*max-width:\s*390px/);
+  });
+
+  test('a click cannot close the viewer in the first second', () => {
+    assert.equal(imageLightboxClickCloseAllowed(1000, 1000, 1000), false);
+    assert.equal(imageLightboxClickCloseAllowed(1999, 1000, 1000), false);
+    assert.equal(imageLightboxClickCloseAllowed(2000, 1000, 1000), true);
   });
 
   test('a click with no drag closes; a drag does not', () => {

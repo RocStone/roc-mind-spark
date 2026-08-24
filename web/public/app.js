@@ -385,9 +385,7 @@ const MARKERS=[
   {c:'\u2705',    label:'Approved'}, {c:'\u26A0',    label:'Risk'},
   {c:'\u{1F3AF}', label:'Goal'},     {c:'\u{1F4CC}', label:'Pinned'},
   {c:'\u23F3',    label:'In progress'},
-  {c:'\u{1F511}', label:'Key takeaway'},
   {c:'\u{1F48E}', label:'Finding'},
-  {c:'\u{1F3C1}', label:'Conclusion'},
 ];
 const NODE_COLORS=['#ffffff','#ffe2d6','#ffedc2','#dcefce','#cfe9e6','#d8e0fb','#efd9f2','#e9e2d6'];
 const PALETTE=['#e0613a','#2f6f6a','#c98a1a','#5a7d3a','#3a6ea5','#9b4f96','#8a8175'];
@@ -4337,7 +4335,8 @@ window.addEventListener('paste', handleImagePasteEvent);
    Wheel zooms, drag pans, a click with no drag or Escape closes.
    ------------------------------------------------------------ */
 const IMAGE_LIGHTBOX_CLICK_PX = 6;
-let _imgLb = { open:false, scale:1, x:0, y:0, ptr:null, moved:0 };
+const IMAGE_LIGHTBOX_CLICK_GUARD_MS = 1000;
+let _imgLb = { open:false, scale:1, x:0, y:0, ptr:null, moved:0, openedAt:0 };
 function imageLightboxZoomAt(state, clientX, clientY, nextScale, vw, vh){
   const scale = Math.min(16, Math.max(0.05, nextScale));
   const cx = clientX - vw/2;
@@ -4347,6 +4346,11 @@ function imageLightboxZoomAt(state, clientX, clientY, nextScale, vw, vh){
 }
 function imageLightboxShouldCloseOnPointerUp(movedPx, threshold){
   return (movedPx||0) < (threshold==null ? IMAGE_LIGHTBOX_CLICK_PX : threshold);
+}
+function imageLightboxClickCloseAllowed(now, openedAt, guardMs){
+  const start = openedAt||0;
+  const guard = guardMs==null ? IMAGE_LIGHTBOX_CLICK_GUARD_MS : guardMs;
+  return (now||0) - start >= guard;
 }
 function isImageLightboxOpen(){
   return !!(_imgLb && _imgLb.open);
@@ -4384,6 +4388,7 @@ function openImageLightbox(src){
   _imgLb.open = true;
   _imgLb.ptr = null;
   _imgLb.moved = 0;
+  _imgLb.openedAt = Date.now();
 }
 function armImageLightbox(){
   if(typeof document==='undefined') return;
@@ -4409,7 +4414,10 @@ function armImageLightbox(){
     if(!_imgLb.open) return;
     e.preventDefault();
     e.stopPropagation();
-    if(e.target !== img){ closeImageLightbox(); return; }
+    if(e.target !== img){
+      if(imageLightboxClickCloseAllowed(Date.now(), _imgLb.openedAt)) closeImageLightbox();
+      return;
+    }
     _imgLb.ptr = { x:e.clientX, y:e.clientY };
     _imgLb.moved = 0;
     try{ img.setPointerCapture(e.pointerId); }catch(_){}
@@ -4431,7 +4439,8 @@ function armImageLightbox(){
     const moved = _imgLb.moved;
     _imgLb.ptr = null;
     box.classList.remove('dragging');
-    if(e && e.target === img && imageLightboxShouldCloseOnPointerUp(moved)) closeImageLightbox();
+    if(e && e.target === img && imageLightboxShouldCloseOnPointerUp(moved)
+       && imageLightboxClickCloseAllowed(Date.now(), _imgLb.openedAt)) closeImageLightbox();
   };
   box.addEventListener('pointerup', endPtr);
   box.addEventListener('pointercancel', endPtr);

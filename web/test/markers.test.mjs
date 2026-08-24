@@ -52,13 +52,11 @@ describe('MARKERS palette', () => {
     assert.equal(hourglass.c, '\u23F3');
   });
 
-  test('offers three conclusion markers to choose from', () => {
-    const key = MARKERS.find(m => m.label === 'Key takeaway');
+  test('keeps Finding as the conclusion marker', () => {
     const finding = MARKERS.find(m => m.label === 'Finding');
-    const conclusion = MARKERS.find(m => m.label === 'Conclusion');
-    assert.equal(key && key.c, '\u{1F511}');
     assert.equal(finding && finding.c, '\u{1F48E}');
-    assert.equal(conclusion && conclusion.c, '\u{1F3C1}');
+    assert.equal(MARKERS.some(m => m.label === 'Key takeaway'), false);
+    assert.equal(MARKERS.some(m => m.label === 'Conclusion'), false);
   });
 });
 
