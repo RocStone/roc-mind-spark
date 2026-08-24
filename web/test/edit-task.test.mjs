@@ -53,12 +53,23 @@ describe('applyNodeEditCapture', () => {
     assert.equal(typeof n.updated, 'number');
   });
 
-  test('clears a previous image when the markdown is gone', () => {
-    const n = { text: 'cap', image: 'old.png', imageAlt: 'old' };
+  test('keeps a file-backed image when the caption has no markdown', () => {
+    const n = { text: 'cap', image: '001.png', imageAlt: 'old' };
     applyNodeEditCapture(n, captureNodeEditText({ innerHTML: 'just text', textContent: 'just text' }));
     assert.equal(n.text, 'just text');
-    assert.equal(n.image, undefined);
-    assert.equal(n.imageAlt, undefined);
+    assert.equal(n.image, '001.png');
+    assert.equal(n.imageAlt, 'old');
+  });
+
+  test('still picks up a new ![alt](src) typed into the caption', () => {
+    const n = { text: 'cap', image: '001.png' };
+    applyNodeEditCapture(n, captureNodeEditText({
+      innerHTML: 'cover ![a](https://example.com/x.png)',
+      textContent: 'cover ![a](https://example.com/x.png)',
+    }));
+    assert.equal(n.text, 'cover');
+    assert.equal(n.image, 'https://example.com/x.png');
+    assert.equal(n.imageAlt, 'a');
   });
 });
 

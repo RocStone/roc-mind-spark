@@ -787,8 +787,11 @@ function render(){
       const img=document.createElement('img');
       const src=nodeImageSrc(n);
       img.className='node-image'; img.src=src; img.alt=n.imageAlt||'attachment';
-      img.addEventListener('mousedown',ev=>ev.stopPropagation());
-      img.addEventListener('dblclick',ev=>{ ev.stopPropagation(); openImageLightbox(src); });
+      img.addEventListener('dblclick',ev=>{
+        ev.stopPropagation();
+        ev.preventDefault();
+        openImageLightbox(src);
+      });
       // If the image can't load, fall back to its alt text so the node isn't a broken icon
       img.addEventListener('error',()=>{
         img.remove(); el.classList.remove('has-image'); el.classList.add('img-missing');
@@ -4087,6 +4090,18 @@ function commitImageData(id, data){
   pushHistory(); render(); autoLayout();
   toast(/^data:/i.test(data) ? 'Image attached' : 'Image saved as '+data);
 }
+function eventOnNodeImage(target){
+  return !!(target && target.closest && target.closest('.node-image'));
+}
+function detachImageFromNode(id){
+  if(!map || !map.nodes || !map.nodes[id] || map.nodes[id].image===undefined) return false;
+  delete map.nodes[id].image;
+  delete map.nodes[id].imageAlt;
+  if(!String(map.nodes[id].text||'').trim()) map.nodes[id].text='Untitled';
+  map.nodes[id].updated=Date.now();
+  pushHistory(); render(); autoLayout();
+  return true;
+}
 function failImageAttach(id){
   toast('Could not read image');
   const n=map && map.nodes && map.nodes[id];
@@ -5239,8 +5254,9 @@ function captureNodeEditText(src){
 }
 function applyNodeEditCapture(node, cap){
   if(!node || !cap) return node;
+  // File-backed images live on the node, not in the caption. Typing a caption
+  // must not wipe n.image just because the editor has no ![alt](src) markdown.
   if(cap.image){ node.image = cap.image; node.imageAlt = cap.imageAlt; }
-  else if(cap.clearImage && node.image !== undefined){ delete node.image; delete node.imageAlt; }
   const isImg = node.image !== undefined;
   node.text = cap.text || (isImg ? '' : 'Untitled');
   node.updated = Date.now();
@@ -5314,12 +5330,6 @@ function startEdit(id){
   // Preserve any inline formatting (bold/italic/etc.) for the user to edit
   if(INLINE_HTML_RE.test(raw)) textEl.innerHTML = sanitizeInlineHTML(raw);
   else textEl.textContent = raw;
-  // If the node carries an image, reveal its source while editing so the user sees/edits
-  // everything (caption + image); it's parsed back out on commit.
-  if(map.nodes[id] && map.nodes[id].image){
-    const cap = textEl.textContent.trim();
-    textEl.textContent = (cap ? cap + '  ' : '') + '![' + (map.nodes[id].imageAlt||'') + '](' + map.nodes[id].image + ')';
-  }
   el.classList.add('editing');
   _liveEditing=true;
   _editTyped=false;
@@ -5683,8 +5693,7 @@ function positionNodeBar(){
       else if(a==='cite') showCitationForm(sel);
       else if(a==='image'){
         if(map.nodes[sel].image){
-          if(confirm('Remove the attached image? (OK removes · Cancel lets you pick a new one)')){ delete map.nodes[sel].image; pushHistory(); render(); }
-          else attachImageToNode(sel);
+          if(confirm('Remove this image?')) detachImageFromNode(sel);
         } else attachImageToNode(sel);
       }
       else if(a==='size') showPicker(b,'size',fs,v=>{ map.nodes[sel].fontSize=v; pushHistory(); render(); });
@@ -6069,6 +6078,11 @@ stage.addEventListener('mousedown',e=>{
       _nodeClickStamp={id:null,t:0};
       e.preventDefault();
       cancelNodeDrag();
+      if(eventOnNodeImage(e.target)){
+        const n=map.nodes[id];
+        if(n && n.image) openImageLightbox(nodeImageSrc(n));
+        return;
+      }
       if(!READONLY) startEdit(id);
       return;
     }
@@ -6332,7 +6346,15 @@ stage.addEventListener('touchend', e=>{
   const nodeEl=t.target.closest?.('.node');
   if(!nodeEl) { lastTap=0; return; }
   const id=nodeEl.dataset.id, now=Date.now();
-  if(id===lastTapId && now-lastTap<350){ startEdit(id); lastTap=0; }
+  if(id===lastTapId && now-lastTap<350){
+    lastTap=0;
+    if(eventOnNodeImage(t.target)){
+      const n=map.nodes[id];
+      if(n && n.image) openImageLightbox(nodeImageSrc(n));
+      return;
+    }
+    startEdit(id);
+  }
   else { lastTap=now; lastTapId=id; }
 });
 
@@ -6585,6 +6607,7 @@ window.addEventListener('keydown',e=>{
   }
 });
 stage.addEventListener('dblclick',e=>{
+  if(eventOnNodeImage(e.target)) return;
   const n=e.target.closest('.node');
   if(!n) return;
   e.preventDefault();
@@ -8868,7 +8891,8 @@ function buildMarkdown(startId, opts){
     const imageLine = () => {
       if(!(rich && n.image)) return null;
       if(/^https?:\/\//i.test(n.image)) return `![${n.imageAlt||'image'}](${n.image})`;
-      return `<img src="${n.image}"${n.imageAlt ? ' alt="'+escapeHtml(n.imageAlt)+'"' : ''}>`;
+      const src = nodeImageSrc(n);
+      return `<img src="${src}"${n.imageAlt ? ' alt="'+escapeHtml(n.imageAlt)+'"' : ''}>`;
     };
     let first;
     if(rich && n.listType){
@@ -9232,7 +9256,7 @@ function buildDoc(){
   let body = `<h1>${escapeHtml(title)}</h1>`;
   // Root's image, if any
   const rootN = map.nodes[map.rootId];
-  if(rootN && rootN.image){ body += `<img src="${rootN.image}" alt="${escapeHtml(rootN.imageAlt||'attachment')}" style="max-width:320px;max-height:220px;display:block;margin-bottom:10px;border-radius:8px">`; }
+  if(rootN && rootN.image){ body += `<img src="${nodeImageSrc(rootN)}" alt="${escapeHtml(rootN.imageAlt||'attachment')}" style="max-width:320px;max-height:220px;display:block;margin-bottom:10px;border-radius:8px">`; }
   // Add root's notes under the title
   const rn = rootN?.notes;
   if(rn){ body += `<p><em>${renderMathForExport(rn, 13, '#6a6258') ?? sanitizeInlineHTML(rn)}</em></p>`; }
@@ -9247,7 +9271,7 @@ function buildDoc(){
         ?? (INLINE_HTML_RE.test(n.text||'') ? sanitizeInlineHTML(n.text) : escapeHtml(n.text||'').replace(/\n/g,'<br>'));
       const taskMark = n.task ? (n.task==='done' ? '\u2611\uFE0F ' : n.task==='doing' ? '\u25D0 ' : '\u2610 ') : '';
       out += `<li>`;
-      if(n.image) out += `<img src="${n.image}" alt="${escapeHtml(n.imageAlt||'attachment')}" style="max-width:280px;max-height:200px;display:block;margin-bottom:4px;border-radius:6px"><br>`;
+      if(n.image) out += `<img src="${nodeImageSrc(n)}" alt="${escapeHtml(n.imageAlt||'attachment')}" style="max-width:280px;max-height:200px;display:block;margin-bottom:4px;border-radius:6px"><br>`;
       out += `${taskMark}${n.task==='done'?`<span style="text-decoration:line-through;opacity:.65">${txt}</span>`:txt}`;
       if(n.notes){ out += `<br><em style="color:#666">${renderMathForExport(n.notes, 13, '#6a6258') ?? sanitizeInlineHTML(n.notes)}</em>`; }
       out += renderChildren(cid, depth+1);

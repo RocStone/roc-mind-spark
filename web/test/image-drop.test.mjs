@@ -352,6 +352,57 @@ describe('paste image as a child of the selected node', () => {
   });
 });
 
+describe('detachImageFromNode', () => {
+  test('drops the image, keeps a caption, and relayouts', () => {
+    const map = { rootId: 'root', nodes: { n1: { id: 'n1', text: 'chart', image: '001.png', imageAlt: 'c' } } };
+    let laidOut = false;
+    const { detachImageFromNode } = loadFns(['detachImageFromNode'], {
+      map,
+      pushHistory() {},
+      render() {},
+      autoLayout() { laidOut = true; },
+    });
+    assert.equal(detachImageFromNode('n1'), true);
+    assert.equal(map.nodes.n1.image, undefined);
+    assert.equal(map.nodes.n1.imageAlt, undefined);
+    assert.equal(map.nodes.n1.text, 'chart');
+    assert.equal(laidOut, true);
+  });
+
+  test('an image-only node becomes Untitled so it is not an empty card', () => {
+    const map = { rootId: 'root', nodes: { n1: { id: 'n1', text: '', image: '001.png' } } };
+    const { detachImageFromNode } = loadFns(['detachImageFromNode'], {
+      map,
+      pushHistory() {},
+      render() {},
+      autoLayout() {},
+    });
+    detachImageFromNode('n1');
+    assert.equal(map.nodes.n1.text, 'Untitled');
+    assert.equal(map.nodes.n1.image, undefined);
+  });
+
+  test('returns false when there is no image', () => {
+    const map = { rootId: 'root', nodes: { n1: { id: 'n1', text: 'x' } } };
+    const { detachImageFromNode } = loadFns(['detachImageFromNode'], {
+      map,
+      pushHistory() { throw new Error('should not snapshot'); },
+      render() {},
+      autoLayout() {},
+    });
+    assert.equal(detachImageFromNode('n1'), false);
+  });
+});
+
+describe('eventOnNodeImage', () => {
+  const { eventOnNodeImage } = loadFns(['eventOnNodeImage']);
+  test('detects the thumbnail and ignores other targets', () => {
+    assert.equal(eventOnNodeImage({ closest: sel => sel === '.node-image' ? {} : null }), true);
+    assert.equal(eventOnNodeImage({ closest: () => null }), false);
+    assert.equal(eventOnNodeImage(null), false);
+  });
+});
+
 describe('nodeImageSrc', () => {
   const { nodeImageSrc } = loadFns(['nodeImageSrc']);
 
