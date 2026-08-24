@@ -127,3 +127,198 @@ describe('nodeIdAtPoint — where the drop landed', () => {
     assert.equal(withElementAt(nodeEl('deleted'), () => nodeIdAtPoint(10, 10)), null);
   });
 });
+
+describe('paste image as a child of the selected node', () => {
+  const nodes = () => ({
+    root: { id: 'root', text: 'root', x: 0, y: 0 },
+    n1: { id: 'n1', parent: 'root', text: 'topic', x: 180, y: 40, side: 'right' },
+  });
+
+  test('resolveImagePasteParentId prefers the node being edited', () => {
+    const { resolveImagePasteParentId } = loadFns(['resolveImagePasteParentId']);
+    const ns = nodes();
+    assert.equal(resolveImagePasteParentId({ editingId: 'n1', selectedId: 'root', nodes: ns }), 'n1');
+    assert.equal(resolveImagePasteParentId({ editingId: null, selectedId: 'n1', nodes: ns }), 'n1');
+    assert.equal(resolveImagePasteParentId({ editingId: null, selectedId: null, nodes: ns }), null);
+    assert.equal(resolveImagePasteParentId({ editingId: null, selectedId: 'gone', nodes: ns }), null);
+  });
+
+  test('insertChildNode adds a child under the parent and does not touch the parent image', () => {
+    const map = { rootId: 'root', nodes: nodes() };
+    const { insertChildNode } = loadFns(['insertChildNode'], {
+      map,
+      NODE_COLORS: ['#ffffff', '#ffe2d6'],
+      uid: () => 'img1',
+      childrenOf: id => Object.values(map.nodes).filter(n => n.parent === id).map(n => n.id),
+    });
+    const id = insertChildNode('n1', { text: '' });
+    assert.equal(id, 'img1');
+    assert.equal(map.nodes.img1.parent, 'n1');
+    assert.equal(map.nodes.img1.text, '');
+    assert.equal(map.nodes.n1.image, undefined);
+  });
+
+  test('beginImagePasteAsChild creates an empty child, not an attach on the parent', () => {
+    const map = { rootId: 'root', nodes: nodes() };
+    let sel = 'n1';
+    const { beginImagePasteAsChild } = loadFns(
+      ['insertChildNode', 'beginImagePasteAsChild'],
+      {
+        READONLY: false,
+        map,
+        sel,
+        NODE_COLORS: ['#ffffff', '#ffe2d6'],
+        uid: () => 'img1',
+        childrenOf: id => Object.values(map.nodes).filter(n => n.parent === id).map(n => n.id),
+        opLog() {},
+        commitOpenEdit() { return false; },
+      }
+    );
+    const id = beginImagePasteAsChild('n1');
+    assert.equal(id, 'img1');
+    assert.equal(map.nodes.n1.image, undefined);
+    assert.equal(map.nodes.img1.parent, 'n1');
+    assert.equal(map.nodes.img1.text, '');
+    assert.equal(map.nodes.img1.image, undefined);
+  });
+
+  test('pasteImageAsChild writes the image onto the new child', () => {
+    const map = { rootId: 'root', nodes: nodes() };
+    const file = { type: 'image/png' };
+    const { pasteImageAsChild } = loadFns(
+      ['insertChildNode', 'resolveImagePasteParentId', 'beginImagePasteAsChild', 'pasteImageAsChild'],
+      {
+        READONLY: false,
+        map,
+        sel: 'n1',
+        NODE_COLORS: ['#ffffff', '#ffe2d6'],
+        uid: () => 'img1',
+        childrenOf: id => Object.values(map.nodes).filter(n => n.parent === id).map(n => n.id),
+        opLog() {},
+        commitOpenEdit() { return false; },
+        isAppTextField: () => false,
+        openClipboardTarget: () => null,
+        toast() {},
+        readImageFile(f, id) { map.nodes[id].image = 'from-file'; },
+        readImageDataUrl(url, id) { map.nodes[id].image = url; },
+      }
+    );
+    global.document = { activeElement: { tagName: 'BODY' }, querySelector: () => null };
+    assert.equal(pasteImageAsChild(file, null), true);
+    assert.equal(map.nodes.n1.image, undefined);
+    assert.equal(map.nodes.img1.parent, 'n1');
+    assert.equal(map.nodes.img1.image, 'from-file');
+  });
+
+  test('pasteImageAsChild refuses to run when no topic is selected', () => {
+    const map = { rootId: 'root', nodes: nodes() };
+    let message = '';
+    const { pasteImageAsChild } = loadFns(
+      ['insertChildNode', 'resolveImagePasteParentId', 'beginImagePasteAsChild', 'pasteImageAsChild'],
+      {
+        READONLY: false,
+        map,
+        sel: null,
+        NODE_COLORS: ['#ffffff', '#ffe2d6'],
+        uid: () => 'img1',
+        childrenOf: () => [],
+        opLog() {},
+        commitOpenEdit() { return false; },
+        isAppTextField: () => false,
+        openClipboardTarget: () => null,
+        toast(m) { message = m; },
+        readImageFile() { throw new Error('should not attach'); },
+        readImageDataUrl() { throw new Error('should not attach'); },
+      }
+    );
+    global.document = { activeElement: { tagName: 'BODY' }, querySelector: () => null };
+    assert.equal(pasteImageAsChild({ type: 'image/png' }, null), false);
+    assert.equal(message, 'Select a topic first, then paste the image');
+    assert.equal(map.nodes.img1, undefined);
+  });
+
+  test('handleImagePasteEvent prevents default only when the paste is handled', () => {
+    let handled = false;
+    const { handleImagePasteEvent } = loadFns(['handleImagePasteEvent'], {
+      READONLY: false,
+      firstImageFile: dt => dt && dt.file,
+      pasteImageAsChild: file => {
+        handled = !!file;
+        return handled;
+      },
+    });
+    let prevented = false;
+    assert.equal(handleImagePasteEvent({
+      clipboardData: { file: { type: 'image/png' } },
+      preventDefault() { prevented = true; },
+    }), true);
+    assert.equal(handled, true);
+    assert.equal(prevented, true);
+
+    handled = false;
+    prevented = false;
+    assert.equal(handleImagePasteEvent({
+      clipboardData: { file: null },
+      preventDefault() { prevented = true; },
+    }), false);
+    assert.equal(prevented, false);
+  });
+
+  test('rmsClipboardPasteImage uses a data URL from the native pasteboard', () => {
+    const map = { rootId: 'root', nodes: nodes() };
+    const dataUrl = 'data:image/jpeg;base64,aaa';
+    const { rmsClipboardPasteImage } = loadFns(
+      ['insertChildNode', 'resolveImagePasteParentId', 'beginImagePasteAsChild', 'pasteImageAsChild', 'rmsClipboardPasteImage'],
+      {
+        READONLY: false,
+        map,
+        sel: 'n1',
+        NODE_COLORS: ['#ffffff', '#ffe2d6'],
+        uid: () => 'img1',
+        childrenOf: id => Object.values(map.nodes).filter(n => n.parent === id).map(n => n.id),
+        opLog() {},
+        commitOpenEdit() { return false; },
+        isAppTextField: () => false,
+        openClipboardTarget: () => null,
+        toast() {},
+        readImageFile() { throw new Error('file path should not run'); },
+        readImageDataUrl(url, id) { map.nodes[id].image = url; },
+      }
+    );
+    global.document = { activeElement: { tagName: 'BODY' }, querySelector: () => null };
+    assert.equal(rmsClipboardPasteImage(dataUrl), true);
+    assert.equal(map.nodes.n1.image, undefined);
+    assert.equal(map.nodes.img1.image, dataUrl);
+  });
+
+  test('failImageAttach removes an empty child that never got an image', () => {
+    const map = { rootId: 'root', nodes: nodes() };
+    map.nodes.img1 = { id: 'img1', parent: 'n1', text: '' };
+    let sel = 'img1';
+    let message = '';
+    const { failImageAttach } = loadFns(['failImageAttach'], {
+      map,
+      sel,
+      toast(m) { message = m; },
+    });
+    failImageAttach('img1');
+    assert.equal(map.nodes.img1, undefined);
+    assert.equal(message, 'Could not read image');
+  });
+
+  test('commitImageData stores the data-URL on the given node', () => {
+    const map = { rootId: 'root', nodes: nodes() };
+    let laidOut = false;
+    const { commitImageData } = loadFns(['commitImageData'], {
+      map,
+      MODE: 'server',
+      pushHistory() {},
+      render() {},
+      autoLayout() { laidOut = true; },
+      toast() {},
+    });
+    commitImageData('n1', 'data:image/jpeg;base64,xx');
+    assert.equal(map.nodes.n1.image, 'data:image/jpeg;base64,xx');
+    assert.equal(laidOut, true);
+  });
+});

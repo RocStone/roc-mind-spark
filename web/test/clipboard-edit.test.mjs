@@ -61,6 +61,7 @@ describe('shouldHandleEditorTextPaste', () => {
   test('image paste is left to the image handler', () => {
     assert.equal(shouldHandleEditorTextPaste({ imageFile: { type: 'image/png' }, text: '' }), false);
     assert.equal(shouldHandleEditorTextPaste({ imageFile: { type: 'image/png' }, text: 'also text' }), false);
+    assert.equal(shouldHandleEditorTextPaste({ imageFile: { type: 'image/png' }, text: 'data:image/png;base64,xx' }), false);
   });
 
   test('empty clipboard is ignored', () => {
@@ -346,5 +347,12 @@ describe('rmsClipboardPaste — native shell Cmd+V / Typeless', () => {
     );
     assert.equal(rmsClipboardPaste('pasted into note'), true);
     assert.equal(notesEl.textContent, 'old note' + 'pasted into note');
+  });
+});
+
+describe('rmsClipboardPasteImage — native shell image paste', () => {
+  test('window.__rmsClipboardPasteImage is the native image entry', () => {
+    const src = readFileSync(join(here, '..', 'public', 'app.js'), 'utf8');
+    assert.match(src, /window\.__rmsClipboardPasteImage\s*=\s*rmsClipboardPasteImage/);
   });
 });

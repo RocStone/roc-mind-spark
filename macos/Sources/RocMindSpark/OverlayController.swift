@@ -874,9 +874,94 @@ private final class MapWebView: WKWebView {
     }
 
     private func nativePaste() {
+        if let image = pasteboardImage(), let dataURL = jpegDataURL(from: image) {
+            evaluateJavaScript("window.__rmsClipboardPasteImage&&window.__rmsClipboardPasteImage(\(Self.jsonString(dataURL)))")
+            return
+        }
         let text = NSPasteboard.general.string(forType: .string) ?? ""
         guard !text.isEmpty else { return }
         evaluateJavaScript("window.__rmsClipboardPaste&&window.__rmsClipboardPaste(\(Self.jsonString(text)))")
+    }
+
+    private static let imagePasteTypes: Set<NSPasteboard.PasteboardType> = [
+        .png,
+        .tiff,
+        NSPasteboard.PasteboardType("public.jpeg"),
+        NSPasteboard.PasteboardType("public.jpg"),
+        NSPasteboard.PasteboardType("public.heic"),
+        NSPasteboard.PasteboardType("public.heif"),
+        NSPasteboard.PasteboardType("public.webp"),
+        NSPasteboard.PasteboardType("public.gif"),
+        NSPasteboard.PasteboardType("com.compuserve.gif"),
+    ]
+
+    private static let imageFileExtensions: Set<String> = [
+        "png", "jpg", "jpeg", "gif", "webp", "heic", "heif", "tif", "tiff", "bmp",
+    ]
+
+    private func pasteboardImage() -> NSImage? {
+        let board = NSPasteboard.general
+        let types = Set(board.types ?? [])
+        if !types.isDisjoint(with: Self.imagePasteTypes),
+           let image = NSImage(pasteboard: board),
+           image.size.width > 0,
+           image.size.height > 0 {
+            return image
+        }
+        if let urls = board.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) {
+            for case let url as URL in urls {
+                guard Self.imageFileExtensions.contains(url.pathExtension.lowercased()) else { continue }
+                if let image = NSImage(contentsOf: url), image.size.width > 0, image.size.height > 0 {
+                    return image
+                }
+            }
+        }
+        return nil
+    }
+
+    /// Match `readImageFile()`: cap width at 360px, JPEG quality 0.82, so the
+    /// WK script argument stays small enough to evaluate.
+    private func jpegDataURL(from image: NSImage, maxWidth: CGFloat = 360, quality: CGFloat = 0.82) -> String? {
+        guard let tiff = image.tiffRepresentation, let src = NSBitmapImageRep(data: tiff) else { return nil }
+        let pw = CGFloat(src.pixelsWide)
+        let ph = CGFloat(src.pixelsHigh)
+        guard pw > 1, ph > 1 else { return nil }
+        var w = pw
+        var h = ph
+        if w > maxWidth {
+            h = (h * maxWidth / w).rounded()
+            w = maxWidth
+        }
+        let iw = max(1, Int(w))
+        let ih = max(1, Int(h))
+        guard let dest = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: iw,
+            pixelsHigh: ih,
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ) else { return nil }
+        dest.size = NSSize(width: iw, height: ih)
+        NSGraphicsContext.saveGraphicsState()
+        defer { NSGraphicsContext.restoreGraphicsState() }
+        guard let ctx = NSGraphicsContext(bitmapImageRep: dest) else { return nil }
+        NSGraphicsContext.current = ctx
+        ctx.imageInterpolation = .high
+        NSColor.white.setFill()
+        NSRect(x: 0, y: 0, width: iw, height: ih).fill()
+        image.draw(
+            in: NSRect(x: 0, y: 0, width: iw, height: ih),
+            from: NSRect(origin: .zero, size: image.size),
+            operation: .sourceOver,
+            fraction: 1
+        )
+        guard let jpeg = dest.representation(using: .jpeg, properties: [.compressionFactor: quality]) else { return nil }
+        return "data:image/jpeg;base64,\(jpeg.base64EncodedString())"
     }
 
     private static func jsonString(_ text: String) -> String {

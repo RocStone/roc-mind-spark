@@ -3271,19 +3271,25 @@ function performHistoryChord(which){
   return true;
 }
 
-function addNode(parentId,asSibling){
-  if(READONLY) return;
-  let parent=parentId;
-  if(asSibling){ const p=map.nodes[parentId]; parent=p.parent||map.rootId; if(parentId===map.rootId) parent=map.rootId; }
+function insertChildNode(parent, extra){
   const pn=map.nodes[parent]||map.nodes[map.rootId];
   const side = parent===map.rootId ? (childrenOf(map.rootId).length%2? 'left':'right') : (pn.side||'right');
   const id=uid();
   // Pick a random soft color from the palette (skip plain white at index 0)
   const palette=NODE_COLORS.slice(1);
   const color=palette[Math.floor(Math.random()*palette.length)];
-  map.nodes[id]={id,text:'New topic',parent,
+  const node={id,text:'New topic',parent,
     x:pn.x+(side==='left'?-180:180),y:pn.y+40,side, color, created:Date.now()};
+  if(extra) Object.assign(node, extra);
+  map.nodes[id]=node;
   if(pn.collapsed) pn.collapsed=false;
+  return id;
+}
+function addNode(parentId,asSibling){
+  if(READONLY) return;
+  let parent=parentId;
+  if(asSibling){ const p=map.nodes[parentId]; parent=p.parent||map.rootId; if(parentId===map.rootId) parent=map.rootId; }
+  const id=insertChildNode(parent);
   opLog(asSibling?'addSibling':'addChild', {id, parent});
   pushHistory();
   // Stable auto-layout tidies the tree (the new node is inserted in order and
@@ -4061,40 +4067,103 @@ function attachImageToNode(id){
   inp.onchange=()=>{ const f=inp.files[0]; if(f) readImageFile(f,id); };
   inp.click();
 }
+function commitImageData(id, data){
+  if(!map || !map.nodes[id] || !data) return;
+  map.nodes[id].image=data;
+  // autoLayout(), not just render(): the node grows to fit the image, and
+  // its neighbours' positions were computed for the old, smaller size —
+  // without a re-tidy the enlarged node overlaps them.
+  pushHistory(); render(); autoLayout();
+  const kb=Math.round(data.length/1024);
+  toast(`Image attached (~${kb} KB)`+(kb>500 && MODE==='cloud'?' — large images slow cloud sync':''));
+}
+function downscaleImageToDataUrl(img, fallbackData){
+  const MAX=360;
+  let w=img.width,h=img.height;
+  if(w>MAX){ h=Math.round(h*MAX/w); w=MAX; }
+  const cv=document.createElement('canvas'); cv.width=w; cv.height=h;
+  cv.getContext('2d').drawImage(img,0,0,w,h);
+  try{ return cv.toDataURL('image/jpeg',0.82); }catch(e){ return fallbackData; }
+}
+function failImageAttach(id){
+  toast('Could not read image');
+  const n=map && map.nodes && map.nodes[id];
+  if(!n || n.image) return;
+  if(n.text) return;
+  const parent=n.parent;
+  delete map.nodes[id];
+  if(sel===id) sel=parent||map.rootId;
+}
 function readImageFile(file,id){
   if(!file.type.startsWith('image/')){ toast('Not an image file'); return; }
   const reader=new FileReader();
   reader.onload=()=>{
     const img=new Image();
-    img.onload=()=>{
-      // Down-scale to a sane max so the data-URL stays small (esp. for cloud/GitHub storage)
-      const MAX=360;
-      let w=img.width,h=img.height;
-      if(w>MAX){ h=Math.round(h*MAX/w); w=MAX; }
-      const cv=document.createElement('canvas'); cv.width=w; cv.height=h;
-      cv.getContext('2d').drawImage(img,0,0,w,h);
-      let data;
-      try{ data=cv.toDataURL('image/jpeg',0.82); }catch(e){ data=reader.result; }
-      map.nodes[id].image=data;
-      // autoLayout(), not just render(): the node grows to fit the image, and
-      // its neighbours' positions were computed for the old, smaller size —
-      // without a re-tidy the enlarged node overlaps them.
-      pushHistory(); render(); autoLayout();
-      const kb=Math.round(data.length/1024);
-      toast(`Image attached (~${kb} KB)`+(kb>500 && MODE==='cloud'?' — large images slow cloud sync':''));
-    };
-    img.onerror=()=>toast('Could not read image');
+    img.onload=()=>commitImageData(id, downscaleImageToDataUrl(img, reader.result));
+    img.onerror=()=>failImageAttach(id);
     img.src=reader.result;
   };
+  reader.onerror=()=>failImageAttach(id);
   reader.readAsDataURL(file);
+}
+function readImageDataUrl(dataUrl,id){
+  if(!dataUrl || !map || !map.nodes[id]) return;
+  // Native paste already down-scales to a JPEG data-URL. Attach it as-is so
+  // the WK bridge does not also need a live Image() decode.
+  if(/^data:image\/(jpeg|jpg|png|gif|webp);base64,/i.test(dataUrl)){
+    commitImageData(id, dataUrl);
+    return;
+  }
+  const img=new Image();
+  img.onload=()=>commitImageData(id, downscaleImageToDataUrl(img, dataUrl));
+  img.onerror=()=>failImageAttach(id);
+  img.src=dataUrl;
+}
+function resolveImagePasteParentId(state){
+  const editingId = state && Object.prototype.hasOwnProperty.call(state, 'editingId')
+    ? state.editingId
+    : (typeof document!=='undefined' && document.querySelector && document.querySelector('.node.editing') && document.querySelector('.node.editing').dataset.id);
+  const selectedId = state && Object.prototype.hasOwnProperty.call(state, 'selectedId')
+    ? state.selectedId
+    : (typeof sel!=='undefined' ? sel : null);
+  const nodes = state && Object.prototype.hasOwnProperty.call(state, 'nodes')
+    ? state.nodes
+    : (typeof map!=='undefined' && map ? map.nodes : null);
+  const parentId = editingId || selectedId;
+  if(!parentId || !nodes || !nodes[parentId]) return null;
+  return parentId;
+}
+function beginImagePasteAsChild(parentId){
+  if(typeof READONLY!=='undefined' && READONLY) return null;
+  if(!parentId || !map || !map.nodes[parentId]) return null;
+  if(typeof commitOpenEdit==='function') commitOpenEdit();
+  const id=insertChildNode(parentId, {text:''});
+  if(typeof opLog==='function') opLog('addChild', {id, parent: parentId});
+  sel=id;
+  return id;
+}
+function pasteImageAsChild(file, dataUrl){
+  if(typeof READONLY!=='undefined' && READONLY) return false;
+  if(typeof document!=='undefined' && typeof isAppTextField==='function' && isAppTextField(document.activeElement)
+     && !(typeof openClipboardTarget==='function' && openClipboardTarget())) return false;
+  const parentId=resolveImagePasteParentId();
+  if(!parentId){ toast('Select a topic first, then paste the image'); return false; }
+  const id=beginImagePasteAsChild(parentId);
+  if(!id) return false;
+  if(file) readImageFile(file, id);
+  else if(dataUrl) readImageDataUrl(dataUrl, id);
+  else return false;
+  return true;
 }
 
 /* ------------------------------------------------------------
-   Drag-and-drop / paste an image straight onto a node.
+   Drag-and-drop attaches an image onto the node under the pointer.
+   Paste (Cmd+V / Edit → Paste) creates a child of the selected node
+   and puts the image on that child.
 
-   Both paths funnel into readImageFile() above, so the down-scale,
-   size warning and cloud-sync caveat are shared rather than
-   reimplemented.
+   Both paths funnel into readImageFile() / readImageDataUrl() above, so
+   the down-scale, size warning and cloud-sync caveat are shared rather
+   than reimplemented.
 
    Note these use the HTML5 drag events (dragover/drop), which are a
    completely separate channel from the mousedown/mousemove dragging
@@ -4173,28 +4242,15 @@ if(stage){
   });
 }
 
-window.addEventListener('paste', e => {
-  if(READONLY) return;
-  const file = firstImageFile(e.clipboardData);
-  if(!file) return;                       // ordinary text paste — leave it alone
-
-  // If a node is mid-edit, commit that edit BEFORE attaching the image.
-  // startEdit() represents an existing image as ![alt](src) markdown inside
-  // the editable text, and finish() parses it back out on commit — including
-  // a branch that DELETES n.image when the text contains no such markdown.
-  // Setting n.image directly during an edit produces exactly that state, so
-  // the image was being wiped the moment focus left the node. Committing
-  // first means the attach lands on a settled node instead.
-  const editingEl = document.querySelector('.node.editing');
-  const targetId = (editingEl && editingEl.dataset.id) || sel;
-  if(!targetId || !map || !map.nodes[targetId]){ toast('Select a topic first, then paste the image'); return; }
-  e.preventDefault();                      // only now, once we know we are handling it
-  if(editingEl){
-    const te = editingEl.querySelector('.node-text') || editingEl;
-    te.blur();                             // synchronous: onBlur -> finish(true)
-  }
-  readImageFile(file, targetId);
-});
+function handleImagePasteEvent(e){
+  if(READONLY) return false;
+  const file = firstImageFile(e && e.clipboardData);
+  if(!file) return false;                 // ordinary text paste — leave it alone
+  if(!pasteImageAsChild(file, null)) return false;
+  if(e && e.preventDefault) e.preventDefault();
+  return true;
+}
+window.addEventListener('paste', handleImagePasteEvent);
 
 /* ============================================================
    SEARCH ACROSS ALL MAPS
@@ -4955,6 +5011,12 @@ function rmsClipboardCut(){
   }
   return text;
 }
+function rmsClipboardPasteImage(dataUrl){
+  if(typeof READONLY !== 'undefined' && READONLY) return false;
+  const str = String(dataUrl == null ? '' : dataUrl);
+  if(!str) return false;
+  return pasteImageAsChild(null, str);
+}
 function rmsClipboardPaste(text){
   if(typeof READONLY !== 'undefined' && READONLY) return false;
   const str = String(text == null ? '' : text);
@@ -5002,6 +5064,7 @@ if(typeof window !== 'undefined'){
   window.__rmsClipboardCopy = rmsClipboardCopy;
   window.__rmsClipboardCut = rmsClipboardCut;
   window.__rmsClipboardPaste = rmsClipboardPaste;
+  window.__rmsClipboardPasteImage = rmsClipboardPasteImage;
   window.__rmsClipboardSelectAll = rmsClipboardSelectAll;
   window.__rmsClipboardUndo = rmsClipboardUndo;
   window.__rmsClipboardRedo = rmsClipboardRedo;

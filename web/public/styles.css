@@ -1600,6 +1600,7 @@
     margin-bottom:6px; cursor:zoom-in; display:block;
   }
   .node.has-image{ max-width:400px; }
+  .node.has-image .node-text:empty{ display:none; }
   /* Marker badge — sits beside the task checkbox and uses the same
      flex-shrink:0 / vertical-align treatment so the two line up when a node
      has both. font-size is nudged up because emoji render smaller than
