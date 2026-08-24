@@ -782,24 +782,51 @@ function render(){
     // Reference/citation nodes get a distinct class
     if(n.ref) el.classList.add('ref-node');
     // Attached image renders as a thumbnail above the text (node goes column)
-    if(n.image){
+    if(n.image || n.imagePending){
       el.classList.add('has-image');
-      const img=document.createElement('img');
-      const src=nodeImageSrc(n);
-      img.className='node-image'; img.src=src; img.alt=n.imageAlt||'attachment';
-      img.addEventListener('dblclick',ev=>{
-        ev.stopPropagation();
-        ev.preventDefault();
-        openImageLightbox(src);
-      });
-      // If the image can't load, fall back to its alt text so the node isn't a broken icon
-      img.addEventListener('error',()=>{
-        img.remove(); el.classList.remove('has-image'); el.classList.add('img-missing');
-        const cap=document.createElement('span'); cap.className='img-alt';
-        cap.textContent = n.imageAlt || 'image not found';
-        el.insertBefore(cap, el.firstChild);
-      });
-      el.appendChild(img);
+      const pend=document.createElement('span');
+      pend.className='image-pending-label';
+      pend.textContent=imagePastingLabel();
+      if(n.image){
+        const img=document.createElement('img');
+        const src=nodeImageSrc(n);
+        img.className='node-image'; img.alt=n.imageAlt||'attachment';
+        let waiting=true;
+        const reveal=()=>{
+          if(!waiting) return;
+          waiting=false;
+          pend.remove();
+          el.classList.remove('image-pending');
+          img.style.display='';
+          if(typeof autoLayout==='function') autoLayout();
+        };
+        img.addEventListener('load', reveal);
+        img.addEventListener('dblclick',ev=>{
+          ev.stopPropagation();
+          ev.preventDefault();
+          openImageLightbox(src);
+        });
+        img.addEventListener('error',()=>{
+          waiting=false;
+          img.remove(); pend.remove(); el.classList.remove('has-image','image-pending'); el.classList.add('img-missing');
+          const cap=document.createElement('span'); cap.className='img-alt';
+          cap.textContent = n.imageAlt || 'image not found';
+          el.insertBefore(cap, el.firstChild);
+        });
+        img.src=src;
+        if(img.complete && img.naturalWidth){
+          waiting=false;
+          el.appendChild(img);
+        } else {
+          el.classList.add('image-pending');
+          img.style.display='none';
+          el.appendChild(pend);
+          el.appendChild(img);
+        }
+      } else {
+        el.classList.add('image-pending');
+        el.appendChild(pend);
+      }
     }
     // Marker badge — click to change, same interaction shape as the task
     // checkbox below it.
@@ -4084,15 +4111,32 @@ function attachImageToNode(id){
 function commitImageData(id, data){
   if(!map || !map.nodes[id] || !data) return;
   map.nodes[id].image=data;
+  delete map.nodes[id].imagePending;
   // autoLayout(), not just render(): the node grows to fit the image, and
   // its neighbours' positions were computed for the old, smaller size —
   // without a re-tidy the enlarged node overlaps them.
   pushHistory(); render(); autoLayout();
-  toast(/^data:/i.test(data) ? 'Image attached' : 'Image saved as '+data);
 }
 function eventOnNodeImage(target){
   return !!(target && target.closest && target.closest('.node-image'));
 }
+function nodeHasImage(n){
+  return !!(n && n.image);
+}
+function shouldOpenImageOnPointer({ hasImage, wasSelected, isDoubleClick }){
+  if(!hasImage) return false;
+  return !!(isDoubleClick || wasSelected);
+}
+function imagePastingLabel(){
+  if(typeof rmsT==='function') return rmsT('imgPasting');
+  return 'Pasting…';
+}
+function openNodeImageLightbox(id){
+  if(typeof map==='undefined' || !map || !map.nodes || !map.nodes[id] || !map.nodes[id].image) return false;
+  openImageLightbox(nodeImageSrc(map.nodes[id]));
+  return true;
+}
+let _pendingImageOpen=null;
 function detachImageFromNode(id){
   if(!map || !map.nodes || !map.nodes[id] || map.nodes[id].image===undefined) return false;
   delete map.nodes[id].image;
@@ -4106,7 +4150,7 @@ function failImageAttach(id){
   toast('Could not read image');
   const n=map && map.nodes && map.nodes[id];
   if(!n || n.image) return;
-  if(n.text) return;
+  if(n.text && !n.imagePending) return;
   const parent=n.parent;
   delete map.nodes[id];
   if(sel===id) sel=parent||map.rootId;
@@ -4168,9 +4212,11 @@ function beginImagePasteAsChild(parentId){
   if(typeof READONLY!=='undefined' && READONLY) return null;
   if(!parentId || !map || !map.nodes[parentId]) return null;
   if(typeof commitOpenEdit==='function') commitOpenEdit();
-  const id=insertChildNode(parentId, {text:''});
+  const id=insertChildNode(parentId, {text:'', imagePending:true});
   if(typeof opLog==='function') opLog('addChild', {id, parent: parentId});
   sel=id;
+  if(typeof render==='function') render();
+  if(typeof autoLayout==='function') autoLayout();
   return id;
 }
 function pasteImageAsChild(file, dataUrl, fileName){
@@ -6084,26 +6130,33 @@ stage.addEventListener('mousedown',e=>{
       toggleMultiSelect(id);
       return;
     }
+    const wasSelected = sel===id;
     const inGroup = multiSel.size && (multiSel.has(id) || id===sel);
+    const now=Date.now();
+    const dbl=isNodeDoubleClick(_nodeClickStamp, id, now, NODE_DBLCLICK_MS);
+    const imgNode=nodeHasImage(map.nodes[id]);
+    if(imgNode && dbl){
+      _nodeClickStamp={id:null,t:0};
+      _pendingImageOpen=null;
+      e.preventDefault();
+      cancelNodeDrag();
+      openNodeImageLightbox(id);
+      return;
+    }
     if(!inGroup){
       if(multiSel.size) clearMultiSelect();
       select(id,false,true);
     } else {
       select(id,false,true);
     }
-    const now=Date.now();
-    if(isNodeDoubleClick(_nodeClickStamp, id, now, NODE_DBLCLICK_MS)){
+    if(dbl){
       _nodeClickStamp={id:null,t:0};
       e.preventDefault();
       cancelNodeDrag();
-      if(eventOnNodeImage(e.target)){
-        const n=map.nodes[id];
-        if(n && n.image) openImageLightbox(nodeImageSrc(n));
-        return;
-      }
       if(!READONLY) startEdit(id);
       return;
     }
+    _pendingImageOpen = (imgNode && wasSelected) ? {id} : null;
     _nodeClickStamp={id,t:now};
     if(READONLY) return;          // view-only: allow selection, no dragging/editing
     if(!shouldStartNodeDrag(e.detail)){
@@ -6236,8 +6289,17 @@ window.addEventListener('mouseup',e=>{
     pushHistory();
   }
   if(dragNode){
-    if((e.detail|0)>=2) cancelNodeDrag();
-    else finishNodeDrop();
+    if((e.detail|0)>=2){
+      _pendingImageOpen=null;
+      cancelNodeDrag();
+    } else {
+      const pending=_pendingImageOpen;
+      const dropped=dragNode;
+      const didMove=moved;
+      finishNodeDrop();
+      if(pending && pending.id===dropped && !didMove) openNodeImageLightbox(dropped);
+      _pendingImageOpen=null;
+    }
   }
   if(panning){ panning=false; saveMapView(); }
 });
@@ -6271,9 +6333,11 @@ stage.addEventListener('touchstart', e=>{
   if(nodeEl && nodeEl.classList.contains('editing')) return;
   if(nodeEl){
     const id=nodeEl.dataset.id;
+    const wasSelected = sel===id;
     const inGroup = multiSel.size && (multiSel.has(id) || id===sel);
     if(!inGroup && multiSel.size) clearMultiSelect();
     select(id,false);
+    _pendingImageOpen = (nodeHasImage(map.nodes[id]) && wasSelected) ? {id} : null;
     panning=false;                       // drop any stale pan state from an interrupted gesture
     dragNode=id; moved=false;
     if(id===map.rootId) dragRoots=[];
@@ -6330,7 +6394,12 @@ window.addEventListener('touchend', e=>{
   if(_moveRAF){ cancelAnimationFrame(_moveRAF); _moveRAF=0; _applyMove(); }
   _movePt=null; _dragHidden=null;
   if(dragNode){
+    const pending=_pendingImageOpen;
+    const dropped=dragNode;
+    const didMove=moved;
     finishNodeDrop();
+    if(pending && pending.id===dropped && !didMove) openNodeImageLightbox(dropped);
+    _pendingImageOpen=null;
   }
   if(panning){ panning=false; saveMapView(); }
 });
@@ -6366,9 +6435,8 @@ stage.addEventListener('touchend', e=>{
   const id=nodeEl.dataset.id, now=Date.now();
   if(id===lastTapId && now-lastTap<350){
     lastTap=0;
-    if(eventOnNodeImage(t.target)){
-      const n=map.nodes[id];
-      if(n && n.image) openImageLightbox(nodeImageSrc(n));
+    if(nodeHasImage(map.nodes[id])){
+      openNodeImageLightbox(id);
       return;
     }
     startEdit(id);
@@ -6625,12 +6693,15 @@ window.addEventListener('keydown',e=>{
   }
 });
 stage.addEventListener('dblclick',e=>{
-  if(eventOnNodeImage(e.target)) return;
-  const n=e.target.closest('.node');
-  if(!n) return;
+  const nEl=e.target.closest('.node');
+  if(!nEl) return;
   e.preventDefault();
   cancelNodeDrag();
-  if(!READONLY) startEdit(n.dataset.id);
+  if(nodeHasImage(map.nodes[nEl.dataset.id])){
+    openNodeImageLightbox(nEl.dataset.id);
+    return;
+  }
+  if(!READONLY) startEdit(nEl.dataset.id);
 });
 // The stage clips overflow, but the browser can still programmatically scroll it
 // to bring a focused/oversized node's caret into view (e.g. after pasting a large

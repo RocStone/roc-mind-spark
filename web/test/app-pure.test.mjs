@@ -194,6 +194,22 @@ describe('resolveHistoryChordTarget', () => {
   });
 });
 
+describe('image node click — select then open, or double-click immediately', () => {
+  const { shouldOpenImageOnPointer } = loadFns(['shouldOpenImageOnPointer']);
+  test('first click on an unselected image node does not open', () => {
+    assert.equal(shouldOpenImageOnPointer({ hasImage: true, wasSelected: false, isDoubleClick: false }), false);
+  });
+  test('a second click on the already selected image node opens', () => {
+    assert.equal(shouldOpenImageOnPointer({ hasImage: true, wasSelected: true, isDoubleClick: false }), true);
+  });
+  test('a fast double-click opens even if it was not selected', () => {
+    assert.equal(shouldOpenImageOnPointer({ hasImage: true, wasSelected: false, isDoubleClick: true }), true);
+  });
+  test('text nodes never open the viewer', () => {
+    assert.equal(shouldOpenImageOnPointer({ hasImage: false, wasSelected: true, isDoubleClick: true }), false);
+  });
+});
+
 describe('double-click vs drag / toolbar', () => {
   test('second click on the same node within the window is a double-click', () => {
     assert.equal(isNodeDoubleClick({id: 'n1', t: 1000}, 'n1', 1200, 450), true);

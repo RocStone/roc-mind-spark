@@ -32,6 +32,7 @@ describe('i18n', () => {
     assert.equal(ctx.window.rmsLang(), 'en');
     assert.equal(ctx.window.rmsT('settings'), 'Settings');
     assert.equal(ctx.window.rmsT('showHide'), 'Show / hide');
+    assert.equal(ctx.window.rmsT('imgPasting'), 'Pasting…');
   });
 
   test('switching to Chinese updates strings and persists', () => {
@@ -41,6 +42,7 @@ describe('i18n', () => {
     assert.equal(ctx.window.rmsLang(), 'zh');
     assert.equal(ctx.window.rmsT('settings'), '设置');
     assert.equal(ctx.window.rmsT('showHide'), '显示 / 隐藏');
+    assert.equal(ctx.window.rmsT('imgPasting'), '正在粘贴');
   });
 
   test('switching back to English restores the default locale', () => {

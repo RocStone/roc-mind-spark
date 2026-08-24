@@ -180,6 +180,7 @@ describe('paste image as a child of the selected node', () => {
     assert.equal(map.nodes.img1.parent, 'n1');
     assert.equal(map.nodes.img1.text, '');
     assert.equal(map.nodes.img1.image, undefined);
+    assert.equal(map.nodes.img1.imagePending, true);
   });
 
   test('pasteImageAsChild writes the image onto the new child', () => {
@@ -320,8 +321,8 @@ describe('paste image as a child of the selected node', () => {
     });
     commitImageData('n1', '001.png');
     assert.equal(map.nodes.n1.image, '001.png');
+    assert.equal(map.nodes.n1.imagePending, undefined);
     assert.equal(laidOut, true);
-    assert.equal(message, 'Image saved as 001.png');
   });
 
   test('pasteImageAsChild with a saved filename does not put the image on the parent', () => {
