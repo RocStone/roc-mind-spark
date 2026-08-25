@@ -15,8 +15,8 @@
     --shadow:0 2px 4px rgba(40,30,15,.06),0 8px 24px rgba(40,30,15,.10);
     --shadow-lg:0 10px 40px rgba(40,30,15,.18);
     --r:14px;
-    --sans:"Bricolage Grotesque",system-ui,sans-serif;
-    --serif:"Fraunces",Georgia,serif;
+    --sans:"PingFang SC",system-ui,sans-serif;
+    --serif:"PingFang SC",system-ui,sans-serif;
   }
   /* ===== Themes ===== */
   :root[data-theme="dark"]{
@@ -310,6 +310,7 @@
   .stage:before{content:"";position:absolute;inset:0;pointer-events:none;
     background:radial-gradient(ellipse at 50% 0%,var(--stage-glow),transparent 60%)}
   #viewport{position:absolute;inset:0;transform-origin:0 0}
+  #viewport.cam-live{will-change:transform}
   #edges{position:absolute;left:0;top:0;overflow:visible;pointer-events:none}
 
   /* ===== Topbar ===== */
@@ -360,6 +361,7 @@
 
   /* ===== Nodes ===== */
   .node{position:absolute;background:var(--node-bg);border:1.5px solid var(--line);border-radius:12px;padding:9px 15px;font-size:15px;font-weight:500;line-height:1.35;box-shadow:var(--shadow);width:max-content;max-width:240px;min-width:34px;user-select:none;-webkit-user-select:none;transition:border-color .15s;white-space:pre-wrap;word-break:break-word;display:flex;align-items:center;justify-content:center;text-align:center;box-sizing:border-box}
+  .node.offscreen{visibility:hidden;pointer-events:none}
   .node:hover{box-shadow:var(--shadow-lg); z-index:10}
   /* Handles sit outside the card. Their own z-index cannot beat a later
      sibling node (each card is a stacking context, especially with
@@ -368,7 +370,8 @@
   /* WK glow: paint shadow on an empty layer so hover does not re-rasterize
      the text. Do NOT set position:relative on children — that shrinks
      width:max-content and wraps glyphs mid-word. */
-  html.rms-wk .node{transition:none; isolation:isolate}
+  html.rms-wk .node{transition:none}
+  html.rms-wk .node:hover{isolation:isolate}
   html.rms-wk .node.editing{isolation:auto}
   /* isolation:isolate rasterizes the card at CSS pixels. A photo inside
      that layer looks 1x-soft on Retina. Let the image composite itself. */
@@ -655,7 +658,7 @@
      not a per-component override, the same two variables everything
      already uses. This is now the ONLY thing "Back to School" controls
      via color/font variables — no palette override, see below. */
-  :root[data-look="handwritten"]{ --sans:"Caveat",cursive; --serif:"Caveat",cursive; }
+  :root[data-look="handwritten"]{ --sans:"PingFang SC",system-ui,sans-serif; --serif:"PingFang SC",system-ui,sans-serif; }
 
   /* ===== "Back to School" look and feel — font + chrome texture only =====
      Deliberately does NOT touch .node/.nodebar border-radius or #viewport's
@@ -669,7 +672,7 @@
      font-size on .node: NOT a shape override (no border-radius/transform
      here), just legibility compensation — handwriting fonts need more size
      than a geometric sans for equivalent readability. */
-  :root[data-look="handwritten"] .node{ font-size:1.2em; }
+  :root[data-look="handwritten"] .node{ font-size:1em; }
   :root[data-look="handwritten"] .stage{
     background-image:repeating-linear-gradient(var(--paper) 0px, var(--paper) 27px, var(--line) 28px);
     background-size:100% 28px; background-color:var(--paper);
@@ -722,7 +725,7 @@
      specific look needs to fight. Nunito genuinely has a bold weight
      (unlike Patrick Hand's single weight), so emphasis below uses
      font-weight:700 directly instead of a size-based workaround. */
-  :root[data-look="coffee-shop"]{ --sans:"Nunito",sans-serif; --serif:"Nunito",sans-serif; }
+  :root[data-look="coffee-shop"]{ --sans:"PingFang SC",system-ui,sans-serif; --serif:"PingFang SC",system-ui,sans-serif; }
   :root[data-look="coffee-shop"] .stage{
     background-image:repeating-linear-gradient(135deg, var(--paper) 0px, var(--paper) 22px, var(--line) 23px);
     background-size:32px 32px; background-color:var(--paper);

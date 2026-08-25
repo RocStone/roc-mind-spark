@@ -363,8 +363,9 @@ describe('rmsClipboardCopyImageUrl — copy a selected image node', () => {
   test('returns the map image URL for a file-backed node', () => {
     global.document = { querySelector: () => null, activeElement: { tagName: 'BODY' } };
     const { rmsClipboardCopyImageUrl } = loadFns(
-      ['nodeImageSrc', 'openNotesEditorEl', 'openEditorTextEl', 'openClipboardTarget', 'isAppTextField', 'shouldTakeNodeClipboard', 'rmsClipboardCopyImageUrl'],
+      ['apiUrl', 'nodeImageSrc', 'openNotesEditorEl', 'openEditorTextEl', 'openClipboardTarget', 'isAppTextField', 'shouldTakeNodeClipboard', 'rmsClipboardCopyImageUrl'],
       {
+        API_BASE: '',
         sel: 'n1',
         map: { id: 'm1', nodes: { n1: { id: 'n1', text: '', image: '001.png' } } },
       }
@@ -376,6 +377,7 @@ describe('rmsClipboardCopyImageUrl — copy a selected image node', () => {
     global.document = { querySelector: () => null, activeElement: { tagName: 'BODY' } };
     const { rmsClipboardCopyPayload } = loadFns(
       [
+        'apiUrl',
         'nodeImageSrc',
         'openNotesEditorEl',
         'openEditorTextEl',
@@ -392,6 +394,7 @@ describe('rmsClipboardCopyImageUrl — copy a selected image node', () => {
         'rmsClipboardCopyPayload',
       ],
       {
+        API_BASE: '',
         sel: 'n1',
         map: { id: 'm1', nodes: { n1: { id: 'n1', text: '', image: '001.png' } } },
       }

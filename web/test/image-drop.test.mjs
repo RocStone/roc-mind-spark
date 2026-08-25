@@ -421,7 +421,7 @@ describe('imageSrcNeedsInline', () => {
 });
 
 describe('nodeImageSrc', () => {
-  const { nodeImageSrc } = loadFns(['nodeImageSrc']);
+  const { nodeImageSrc } = loadFns(['nodeImageSrc', 'apiUrl'], { API_BASE: '' });
 
   test('keeps data URLs and http URLs as-is', () => {
     assert.equal(nodeImageSrc({ image: 'data:image/png;base64,xx' }), 'data:image/png;base64,xx');

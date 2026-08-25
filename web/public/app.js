@@ -34,8 +34,19 @@
    is in. When in doubt, warn — noise in the console is cheaper than an
    invisible failure.
    ------------------------------------------------------------ */
+// Overlay loads index.html from disk. API still lives on the local Node
+// server. HTTP pages keep relative URLs so GitHub Pages / cloud deploys
+// are unchanged.
+const API_BASE=(typeof location!=='undefined' && location.protocol==='file:')
+  ? 'http://127.0.0.1:3034' : '';
+function apiUrl(path){
+  if(!path) return path;
+  if(API_BASE && path.charAt(0)==='/') return API_BASE+path;
+  return path;
+}
+
 const ServerStore = {
-  async _j(url,opt){ const r=await fetch(url,opt); if(!r.ok) throw new Error(r.status); return r.status===204?null:r.json(); },
+  async _j(url,opt){ const r=await fetch(apiUrl(url),opt); if(!r.ok) throw new Error(r.status); return r.status===204?null:r.json(); },
   async list(){ try{ return await this._j('/api/maps'); }catch(e){ return []; } },
   async get(id){ try{ return await this._j('/api/maps/'+id); }catch(e){ return null; } },
   async save(map){
@@ -357,10 +368,14 @@ function execCmd(cmd, value){
 }
 
 async function initStore(){
-  try{
-    const r=await fetch('/healthz', {cache:'no-store'});
-    if(r.ok){ Store=ServerStore; MODE='server'; return {mode:'server', loggedIn:true}; }
-  }catch(e){}
+  const tries=(typeof location!=='undefined' && location.protocol==='file:') ? 50 : 1;
+  for(let i=0;i<tries;i++){
+    try{
+      const r=await fetch(apiUrl('/healthz'), {cache:'no-store'});
+      if(r.ok){ Store=ServerStore; MODE='server'; return {mode:'server', loggedIn:true}; }
+    }catch(e){}
+    if(i+1<tries) await new Promise(ok=>setTimeout(ok,80));
+  }
   Store=CloudStore; MODE='cloud';
   const loggedIn=await CloudStore.tryInit();
   return {mode:'cloud', loggedIn};
@@ -474,7 +489,7 @@ function flushOpLog(){
   if(!_opLogQ.length) return;
   const batch=_opLogQ.splice(0,40);
   try{
-    fetch('/api/ops-log',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({events:batch}),keepalive:true}).catch(()=>{});
+    fetch(apiUrl('/api/ops-log'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({events:batch}),keepalive:true}).catch(()=>{});
   }catch(e){}
 }
 if(typeof window!=='undefined' && window.addEventListener){
@@ -697,12 +712,20 @@ let history=[],hpos=-1;       // undo stack
 let saveTimer=null, _pendingSaveMap=null;
 
 const viewport=$('#viewport'), edges=$('#edges'), stage=$('#stage'), zoomVal=$('#zoomVal');
+if(viewport){
+  viewport.addEventListener('pointerover', e=>{
+    const node=e.target && e.target.closest && e.target.closest('.node');
+    if(node) ensureNodeChrome(node);
+  });
+}
 
 /* ============================================================
    RENDER
    ============================================================ */
-function applyView(){
+function applyViewTransform(){
   viewport.style.transform=`translate(${view.x}px,${view.y}px) scale(${view.k})`;
+}
+function applyViewChrome(){
   if(zoomVal) zoomVal.textContent=Math.round(view.k*100)+'%';
   // Keep the (in-viewport) node toolbar at a constant on-screen size AND a
   // constant ~12px gap below the node as zoom changes (so it never overlaps).
@@ -719,6 +742,124 @@ function applyView(){
   // point — the "floating New topic" ghost.
   if(typeof syncEditFloat==='function') syncEditFloat();
   updateMinimapViewport();
+}
+function applyView(){
+  applyViewTransform();
+  applyViewChrome();
+  cullOffscreenNodes();
+}
+
+// Camera pan/zoom used to call applyView() on every wheel/mousemove. Trackpads
+// fire far above 60Hz, and chrome (nodebar GBR, minimap SVG, zoom label) forced
+// layout on the full node tree. Coalesce to one compositor transform per frame
+// and defer chrome until the gesture settles.
+let _viewRAF=0, _camLive=false, _camChromeTimer=0, _wheelIdle=0, _stageRectCam=null;
+function beginCamGesture(){
+  if(_camLive) return;
+  _camLive=true;
+  if(viewport && viewport.classList) viewport.classList.add('cam-live');
+}
+function endCamGesture(){
+  if(_wheelIdle){ clearTimeout(_wheelIdle); _wheelIdle=0; }
+  if(_camChromeTimer){ clearTimeout(_camChromeTimer); _camChromeTimer=0; }
+  _camLive=false;
+  _stageRectCam=null;
+  if(viewport && viewport.classList) viewport.classList.remove('cam-live');
+  if(_viewRAF){ cancelAnimationFrame(_viewRAF); _viewRAF=0; }
+  applyView();
+  saveMapView();
+}
+function scheduleCamChrome(){
+  if(_camChromeTimer) return;
+  _camChromeTimer=setTimeout(()=>{
+    _camChromeTimer=0;
+    if(!_camLive) return;
+    applyViewChrome();
+  }, 80);
+}
+function scheduleView(){
+  if(_viewRAF) return;
+  _viewRAF=requestAnimationFrame(()=>{
+    _viewRAF=0;
+    applyViewTransform();
+    if(_camLive){ scheduleCamChrome(); cullOffscreenNodes(); }
+    else { applyViewChrome(); cullOffscreenNodes(); }
+  });
+}
+function _stagePointCam(cx,cy){
+  const r=_stageRectCam || (_stageRectCam=stage.getBoundingClientRect());
+  const z=_uiZ();
+  return {x:(cx-r.left)/z, y:(cy-r.top)/z};
+}
+function mapViewRect(v, stageW, stageH, pad){
+  const k=v.k||1;
+  const p=pad||0;
+  return {
+    x0:(-v.x)/k - p,
+    y0:(-v.y)/k - p,
+    x1:(stageW-v.x)/k + p,
+    y1:(stageH-v.y)/k + p
+  };
+}
+function nodeOutsideRect(n, r){
+  if(!n||!r) return true;
+  const w=n.w||120, h=n.h||40;
+  return n.x+w<r.x0 || n.x>r.x1 || n.y+h<r.y0 || n.y>r.y1;
+}
+function cullOffscreenNodes(){
+  if(!viewport || !map || !map.nodes) return;
+  const els=viewport.querySelectorAll('.node');
+  const nEls=els.length;
+  if(nEls<80){
+    for(let i=0;i<nEls;i++) els[i].classList.remove('offscreen');
+    return;
+  }
+  const {w:SW,h:SH}=(_prevStage && _prevStage.w>1 && _prevStage.h>1) ? _prevStage : _stageSize();
+  const pad=Math.max(120, 280/(view.k||1));
+  const r=mapViewRect(view, SW, SH, pad);
+  for(let i=0;i<nEls;i++){
+    const el=els[i];
+    const id=el.dataset.id;
+    if(el.classList.contains('editing') || id===sel){
+      if(el.classList.contains('offscreen')) el.classList.remove('offscreen');
+      continue;
+    }
+    const n=map.nodes[id];
+    const off=n ? nodeOutsideRect(n, r) : false;
+    if(el.classList.contains('offscreen')!==off) el.classList.toggle('offscreen', off);
+  }
+}
+function mkNodeHandle(cls,label,title,onClick){
+  const h=document.createElement('span');
+  h.className='handle '+cls; h.textContent=label; h.title=title;
+  h.addEventListener('mousedown',ev=>ev.stopPropagation());
+  h.addEventListener('click',ev=>{ ev.stopPropagation(); onClick(); });
+  return h;
+}
+function ensureNodeChrome(el){
+  if(!el || !map || el.dataset.chrome==='1') return;
+  const id=el.dataset.id;
+  const n=map.nodes[id];
+  if(!n) return;
+  el.dataset.chrome='1';
+  if(!n.hr && (n.created || n.updated) && !el.querySelector('.node-watermark')){
+    const wm=document.createElement('span');
+    wm.className='node-watermark'; wm.setAttribute('aria-hidden','true');
+    wm.textContent=formatNodeTimestamp(n.updated||n.created);
+    el.appendChild(wm);
+  }
+  if(!el.querySelector('.h-child')){
+    el.appendChild(mkNodeHandle('h-child','+','Add child topic',()=>addNode(id,false)));
+  }
+  if(id!==map.rootId && !el.querySelector('.h-sibling')){
+    el.appendChild(mkNodeHandle('h-sibling','+','Add sibling topic',()=>addNode(id,true)));
+  }
+  if(!el.querySelector('.resize-grip')){
+    const grip=document.createElement('span');
+    grip.className='resize-grip'; grip.title='Drag to resize';
+    grip.addEventListener('mousedown',ev=>{ ev.stopPropagation(); ev.preventDefault(); startResize(id,ev); });
+    el.appendChild(grip);
+  }
 }
 function clearNodes(){
   document.querySelectorAll('.node').forEach(n=>n.remove());
@@ -891,44 +1032,18 @@ function render(){
     }
     if(n.listType) t.classList.add('node-text-list','list-'+n.listType);
     el.appendChild(t);
-    // Hover-only watermark: when this node was created/last edited. Off by default so it
-    // never clutters the map — only appears as a subtle background detail on hover.
-    if(!n.hr && (n.created || n.updated)){
-      const wm=document.createElement('span');
-      wm.className='node-watermark'; wm.setAttribute('aria-hidden','true');
-      wm.textContent=formatNodeTimestamp(n.updated||n.created);
-      el.appendChild(wm);
-    }
 
-    // ---- Quick-action handles (appear on hover; collapse stays visible) ----
-    const mkHandle=(cls,label,title,onClick)=>{
-      const h=document.createElement('span');
-      h.className='handle '+cls; h.textContent=label; h.title=title;
-      h.addEventListener('mousedown',ev=>ev.stopPropagation());
-      h.addEventListener('click',ev=>{ ev.stopPropagation(); onClick(); });
-      return h;
-    };
-
-    // Collapse / expand toggle — only on nodes with children
+    // Collapse stays in the tree: it is visible without hover. Child / sibling
+    // plus, resize grip, and watermark wait for hover or selection.
     if(hasKids){
-      el.appendChild(mkHandle(
+      el.appendChild(mkNodeHandle(
         'h-collapse'+(n.collapsed?' collapsed':''),
         n.collapsed?'+':'−',
         n.collapsed?`Expand (${roll.desc[id]} hidden)`:'Collapse',
         ()=>{ n.collapsed=!n.collapsed; opLog(n.collapsed?'collapse':'expand', {id}); pushHistory(); autoLayout(); }
       ));
     }
-    // Add child — every node
-    el.appendChild(mkHandle('h-child','+','Add child topic',()=>addNode(id,false)));
-    // Add sibling — every non-root node
-    if(id!==map.rootId){
-      el.appendChild(mkHandle('h-sibling','+','Add sibling topic',()=>addNode(id,true)));
-    }
-    // Resize grip — drag from the bottom-right corner to resize the node
-    const grip=document.createElement('span');
-    grip.className='resize-grip'; grip.title='Drag to resize';
-    grip.addEventListener('mousedown',ev=>{ ev.stopPropagation(); ev.preventDefault(); startResize(id,ev); });
-    el.appendChild(grip);
+    if(id===sel) ensureNodeChrome(el);
     // Notes indicator — visible only if a non-empty note exists
     const noteText = (n.notes||'').replace(/<[^>]*>/g,'').trim();
     if(noteText){
@@ -1002,6 +1117,7 @@ function render(){
   if(typeof multiSel !== 'undefined' && multiSel.size){
     multiSel.forEach(id=>document.querySelector(`.node[data-id="${id}"]`)?.classList.add('multi-sel'));
   }
+  cullOffscreenNodes();
   } finally { _ci=_prevCI; }
 }
 
@@ -3386,7 +3502,10 @@ function select(id,edit,fromPointer){
   sel=id;
   if(id){
     const el=document.querySelector(`.node[data-id="${id}"]`);
-    if(el) el.classList.add('sel');
+    if(el){
+      el.classList.add('sel');
+      ensureNodeChrome(el);
+    }
   }
   // A pointer select must not put the format toolbar under the second click of
   // a double-click (that click otherwise hits ＋ / paste-looking "New topic" /
@@ -4098,11 +4217,11 @@ function nodeImageSrc(n, mapObj){
   const src = n && n.image;
   if(!src) return '';
   if(/^(data:|blob:|https?:|\/\/)/i.test(src)) return src;
-  if(src.charAt(0)==='/') return src;
+  if(src.charAt(0)==='/') return apiUrl(src);
   const mapId = (mapObj|| (typeof map!=='undefined' ? map : null));
   const id = mapId && mapId.id;
   if(!id) return src;
-  return '/api/maps/' + encodeURIComponent(id) + '/images/' + encodeURIComponent(src);
+  return apiUrl('/api/maps/' + encodeURIComponent(id) + '/images/' + encodeURIComponent(src));
 }
 function attachImageToNode(id){
   const inp=document.createElement('input'); inp.type='file'; inp.accept='image/*';
@@ -4169,7 +4288,7 @@ function dataUrlToBlob(dataUrl){
 async function uploadMapImage(blob, mime){
   if(!map || !map.id) throw new Error('no map');
   if(typeof fetch!=='function') throw new Error('no fetch');
-  const r = await fetch('/api/maps/' + encodeURIComponent(map.id) + '/images', {
+  const r = await fetch(apiUrl('/api/maps/' + encodeURIComponent(map.id) + '/images'), {
     method: 'POST',
     headers: { 'Content-Type': mime || blob.type || 'application/octet-stream' },
     body: blob
@@ -6259,11 +6378,12 @@ window.addEventListener('mousemove',e=>{
     }
     return;
   }
-  if(panning){                       // pan is GPU-only + cheap: keep it immediate
+  if(panning){
     e.preventDefault();
     const z=_uiZ();
     view.x=panStart.vx+(pt.x-panStart.x)/z; view.y=panStart.vy+(pt.y-panStart.y)/z;
-    applyView();
+    beginCamGesture();
+    scheduleView();
     return;
   }
   if(!resizing && !dragNode) return;
@@ -6317,7 +6437,7 @@ window.addEventListener('mouseup',e=>{
       _pendingImageOpen=null;
     }
   }
-  if(panning){ panning=false; saveMapView(); }
+  if(panning){ panning=false; endCamGesture(); }
 });
 
 /* ============================================================
@@ -6382,7 +6502,8 @@ window.addEventListener('touchmove', e=>{
     const px=p.x, py=p.y;
     const old=view.k;
     view.x = px-(px-view.x)*(k/old); view.y = py-(py-view.y)*(k/old); view.k = k; userZoom=k;
-    applyView(); saveMapView();
+    beginCamGesture();
+    scheduleView();
     e.preventDefault(); return;
   }
   if(e.touches.length!==1) return;
@@ -6397,7 +6518,8 @@ window.addEventListener('touchmove', e=>{
   } else if(panning){
     const z=_uiZ();
     view.x=panStart.vx+(t.clientX-panStart.x)/z; view.y=panStart.vy+(t.clientY-panStart.y)/z;
-    applyView();
+    beginCamGesture();
+    scheduleView();
     e.preventDefault();
   }
 }, {passive:false});
@@ -6417,7 +6539,8 @@ window.addEventListener('touchend', e=>{
     if(pending && pending.id===dropped && !didMove) openNodeImageLightbox(dropped);
     _pendingImageOpen=null;
   }
-  if(panning){ panning=false; saveMapView(); }
+  if(panning){ panning=false; endCamGesture(); }
+  else if(_camLive) endCamGesture();
 });
 
 // Android (esp. 16) fires touchcancel whenever the system/browser reclaims a gesture
@@ -6438,7 +6561,7 @@ window.addEventListener('touchcancel', ()=>{
   _movePt=null; _dragHidden=null;
   if(dragNode){ setDropTarget(null); dragNode=null; dragRoots=null; clearDragGhosts(); }
   if(marquee) endMarquee(true);
-  if(panning){ panning=false; saveMapView(); }
+  if(panning){ panning=false; endCamGesture(); }
   pinch=null; resizing=null; moved=false;
 });
 
@@ -6486,7 +6609,7 @@ let wheelSpeed=readWheelSpeed();
 stage.addEventListener('wheel',e=>{
   if(e.target && e.target.closest && e.target.closest('.wheel-speed')) return;
   e.preventDefault();
-  const p=_stagePoint(e.clientX, e.clientY);
+  const p=_stagePointCam(e.clientX, e.clientY);
   const px=p.x, py=p.y;
   const old=view.k;
   const factor=wheelZoomFactor(e.deltaY, wheelSpeed);
@@ -6494,7 +6617,10 @@ stage.addEventListener('wheel',e=>{
   const k=Math.min(3,Math.max(.1, view.k*factor));
   if(k===old) return;
   view.x=px-(px-view.x)*(k/old); view.y=py-(py-view.y)*(k/old); view.k=k; userZoom=k;
-  applyView(); saveMapView();
+  beginCamGesture();
+  scheduleView();
+  if(_wheelIdle) clearTimeout(_wheelIdle);
+  _wheelIdle=setTimeout(()=>{ _wheelIdle=0; endCamGesture(); }, 140);
 },{passive:false});
 
 function zoom(f){ const {w,h}=_stageSize();const px=w/2,py=h/2;const old=view.k;
@@ -6558,9 +6684,9 @@ function animateViewTo(target, duration, onDone){
     view.x=start.x+(target.x-start.x)*e;
     view.y=start.y+(target.y-start.y)*e;
     view.k=start.k+(target.k-start.k)*e;
-    applyView();
+    applyViewTransform();
     if(p<1) _viewAnimRAF=requestAnimationFrame(step);
-    else { _markStage(); if(onDone) onDone(); }
+    else { applyView(); _markStage(); if(onDone) onDone(); }
   };
   _viewAnimRAF=requestAnimationFrame(step);
 }
@@ -7281,7 +7407,7 @@ async function duplicateMap(id){
   await Store.save(copy);
   let imgOk = true;
   try{
-    const r = await fetch('/api/maps/'+encodeURIComponent(copy.id)+'/images/duplicate', {
+    const r = await fetch(apiUrl('/api/maps/'+encodeURIComponent(copy.id)+'/images/duplicate'), {
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({ from: id })
     });
@@ -9804,7 +9930,7 @@ async function exportPNG(){
     if(containsMath(n.text||'')){
       drawNodeMath(ctx, n.text||'', {
         x: textX, y: textCenterY, maxWidth: textMaxWidth,
-        fontPx, color: textFill, family: '"Bricolage Grotesque", sans-serif',
+        fontPx, color: textFill, family: '"PingFang SC", sans-serif',
         bold: !!n.bold || isRoot, align: n.align || 'center', listType: n.listType || null
       });
     } else {
@@ -9815,7 +9941,7 @@ async function exportPNG(){
       maxWidth: textMaxWidth,
       fontPx,
       color: textFill,
-      family: '"Bricolage Grotesque", sans-serif',
+      family: '"PingFang SC", sans-serif',
       baseBold: !!n.bold || isRoot,
       baseItalic: !!n.italic,
       baseUnderline: !!n.underline,
@@ -10364,8 +10490,8 @@ const THEMES = [
 // "I am in the Office" / "I am at Coffee Shop" / "I am back to School".
 const LOOKS = [
   {id:'office',      name:'in the<br>Office',  font:'inherit'},
-  {id:'coffee-shop', name:'at Coffee<br>Shop', font:'"Nunito",sans-serif'},
-  {id:'handwritten', name:'back to<br>School', font:'"Caveat",cursive'}
+  {id:'coffee-shop', name:'at Coffee<br>Shop', font:'"PingFang SC",sans-serif'},
+  {id:'handwritten', name:'back to<br>School', font:'"PingFang SC",sans-serif'}
 ];
 const MAP_STYLES = [
   {id:'modern',  name:'Modern',  desc:'Soft cards, curved branches'},

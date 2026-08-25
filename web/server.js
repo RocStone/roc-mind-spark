@@ -135,7 +135,8 @@ const MIME = { '.html':'text/html', '.js':'text/javascript', '.css':'text/css',
   '.jpeg':'image/jpeg', '.gif':'image/gif', '.webp':'image/webp', '.ico':'image/x-icon',
   '.webmanifest':'application/manifest+json' };
 const send = (res, code, body, type='application/json') => {
-  res.writeHead(code, { 'Content-Type': type });
+  res.setHeader('Content-Type', type);
+  res.writeHead(code);
   res.end(typeof body === 'string' || Buffer.isBuffer(body) ? body : JSON.stringify(body));
 };
 const readBody = (req) => new Promise((resolve, reject) => {
@@ -161,6 +162,12 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x');
   const p = url.pathname;
 
+  // Overlay may load the page from file:// and call the API on this origin.
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization');
+  if (req.method === 'OPTIONS') { res.writeHead(204); return res.end(); }
+
   // Baseline security headers on every response.
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'no-referrer');
@@ -172,8 +179,8 @@ const server = http.createServer(async (req, res) => {
   res.setHeader('Content-Security-Policy', [
     "default-src 'self'",
     "script-src 'self' 'unsafe-inline'",
-    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-    "font-src 'self' https://fonts.gstatic.com",
+    "style-src 'self' 'unsafe-inline'",
+    "font-src 'self'",
     "img-src 'self' data: blob: https://icons.duckduckgo.com",
     "connect-src 'self' https://api.github.com https://api.crossref.org https://api.anthropic.com https://api.openai.com",
     "object-src 'none'",
