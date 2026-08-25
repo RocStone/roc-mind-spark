@@ -21,6 +21,10 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
     private var duckedUnderHud = false
     private var duckedHudId: UInt32 = 0
     private var ignoreActivateUntil: Date?
+    /// WKWebView `<input type=file>` is stuck until `runOpenPanelWith` completes.
+    private var pickingOpenPanel = false
+    private var openPanel: NSOpenPanel?
+    private var openPanelCompletion: (@MainActor @Sendable ([URL]?) -> Void)?
 
     private(set) var isVisible = false
 
@@ -113,6 +117,7 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
     }
 
     func hide(restorePrevious: Bool = true) {
+        cancelOpenPanel()
         if isVisible { Paths.opsLog("overlay-hide") }
         pendingShow = false
         restoreCoverStack(orderFront: false)
@@ -325,7 +330,7 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
     }
 
     private func hideIfClickOutside(_: NSEvent) {
-        guard isVisible else { return }
+        guard isVisible, !pickingOpenPanel else { return }
         if Self.isScreenshotApp(NSWorkspace.shared.frontmostApplication) { return }
         let point = NSEvent.mouseLocation
         if !panel.frame.contains(point) {
@@ -368,7 +373,7 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
     }
 
     @objc private func anotherAppActivated(_ note: Notification) {
-        guard isVisible else { return }
+        guard isVisible, !pickingOpenPanel else { return }
         let app = (note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication)
             ?? NSWorkspace.shared.frontmostApplication
         let shouldHide = Self.shouldHideOnActivation(
@@ -726,6 +731,58 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
             NSWorkspace.shared.open(url)
         }
         return nil
+    }
+
+    /// Without this, `<input type=file>` (Attach image / Import) is a no-op
+    /// in WKWebView.
+    func webView(
+        _ webView: WKWebView,
+        runOpenPanelWith parameters: WKOpenPanelParameters,
+        initiatedByFrame frame: WKFrameInfo,
+        completionHandler: @escaping @MainActor @Sendable ([URL]?) -> Void
+    ) {
+        if pickingOpenPanel {
+            completionHandler(nil)
+            return
+        }
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = parameters.allowsDirectories
+        panel.allowsMultipleSelection = parameters.allowsMultipleSelection
+        panel.canCreateDirectories = false
+        panel.level = NSWindow.Level(rawValue: OverlayPanel.coverLevel.rawValue + 2)
+        NSApp.activate()
+        pickingOpenPanel = true
+        openPanel = panel
+        openPanelCompletion = completionHandler
+        let finish: (NSApplication.ModalResponse) -> Void = { [weak self] result in
+            guard let self else { return }
+            let urls = result == .OK ? panel.urls : nil
+            self.finishOpenPanel(urls)
+        }
+        if isVisible {
+            panel.beginSheetModal(for: self.panel, completionHandler: finish)
+        } else {
+            panel.begin(completionHandler: finish)
+        }
+    }
+
+    private func finishOpenPanel(_ urls: [URL]?) {
+        let done = openPanelCompletion
+        openPanelCompletion = nil
+        openPanel = nil
+        pickingOpenPanel = false
+        done?(urls)
+        if isVisible {
+            self.panel.makeKey()
+            self.panel.makeFirstResponder(webView)
+        }
+    }
+
+    private func cancelOpenPanel() {
+        guard pickingOpenPanel || openPanelCompletion != nil else { return }
+        openPanel?.close()
+        finishOpenPanel(nil)
     }
 
     private static func shortcutScript() -> WKUserScript {
