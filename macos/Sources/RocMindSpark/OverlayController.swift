@@ -87,12 +87,13 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
         }
         Task { [weak self] in
             guard let self else { return }
-            self.startLoadIfNeeded()
             do {
                 try await self.server.ensureRunning()
             } catch {
                 Paths.log("preload server failed: \(error.localizedDescription)")
+                return
             }
+            self.startLoadIfNeeded()
             if !self.isVisible { self.parkOffscreen() }
         }
     }
@@ -187,10 +188,15 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
     private func startLoadIfNeeded() {
         guard webView != nil, !didStartLoad else { return }
         didStartLoad = true
-        let publicDir = Paths.webRoot.appendingPathComponent("public", isDirectory: true)
-        let index = publicDir.appendingPathComponent("index.html")
-        Paths.log("webview loadFile \(index.path)")
-        webView.loadFileURL(index, allowingReadAccessTo: publicDir)
+        Paths.log("webview load \(AppConfig.url)")
+        var comps = URLComponents(url: AppConfig.url, resolvingAgainstBaseURL: false) ?? URLComponents()
+        var items = comps.queryItems ?? []
+        items.append(URLQueryItem(name: "v", value: String(Int(Date().timeIntervalSince1970))))
+        comps.queryItems = items
+        var req = URLRequest(url: comps.url ?? AppConfig.url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 8)
+        req.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+        req.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+        webView.load(req)
     }
 
     /// Keep the live, fully painted window. Moving it off-screen (instead of
