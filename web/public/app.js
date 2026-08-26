@@ -4497,6 +4497,7 @@ function beginImagePasteAsChild(parentId){
 }
 function pasteImageAsChild(file, dataUrl, fileName){
   if(typeof READONLY!=='undefined' && READONLY) return false;
+  if(typeof overlayTextFieldOwnsClipboard==='function' && overlayTextFieldOwnsClipboard()) return false;
   if(typeof document!=='undefined' && typeof isAppTextField==='function' && isAppTextField(document.activeElement)
      && !(typeof openClipboardTarget==='function' && openClipboardTarget())) return false;
   const parentId=resolveImagePasteParentId();
@@ -5159,6 +5160,48 @@ function isAppTextField(ae){
   if(ae.isContentEditable) return true;
   return false;
 }
+function openOverlayTextField(){
+  if(typeof document === 'undefined' || !document.querySelector) return null;
+  const ae = document.activeElement;
+  if(ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')){
+    if(ae.id === 'mapTitle') return ae;
+    if(ae.closest && ae.closest('.picker, .var-form, .bp-panel, .donate-card, .rms-settings, .search-wrap')) return ae;
+  }
+  // WK overlay: native Cmd+V never focuses the field. A visible picker /
+  // citation form still owns paste — not the selected node.
+  return document.querySelector('.picker input, .picker textarea, .var-form input, .var-form textarea');
+}
+function overlayTextFieldOwnsClipboard(){
+  return !!openOverlayTextField();
+}
+function insertFieldText(el, text){
+  if(!el) return false;
+  const str = String(text == null ? '' : text);
+  try{ if(typeof el.focus === 'function') el.focus(); }catch(_){}
+  if(el.tagName !== 'INPUT' && el.tagName !== 'TEXTAREA'){
+    return typeof insertEditorText === 'function' ? insertEditorText(el, str, false) : false;
+  }
+  const v = el.value || '';
+  let start = el.selectionStart;
+  let end = el.selectionEnd;
+  const unfocused = typeof document !== 'undefined' && document.activeElement !== el;
+  if(start == null || end == null || (unfocused && start === end)){
+    start = 0;
+    end = v.length;
+  }
+  el.value = v.slice(0, start) + str + v.slice(end);
+  const caret = start + str.length;
+  try{ if(typeof el.setSelectionRange === 'function') el.setSelectionRange(caret, caret); }catch(_){}
+  if(typeof emitEditorInput === 'function') emitEditorInput(el);
+  return true;
+}
+function overlayFieldCopyPayload(el){
+  if(!el) return '';
+  const v = el.value || '';
+  const start = el.selectionStart, end = el.selectionEnd;
+  if(start != null && end != null && end > start) return v.slice(start, end);
+  return v;
+}
 function openNotesEditorEl(){
   if(typeof document === 'undefined' || !document.querySelector) return null;
   return document.querySelector('.notes-popup .np-editor');
@@ -5167,6 +5210,7 @@ function openClipboardTarget(){
   return openNotesEditorEl() || openEditorTextEl();
 }
 function shouldTakeNodeClipboard(){
+  if(typeof openOverlayTextField==='function' && openOverlayTextField()) return false;
   if(openClipboardTarget()) return true;
   if(typeof document !== 'undefined' && isAppTextField(document.activeElement)) return false;
   if(typeof sel === 'undefined' || !sel) return false;
@@ -5379,6 +5423,7 @@ function insertEditorText(textEl, text, replaceAll){
 function onEditorClipboardKeydown(e){
   const act = clipboardEditAction(e);
   if(!act) return;
+  if(typeof openOverlayTextField==='function' && openOverlayTextField()) return;
   const textEl = openEditorTextEl();
   // Never preventDefault copy/cut on keydown. That cancels the copy/cut
   // event; WKWebView then has nowhere to write. The copy/cut listeners
@@ -5432,6 +5477,16 @@ function onEditorCopyCut(e, isCut){
 }
 function onEditorPaste(e){
   if(typeof READONLY !== 'undefined' && READONLY) return;
+  const overlay = typeof openOverlayTextField==='function' ? openOverlayTextField() : null;
+  if(overlay){
+    if(typeof document !== 'undefined' && document.activeElement === overlay) return;
+    const dt = e && e.clipboardData;
+    const text = clipboardPlainText(dt);
+    if(!text) return;
+    if(e && e.preventDefault) e.preventDefault();
+    insertFieldText(overlay, text);
+    return;
+  }
   if(typeof document !== 'undefined' && isAppTextField(document.activeElement) && !openClipboardTarget()) return;
   const dt = e && e.clipboardData;
   const imageFile = typeof firstImageFile === 'function' ? firstImageFile(dt) : null;
@@ -5465,6 +5520,8 @@ function onEditorPaste(e){
   if(typeof autoLayout === 'function') autoLayout();
 }
 function rmsClipboardCopy(){
+  const field = typeof openOverlayTextField==='function' ? openOverlayTextField() : null;
+  if(field) return overlayFieldCopyPayload(field);
   const target = openClipboardTarget();
   if(target){
     const inNotes = !!(target.closest && target.closest('.notes-popup'));
@@ -5493,6 +5550,20 @@ function rmsClipboardCopyPayload(){
   });
 }
 function rmsClipboardCut(){
+  const field = typeof openOverlayTextField==='function' ? openOverlayTextField() : null;
+  if(field){
+    const text = overlayFieldCopyPayload(field);
+    const v = field.value || '';
+    const start = field.selectionStart, end = field.selectionEnd;
+    if(start != null && end != null && end > start){
+      field.value = v.slice(0, start) + v.slice(end);
+      try{ field.setSelectionRange(start, start); }catch(_){}
+    } else {
+      field.value = '';
+    }
+    if(typeof emitEditorInput==='function') emitEditorInput(field);
+    return text;
+  }
   const text = rmsClipboardCopy();
   const textEl = openClipboardTarget();
   if(textEl && text){
@@ -5505,12 +5576,14 @@ function rmsClipboardCut(){
 }
 function rmsClipboardPasteImage(dataUrl){
   if(typeof READONLY !== 'undefined' && READONLY) return false;
+  if(typeof overlayTextFieldOwnsClipboard==='function' && overlayTextFieldOwnsClipboard()) return false;
   const str = String(dataUrl == null ? '' : dataUrl);
   if(!str) return false;
   return pasteImageAsChild(null, str);
 }
 function rmsClipboardPasteImageFile(name){
   if(typeof READONLY !== 'undefined' && READONLY) return false;
+  if(typeof overlayTextFieldOwnsClipboard==='function' && overlayTextFieldOwnsClipboard()) return false;
   const fileName = String(name == null ? '' : name);
   if(!fileName) return false;
   return pasteImageAsChild(null, null, fileName);
@@ -5519,6 +5592,8 @@ function rmsClipboardPaste(text){
   if(typeof READONLY !== 'undefined' && READONLY) return false;
   const str = String(text == null ? '' : text);
   if(!str) return false;
+  const overlay = typeof openOverlayTextField==='function' ? openOverlayTextField() : null;
+  if(overlay) return insertFieldText(overlay, str);
   if(typeof document !== 'undefined' && isAppTextField(document.activeElement) && !openClipboardTarget()) return false;
   const textEl = openClipboardTarget();
   if(textEl){
@@ -5547,6 +5622,11 @@ function rmsClipboardPaste(text){
   return true;
 }
 function rmsClipboardSelectAll(){
+  const field = typeof openOverlayTextField==='function' ? openOverlayTextField() : null;
+  if(field){
+    try{ if(typeof field.focus==='function') field.focus(); if(typeof field.select==='function') field.select(); }catch(_){}
+    return true;
+  }
   const textEl = openClipboardTarget();
   if(!textEl) return false;
   selectEditorContents(textEl);
@@ -5569,6 +5649,7 @@ if(typeof window !== 'undefined'){
   window.__rmsClipboardSelectAll = rmsClipboardSelectAll;
   window.__rmsClipboardUndo = rmsClipboardUndo;
   window.__rmsClipboardRedo = rmsClipboardRedo;
+  window.__rmsClipboardWantsText = overlayTextFieldOwnsClipboard;
 }
 function armEditorHost(textEl){
   if(!textEl) return;
@@ -5662,6 +5743,7 @@ if(typeof document!=='undefined' && document.addEventListener){
   document.addEventListener('copy', e => onEditorCopyCut(e, false), true);
   document.addEventListener('cut', e => onEditorCopyCut(e, true), true);
   window.addEventListener('focus', ()=>{
+    if(typeof openOverlayTextField==='function' && openOverlayTextField()) return;
     const textEl = openEditorTextEl();
     if(!textEl) return;
     const ae = document.activeElement;

@@ -17,12 +17,16 @@ const {
   nodeClipboardPlain,
   isAppTextField,
   shouldTakeNodeClipboard,
+  openOverlayTextField,
+  overlayTextFieldOwnsClipboard,
 } = loadFns([
   'clipboardEditAction',
   'shouldHandleEditorTextPaste',
   'editorCopyPayload',
   'openEditorTextEl',
   'openNotesEditorEl',
+  'openOverlayTextField',
+  'overlayTextFieldOwnsClipboard',
   'openClipboardTarget',
   'clipboardPlainText',
   'nodeClipboardPlain',
@@ -143,6 +147,20 @@ describe('shouldTakeNodeClipboard', () => {
       querySelector: () => null,
     };
     assert.equal(isAppTextField(global.document.activeElement), true);
+    assert.equal(shouldTakeNodeClipboard(), false);
+  });
+
+  test('does not steal clipboard from an open URL picker even if the input is not focused', () => {
+    const hrefIn = { tagName: 'INPUT', value: '', closest: () => null };
+    global.document = {
+      activeElement: { tagName: 'BODY' },
+      querySelector: sel => (typeof sel === 'string' && sel.includes('.picker')) ? hrefIn : null,
+    };
+    const { openOverlayTextField, overlayTextFieldOwnsClipboard, shouldTakeNodeClipboard } = loadFns(
+      ['openOverlayTextField', 'overlayTextFieldOwnsClipboard', 'openNotesEditorEl', 'openEditorTextEl', 'openClipboardTarget', 'isAppTextField', 'shouldTakeNodeClipboard']
+    );
+    assert.equal(openOverlayTextField(), hrefIn);
+    assert.equal(overlayTextFieldOwnsClipboard(), true);
     assert.equal(shouldTakeNodeClipboard(), false);
   });
 });
@@ -317,6 +335,50 @@ describe('rmsClipboardPaste — native shell Cmd+V / Typeless', () => {
     assert.equal(textEl.textContent, 'from native pasteboard');
   });
 
+  test('pastes into the URL picker instead of the selected node', () => {
+    const hrefIn = {
+      tagName: 'INPUT',
+      value: '',
+      selectionStart: 0,
+      selectionEnd: 0,
+      focus(){},
+      setSelectionRange(a, b){ this.selectionStart = a; this.selectionEnd = b; },
+      dispatchEvent(){ return true; },
+    };
+    let started = false;
+    global.document = {
+      activeElement: { tagName: 'BODY' },
+      querySelector: sel => {
+        if(typeof sel === 'string' && sel.includes('.picker')) return hrefIn;
+        return null;
+      },
+    };
+    const { rmsClipboardPaste } = loadFns(
+      [
+        'isAppTextField',
+        'openOverlayTextField',
+        'overlayTextFieldOwnsClipboard',
+        'insertFieldText',
+        'emitEditorInput',
+        'openEditorTextEl',
+        'openNotesEditorEl',
+        'openClipboardTarget',
+        'insertEditorText',
+        'rmsClipboardPaste',
+      ],
+      {
+        READONLY: false,
+        sel: 'n1',
+        map: { nodes: { n1: { text: 'SPT 2025 ACL' } } },
+        startEdit(){ started = true; },
+        execCmd: () => false,
+      }
+    );
+    assert.equal(rmsClipboardPaste('https://arxiv.org/html/2601.03511v2'), true);
+    assert.equal(hrefIn.value, 'https://arxiv.org/html/2601.03511v2');
+    assert.equal(started, false);
+  });
+
   test('pastes into the notes editor when that popup is open', () => {
     const notesEl = {
       textContent: 'old note',
@@ -356,6 +418,7 @@ describe('rmsClipboardPasteImage — native shell image paste', () => {
     assert.match(src, /window\.__rmsClipboardPasteImage\s*=\s*rmsClipboardPasteImage/);
     assert.match(src, /window\.__rmsClipboardPasteImageFile\s*=\s*rmsClipboardPasteImageFile/);
     assert.match(src, /window\.__rmsClipboardCopyPayload\s*=\s*rmsClipboardCopyPayload/);
+    assert.match(src, /window\.__rmsClipboardWantsText\s*=\s*overlayTextFieldOwnsClipboard/);
   });
 });
 

@@ -976,13 +976,22 @@ private final class MapWebView: WKWebView {
     }
 
     private func nativePaste() {
-        if let payload = pasteboardImagePayload() {
-            pasteImage(payload)
-            return
+        evaluateJavaScript("window.__rmsClipboardWantsText&&window.__rmsClipboardWantsText()") { [weak self] result, _ in
+            guard let self else { return }
+            let wantsText = (result as? Bool) == true || (result as? NSNumber)?.boolValue == true
+            let text = NSPasteboard.general.string(forType: .string) ?? ""
+            if wantsText {
+                guard !text.isEmpty else { return }
+                self.evaluateJavaScript("window.__rmsClipboardPaste&&window.__rmsClipboardPaste(\(Self.jsonString(text)))")
+                return
+            }
+            if let payload = self.pasteboardImagePayload() {
+                self.pasteImage(payload)
+                return
+            }
+            guard !text.isEmpty else { return }
+            self.evaluateJavaScript("window.__rmsClipboardPaste&&window.__rmsClipboardPaste(\(Self.jsonString(text)))")
         }
-        let text = NSPasteboard.general.string(forType: .string) ?? ""
-        guard !text.isEmpty else { return }
-        evaluateJavaScript("window.__rmsClipboardPaste&&window.__rmsClipboardPaste(\(Self.jsonString(text)))")
     }
 
     private struct PasteImage {
