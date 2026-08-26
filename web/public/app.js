@@ -4000,20 +4000,15 @@ function showNodeHrefMenu(ev, id){
   closeNodeHrefMenu();
   const label=(typeof window!=='undefined' && window.rmsT) ? window.rmsT('actOpenHref') : 'Open link';
   const p=document.createElement('div');
-  p.className='row-pop node-href-menu';
-  p.style.position='fixed';
-  p.style.zIndex='2000';
-  p.innerHTML=`<button type="button" data-a="open-href"><span class="rp-ic">↗</span>${escapeHtml(label)}</button>`;
+  p.className='rms-ctx node-href-menu';
+  const x0=(ev && ev.clientX) || 8, y0=(ev && ev.clientY) || 8;
+  p.style.left=x0+'px';
+  p.style.top=y0+'px';
+  p.innerHTML=`<button type="button" data-a="open-href">${escapeHtml(label)}</button>`;
   document.body.appendChild(p);
-  const pad=8;
   const r=p.getBoundingClientRect();
-  let x=(ev && ev.clientX) || pad, y=(ev && ev.clientY) || pad;
-  if(x+r.width>window.innerWidth-pad) x=Math.max(pad, window.innerWidth-r.width-pad);
-  if(y+r.height>window.innerHeight-pad) y=Math.max(pad, window.innerHeight-r.height-pad);
-  if(x<pad) x=pad;
-  if(y<pad) y=pad;
-  p.style.left=x+'px';
-  p.style.top=y+'px';
+  if(r.right>innerWidth-8) p.style.left=Math.max(8, innerWidth-r.width-8)+'px';
+  if(r.bottom>innerHeight-8) p.style.top=Math.max(8, innerHeight-r.height-8)+'px';
   p.addEventListener('mousedown',e=>e.stopPropagation());
   p.querySelector('[data-a="open-href"]').onclick=e=>{
     e.stopPropagation();

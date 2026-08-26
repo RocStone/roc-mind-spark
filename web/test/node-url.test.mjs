@@ -99,6 +99,12 @@ describe('chrome wiring', () => {
     assert.doesNotMatch(css, /\.href-node \.node-text[^{]*\{[^}]*text-decoration:\s*underline/);
   });
 
+  test('Open link menu hugs its label instead of stretching across the canvas', () => {
+    assert.match(appSrc, /className='rms-ctx node-href-menu'/);
+    assert.doesNotMatch(appSrc, /className='row-pop node-href-menu'/);
+    assert.match(css, /\.node-href-menu\{[^}]*width:\s*max-content/);
+  });
+
   test('i18n labels exist in both locales', () => {
     assert.match(i18nSrc, /actHref: 'Hyperlink'/);
     assert.match(i18nSrc, /actHref: '超链接'/);

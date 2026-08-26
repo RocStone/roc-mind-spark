@@ -1688,7 +1688,15 @@
     border-radius:99px; background:var(--link); pointer-events:none; opacity:.88;
   }
   .node.root.href-node .href-bar{ background:rgba(255,255,255,.72); }
-  .node-href-menu{ min-width:148px; }
+  /* Hug the label. row-pop is a flex column; with position:fixed + left it
+     stretches to the right edge of the viewport. rms-ctx is the existing
+     right-click menu and already sizes to its text. */
+  .node-href-menu{
+    width:max-content;
+    min-width:0;
+    max-width:min(240px, calc(100vw - 16px));
+  }
+  .node-href-menu button{ width:auto; white-space:nowrap; }
   .picker.href-picker{
     flex-direction:column; align-items:stretch; gap:6px; padding:8px;
   }
