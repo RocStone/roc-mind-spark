@@ -23,6 +23,9 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
     private var ignoreActivateUntil: Date?
     /// WKWebView `<input type=file>` is stuck until `runOpenPanelWith` completes.
     private var pickingOpenPanel = false
+    /// window.open(_blank) hits createWebViewWith; a follow-up <a> click can
+    /// also hit decidePolicyFor. Both used to call NSWorkspace.open.
+    private var lastExternalOpen: (url: URL, at: Date)?
     private var openPanel: NSOpenPanel?
     private var openPanelCompletion: (@MainActor @Sendable ([URL]?) -> Void)?
 
@@ -717,7 +720,7 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
         guard let url = navigationAction.request.url else { return .cancel }
         if url.host == "127.0.0.1" || url.host == "localhost" { return .allow }
         if url.scheme == "about" { return .allow }
-        NSWorkspace.shared.open(url)
+        openExternal(url)
         return .cancel
     }
 
@@ -728,9 +731,17 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
         windowFeatures: WKWindowFeatures
     ) -> WKWebView? {
         if let url = navigationAction.request.url {
-            NSWorkspace.shared.open(url)
+            openExternal(url)
         }
         return nil
+    }
+
+    private func openExternal(_ url: URL) {
+        if let last = lastExternalOpen, last.url == url, Date().timeIntervalSince(last.at) < 0.8 {
+            return
+        }
+        lastExternalOpen = (url, Date())
+        NSWorkspace.shared.open(url)
     }
 
     /// Without this, `<input type=file>` (Attach image / Import) is a no-op

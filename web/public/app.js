@@ -4031,19 +4031,29 @@ function onNodeHrefContextMenu(e){
   if(e.stopPropagation) e.stopPropagation();
   showNodeHrefMenu(e, id);
 }
+function isRmsWk(){
+  return !!(typeof document!=='undefined' && document.documentElement
+    && document.documentElement.classList
+    && document.documentElement.classList.contains('rms-wk'));
+}
+function openExternalUrl(url){
+  if(!url) return false;
+  // WK: window.open(_blank) already goes through createWebViewWith →
+  // NSWorkspace.open. createWebViewWith returns nil, so window.open is null
+  // even though the page already opened. A fallback <a> click would open it
+  // a second time via decidePolicyFor / createWebViewWith again.
+  const opened=window.open(url, '_blank', 'noopener,noreferrer');
+  if(opened || isRmsWk()) return true;
+  const a=document.createElement('a');
+  a.href=url; a.target='_blank'; a.rel='noopener noreferrer';
+  document.body.appendChild(a); a.click(); a.remove();
+  return true;
+}
 function openNodeUrl(id){
   const n=map.nodes[id]; if(!n) return;
   const url=normalizeNodeUrl(n.url);
   if(!url){ toast('No valid URL on this node'); return; }
-  const opened=window.open(url, '_blank', 'noopener,noreferrer');
-  // WK intercepts target=_blank via createWebViewWith and hands it to the OS.
-  // If the popup is blocked, fall through to a same-view navigation — the
-  // overlay's decidePolicyFor still opens it in the default browser.
-  if(!opened){
-    const a=document.createElement('a');
-    a.href=url; a.target='_blank'; a.rel='noopener noreferrer';
-    document.body.appendChild(a); a.click(); a.remove();
-  }
+  openExternalUrl(url);
 }
 function setNodeUrl(id, raw){
   const n=map.nodes[id]; if(!n) return false;

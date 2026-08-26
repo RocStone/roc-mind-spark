@@ -113,6 +113,42 @@ describe('chrome wiring', () => {
   });
 });
 
+describe('openExternalUrl — one click, one browser tab', () => {
+  function harness(wk){
+    let opened = 0;
+    let fallback = 0;
+    global.window = { open(){ opened++; return null; } };
+    global.document = {
+      documentElement: { classList: { contains: c => wk && c === 'rms-wk' } },
+      createElement(){
+        fallback++;
+        return { href:'', target:'', rel:'', click(){}, remove(){} };
+      },
+      body: { appendChild(){} },
+    };
+    const { openExternalUrl, isRmsWk } = loadFns(['isRmsWk', 'openExternalUrl']);
+    return { openExternalUrl, isRmsWk, counts: () => ({ opened, fallback }) };
+  }
+
+  test('WK overlay does not click a second <a> when window.open returns null', () => {
+    const h = harness(true);
+    assert.equal(h.isRmsWk(), true);
+    h.openExternalUrl('https://arxiv.org/html/2601.03511v2');
+    const c = h.counts();
+    assert.equal(c.opened, 1);
+    assert.equal(c.fallback, 0);
+  });
+
+  test('a regular browser still falls back if the popup is blocked', () => {
+    const h = harness(false);
+    assert.equal(h.isRmsWk(), false);
+    h.openExternalUrl('https://example.com');
+    const c = h.counts();
+    assert.equal(c.opened, 1);
+    assert.equal(c.fallback, 1);
+  });
+});
+
 describe('nodeHrefContextId — right-click only adds Open link when the node has a URL', () => {
   test('a linked node returns its id', () => {
     const node = { className:'node', dataset:{ id:'n1' }, parent:null };
