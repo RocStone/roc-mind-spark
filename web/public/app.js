@@ -397,9 +397,9 @@ const MARKERS=[
   {c:'\u2753',    label:'Question'}, {c:'\u{1F6A9}', label:'Flag'},
   {c:'\u{1F525}', label:'Hot'},      {c:'\u{1F4A1}', label:'Idea'},
   {c:'\u{1F440}', label:'Review'},   {c:'\u{1F512}', label:'Blocked'},
-  {c:'\u2705',    label:'Approved'}, {c:'\u26A0',    label:'Risk'},
-  {c:'\u{1F3AF}', label:'Goal'},     {c:'\u{1F4CC}', label:'Pinned'},
-  {c:'\u23F3',    label:'In progress'},
+  {c:'\u2705',    label:'Approved'}, {c:'\u274C',    label:'Rejected'},
+  {c:'\u26A0',    label:'Risk'},     {c:'\u{1F3AF}', label:'Goal'},
+  {c:'\u{1F4CC}', label:'Pinned'},   {c:'\u23F3',    label:'In progress'},
   {c:'\u{1F48E}', label:'Finding'},
 ];
 const NODE_COLORS=['#ffffff','#ffe2d6','#ffedc2','#dcefce','#cfe9e6','#d8e0fb','#efd9f2','#e9e2d6'];

@@ -52,6 +52,12 @@ describe('MARKERS palette', () => {
     assert.equal(hourglass.c, '\u23F3');
   });
 
+  test('includes a rejected cross mark next to Approved', () => {
+    const rejected = MARKERS.find(m => m.label === 'Rejected');
+    assert.ok(rejected, 'missing Rejected marker');
+    assert.equal(rejected.c, '\u274C');
+  });
+
   test('keeps Finding as the conclusion marker', () => {
     const finding = MARKERS.find(m => m.label === 'Finding');
     assert.equal(finding && finding.c, '\u{1F48E}');
