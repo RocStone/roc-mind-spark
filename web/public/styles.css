@@ -1584,7 +1584,7 @@
     .stage{ width:100% !important; height:auto !important; overflow:visible !important; }
     body, .app, .stage{ background:#fff !important; }
     .node{ box-shadow:none !important; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
-    .node .token-badge, .node .notes-mark, .node .href-mark{ display:none !important; }
+    .node .token-badge, .node .notes-mark{ display:none !important; }
     @page{ margin:1cm; }
   }
 
@@ -1688,16 +1688,7 @@
     border-radius:99px; background:var(--link); pointer-events:none; opacity:.88;
   }
   .node.root.href-node .href-bar{ background:rgba(255,255,255,.72); }
-  .node .href-mark{
-    position:absolute; bottom:-9px; right:-9px;
-    width:22px; height:22px; border-radius:50%;
-    background:var(--node-bg); border:1.5px solid var(--link);
-    display:flex; align-items:center; justify-content:center;
-    font-size:11px; cursor:pointer; z-index:6;
-    box-shadow:0 1px 3px rgba(0,0,0,.18);
-  }
-  .node .href-mark:hover{transform:scale(1.1)}
-  .node.left .href-mark{right:auto; left:-9px}
+  .node-href-menu{ min-width:148px; }
   .picker.href-picker{
     flex-direction:column; align-items:stretch; gap:6px; padding:8px;
   }

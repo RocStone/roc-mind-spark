@@ -1,4 +1,4 @@
-// Per-node hyperlink (n.url). Badge opens; nodebar edits.
+// Per-node hyperlink (n.url). Right-click opens; nodebar edits.
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { loadFns } from './helpers/load-app-fns.mjs';
@@ -94,7 +94,7 @@ describe('chrome wiring', () => {
   test('linked nodes are not underlined as a whole', () => {
     assert.match(css, /\.node\.href-node/);
     assert.match(css, /\.node \.href-bar/);
-    assert.match(css, /\.node \.href-mark/);
+    assert.doesNotMatch(css, /\.node \.href-mark/);
     assert.doesNotMatch(css, /\.node\.href-node[^{]*\{[^}]*text-decoration:\s*underline/);
     assert.doesNotMatch(css, /\.href-node \.node-text[^{]*\{[^}]*text-decoration:\s*underline/);
   });
@@ -102,5 +102,41 @@ describe('chrome wiring', () => {
   test('i18n labels exist in both locales', () => {
     assert.match(i18nSrc, /actHref: 'Hyperlink'/);
     assert.match(i18nSrc, /actHref: '超链接'/);
+    assert.match(i18nSrc, /actOpenHref: 'Open link'/);
+    assert.match(i18nSrc, /actOpenHref: '打开链接'/);
+  });
+});
+
+describe('nodeHrefContextId — right-click only adds Open link when the node has a URL', () => {
+  test('a linked node returns its id', () => {
+    const node = { className:'node', dataset:{ id:'n1' }, parent:null };
+    node.closest = sel => sel.split(',').some(s => s.trim()==='.node') ? node : null;
+    const { nodeHrefContextId } = loadFns(['nodeHrefContextId'], {
+      map: { nodes: { n1: { url:'https://arxiv.org/html/2601.03511v2' } } },
+    });
+    assert.equal(nodeHrefContextId(node), 'n1');
+  });
+
+  test('a node without a URL returns null, so the existing right-click is unchanged', () => {
+    const node = { className:'node', dataset:{ id:'n1' }, parent:null };
+    node.closest = sel => sel.split(',').some(s => s.trim()==='.node') ? node : null;
+    const { nodeHrefContextId } = loadFns(['nodeHrefContextId'], {
+      map: { nodes: { n1: { text:'plain' } } },
+    });
+    assert.equal(nodeHrefContextId(node), null);
+  });
+
+  test('a handle on a linked node returns null so shortcut-bind still owns that click', () => {
+    const node = { className:'node', dataset:{ id:'n1' } };
+    const handle = { className:'handle', parent:node };
+    handle.closest = sel => {
+      if(sel.split(',').some(s => s.trim()==='.handle')) return handle;
+      if(sel.split(',').some(s => s.trim()==='.node')) return node;
+      return null;
+    };
+    const { nodeHrefContextId } = loadFns(['nodeHrefContextId'], {
+      map: { nodes: { n1: { url:'https://example.com' } } },
+    });
+    assert.equal(nodeHrefContextId(handle), null);
   });
 });

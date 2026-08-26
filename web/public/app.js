@@ -1070,20 +1070,13 @@ function render(){
       cb.addEventListener('click',ev=>{ ev.stopPropagation(); showCitationForm(id); });
       el.appendChild(cb);
     }
-    // Hyperlink — bar on the card so it is glanceable without underlining
-    // the text; 🔗 badge click opens (edit lives on the nodebar, like notes).
+    // Hyperlink — a bar on the card, glanceable without underlining the
+    // text. Opening lives on the right-click menu, not a badge.
     if(n.url){
       const bar=document.createElement('span');
       bar.className='href-bar';
       bar.setAttribute('aria-hidden','true');
       el.appendChild(bar);
-      const hm=document.createElement('span');
-      hm.className='href-mark';
-      hm.textContent='🔗';
-      hm.title=(n.url||'')+' — click to open';
-      hm.addEventListener('mousedown',ev=>ev.stopPropagation());
-      hm.addEventListener('click',ev=>{ ev.stopPropagation(); openNodeUrl(id); });
-      el.appendChild(hm);
     }
     // Task progress roll-up — shown on nodes that have task-bearing descendants
     const prog = {done:roll.tdone[id], total:roll.ttot[id]};
@@ -3988,6 +3981,60 @@ function normalizeNodeUrl(raw){
   if(u.protocol!=='http:' && u.protocol!=='https:') return '';
   if(!u.hostname) return '';
   return u.href;
+}
+function nodeHrefContextId(target){
+  if(!target || !target.closest) return null;
+  // Handles / chrome keep their existing right-click (shortcut bind). A node
+  // without n.url must also fall through so the menu does not change.
+  if(target.closest('.handle, .resize-grip, .nodebar, .picker, .notes-mark, .ref-mark, .task-check, .rms-ctx, .row-pop, input, textarea, [contenteditable="true"]')) return null;
+  const el=target.closest('.node');
+  if(!el || !el.dataset) return null;
+  const id=el.dataset.id;
+  if(!id || !map || !map.nodes || !map.nodes[id] || !map.nodes[id].url) return null;
+  return id;
+}
+function closeNodeHrefMenu(){
+  document.querySelectorAll('.node-href-menu').forEach(p=>p.remove());
+}
+function showNodeHrefMenu(ev, id){
+  closeNodeHrefMenu();
+  const label=(typeof window!=='undefined' && window.rmsT) ? window.rmsT('actOpenHref') : 'Open link';
+  const p=document.createElement('div');
+  p.className='row-pop node-href-menu';
+  p.style.position='fixed';
+  p.style.zIndex='2000';
+  p.innerHTML=`<button type="button" data-a="open-href"><span class="rp-ic">↗</span>${escapeHtml(label)}</button>`;
+  document.body.appendChild(p);
+  const pad=8;
+  const r=p.getBoundingClientRect();
+  let x=(ev && ev.clientX) || pad, y=(ev && ev.clientY) || pad;
+  if(x+r.width>window.innerWidth-pad) x=Math.max(pad, window.innerWidth-r.width-pad);
+  if(y+r.height>window.innerHeight-pad) y=Math.max(pad, window.innerHeight-r.height-pad);
+  if(x<pad) x=pad;
+  if(y<pad) y=pad;
+  p.style.left=x+'px';
+  p.style.top=y+'px';
+  p.addEventListener('mousedown',e=>e.stopPropagation());
+  p.querySelector('[data-a="open-href"]').onclick=e=>{
+    e.stopPropagation();
+    closeNodeHrefMenu();
+    openNodeUrl(id);
+  };
+  setTimeout(()=>{
+    const off=e=>{
+      if(!p.contains(e.target)){
+        closeNodeHrefMenu();
+        document.removeEventListener('mousedown',off,true);
+      }
+    };
+    document.addEventListener('mousedown',off,true);
+  },0);
+}
+function onNodeHrefContextMenu(e){
+  const id=nodeHrefContextId(e && e.target);
+  if(!id) return;
+  if(e.stopPropagation) e.stopPropagation();
+  showNodeHrefMenu(e, id);
 }
 function openNodeUrl(id){
   const n=map.nodes[id]; if(!n) return;
@@ -10115,17 +10162,7 @@ async function exportPNG(){
       ctx.fillStyle=themeInk; ctx.fillText('📖', cx, cy);
       ctx.textAlign='start';
     }
-    // Hyperlink mark — bottom-right (bottom-left on left-side nodes)
-    if(n.url){
-      const cx=(n.side==='left') ? n.x-9+11 : n.x+w-9+11;
-      const cy=n.y+h-9+11;
-      ctx.beginPath(); ctx.arc(cx, cy, 11, 0, Math.PI*2);
-      ctx.fillStyle=themeNodeBg; ctx.fill();
-      ctx.lineWidth=1.5; ctx.strokeStyle=themeLink; ctx.stroke();
-      ctx.font='11px sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
-      ctx.fillStyle=themeInk; ctx.fillText('🔗', cx, cy);
-      ctx.textAlign='start';
-    }
+
   });
 
   try{
@@ -10316,6 +10353,7 @@ function suppressNativeContextMenu(e){
    WIRE UP
    ============================================================ */
 document.addEventListener('contextmenu', suppressNativeContextMenu, true);
+document.addEventListener('contextmenu', onNodeHrefContextMenu, true);
 $('#newMap').onclick=createMap;
 $('#newMapMenu')?.addEventListener('click', e => { e.stopPropagation(); showTemplatesMenu(); });
 $('#emptyNew').onclick=createMap;
