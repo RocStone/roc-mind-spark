@@ -923,6 +923,7 @@ function render(){
     if(n.height){ el.style.minHeight=n.height+'px'; }
     // Reference/citation nodes get a distinct class
     if(n.ref) el.classList.add('ref-node');
+    if(n.url) el.classList.add('href-node');
     // Attached image renders as a thumbnail above the text (node goes column)
     if(n.image || n.imagePending){
       el.classList.add('has-image');
@@ -1068,6 +1069,21 @@ function render(){
       cb.addEventListener('mousedown',ev=>ev.stopPropagation());
       cb.addEventListener('click',ev=>{ ev.stopPropagation(); showCitationForm(id); });
       el.appendChild(cb);
+    }
+    // Hyperlink — bar on the card so it is glanceable without underlining
+    // the text; 🔗 badge click opens (edit lives on the nodebar, like notes).
+    if(n.url){
+      const bar=document.createElement('span');
+      bar.className='href-bar';
+      bar.setAttribute('aria-hidden','true');
+      el.appendChild(bar);
+      const hm=document.createElement('span');
+      hm.className='href-mark';
+      hm.textContent='🔗';
+      hm.title=(n.url||'')+' — click to open';
+      hm.addEventListener('mousedown',ev=>ev.stopPropagation());
+      hm.addEventListener('click',ev=>{ ev.stopPropagation(); openNodeUrl(id); });
+      el.appendChild(hm);
     }
     // Task progress roll-up — shown on nodes that have task-bearing descendants
     const prog = {done:roll.tdone[id], total:roll.ttot[id]};
@@ -3948,6 +3964,99 @@ function setMarker(id, ch){
   // neighbours were positioned for the old size.
   pushHistory(); render(); autoLayout();
 }
+
+/* ============================================================
+   PER-NODE HYPERLINK — n.url on the node, not inline text.
+   Badge click opens; the nodebar button edits. Text is not
+   underlined (that fights the existing inline URL renderer).
+   ============================================================ */
+function normalizeNodeUrl(raw){
+  let s=String(raw==null?'':raw).trim();
+  if(!s) return '';
+  if(s.charAt(0)==='<' && s.charAt(s.length-1)==='>') s=s.slice(1,-1).trim();
+  if(!s) return '';
+  if(s.length>2000) s=s.slice(0, 2000);
+  if(/^(javascript|data|file|vbscript|blob|about):/i.test(s)) return '';
+  if(/^\/\//.test(s)) s='https:'+s;
+  else if(!/^[a-z][a-z0-9+.-]*:/i.test(s)){
+    if(/^(www\.)?[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+([/:?#].*)?$/i.test(s))
+      s='https://'+s;
+    else return '';
+  }
+  let u;
+  try{ u=new URL(s); }catch(_){ return ''; }
+  if(u.protocol!=='http:' && u.protocol!=='https:') return '';
+  if(!u.hostname) return '';
+  return u.href;
+}
+function openNodeUrl(id){
+  const n=map.nodes[id]; if(!n) return;
+  const url=normalizeNodeUrl(n.url);
+  if(!url){ toast('No valid URL on this node'); return; }
+  const opened=window.open(url, '_blank', 'noopener,noreferrer');
+  // WK intercepts target=_blank via createWebViewWith and hands it to the OS.
+  // If the popup is blocked, fall through to a same-view navigation — the
+  // overlay's decidePolicyFor still opens it in the default browser.
+  if(!opened){
+    const a=document.createElement('a');
+    a.href=url; a.target='_blank'; a.rel='noopener noreferrer';
+    document.body.appendChild(a); a.click(); a.remove();
+  }
+}
+function setNodeUrl(id, raw){
+  const n=map.nodes[id]; if(!n) return false;
+  flushOpenEditToModel();
+  const trimmed=String(raw==null?'':raw).trim();
+  const url=normalizeNodeUrl(trimmed);
+  if(trimmed && !url){ toast('Need a valid http(s) URL'); return false; }
+  if(url) n.url=url; else delete n.url;
+  n.updated=Date.now();
+  pushHistory(); render(); autoLayout();
+  return true;
+}
+function showHrefPicker(anchor, id){
+  const n=map.nodes[id]; if(!n) return;
+  if(READONLY) return;
+  if(activePicker){ activePicker.remove(); activePicker=null; }
+  const cur=n.url||'';
+  const p=document.createElement('div');
+  p.className='picker href-picker'; p._anchor=anchor;
+  p.innerHTML=
+    `<input class="href-in" type="text" inputmode="url" spellcheck="false" autocomplete="off" placeholder="https://…" value="${escapeHtml(cur)}">`+
+    `<div class="href-actions">`+
+      (cur?`<button type="button" class="href-open" title="Open in browser">↗ Open</button>`:'')+
+      (cur?`<button type="button" class="href-clear">Remove</button>`:'')+
+      `<button type="button" class="href-go primary">Save</button>`+
+    `</div>`;
+  document.body.appendChild(p);
+  positionPopup(p, anchor, {align:'left'});
+  activePicker=p;
+  const input=p.querySelector('.href-in');
+  let off=null;
+  const close=()=>{
+    if(off) document.removeEventListener('mousedown',off);
+    p.remove(); if(activePicker===p) activePicker=null;
+  };
+  const save=()=>{ if(setNodeUrl(id, input.value)) close(); else input.focus(); };
+  p.addEventListener('mousedown',ev=>ev.stopPropagation());
+  p.addEventListener('keydown',ev=>ev.stopPropagation());
+  input.addEventListener('keydown',ev=>{
+    if(ev.isComposing || ev.keyCode===229) return;
+    if(ev.key==='Enter'){ ev.preventDefault(); save(); }
+    else if(ev.key==='Escape'){ ev.preventDefault(); close(); }
+  });
+  p.querySelector('.href-go').onclick=ev=>{ ev.stopPropagation(); save(); };
+  p.querySelector('.href-clear')?.addEventListener('click',ev=>{ ev.stopPropagation(); setNodeUrl(id, ''); close(); });
+  p.querySelector('.href-open')?.addEventListener('click',ev=>{ ev.stopPropagation(); openNodeUrl(id); });
+  setTimeout(()=>{
+    input.focus();
+    input.select();
+    off=ev=>{
+      if(!p.contains(ev.target)) close();
+    };
+    document.addEventListener('mousedown',off);
+  },0);
+}
 function cycleTask(id){
   const n=map.nodes[id]; if(!n) return;
   // Nodebar clicks do not blur-commit (so inline B/I/U keep their selection).
@@ -4588,8 +4697,9 @@ async function searchAllMaps(query){
     for(const n of Object.values(m.nodes)){
       const plain=nodeTextPlain(n.text||'').toLowerCase();
       const notes=(n.notes||'').replace(/<[^>]*>/g,' ').toLowerCase();
-      if(plain.includes(q) || notes.includes(q)){
-        const src=plain.includes(q)?nodeTextPlain(n.text||''):(n.notes||'').replace(/<[^>]*>/g,' ');
+      const href=(n.url||'').toLowerCase();
+      if(plain.includes(q) || notes.includes(q) || href.includes(q)){
+        const src=plain.includes(q)?nodeTextPlain(n.text||''):notes.includes(q)?(n.notes||'').replace(/<[^>]*>/g,' '):(n.url||'');
         const at=src.toLowerCase().indexOf(q);
         const snippet=(at>30?'…':'')+src.slice(Math.max(0,at-30), at+q.length+40).trim()+'…';
         results.push({ mapId:m.id, mapTitle:m.title||'Untitled', nodeId:n.id, snippet });
@@ -5803,6 +5913,7 @@ function positionNodeBar(){
       <button data-a="task" class="${n.task?'on':''}" title="Task state (todo / doing / done)">☑</button>
       <button data-a="marker" class="${n.marker?'on':''}" title="${n.marker?'Change marker':'Add a marker'}">${n.marker||'\u2B50'}</button>
       <button data-a="cite" class="${n.ref?'on':''}" title="Reference / citation">📖</button>
+      <button data-a="href" class="${n.url?'on':''}" title="${n.url?'Edit hyperlink':'Add hyperlink'}">🔗</button>
       <button data-a="image" class="${n.image?'on':''}" title="Attach image">🖼</button>
       ${!isRoot?'<button data-a="del" title="Delete (Del)">🗑</button>':''}
     </div>
@@ -5890,6 +6001,7 @@ function positionNodeBar(){
       else if(a==='task') cycleTask(sel);
       else if(a==='marker'){ showMarkerPicker(b, sel); return; }   // return: keep the bar open behind the picker
       else if(a==='cite') showCitationForm(sel);
+      else if(a==='href'){ showHrefPicker(b, sel); return; }
       else if(a==='image'){
         if(map.nodes[sel].image){
           if(confirm('Remove this image?')) detachImageFromNode(sel);
@@ -7362,7 +7474,7 @@ async function createMapFromTemplate(templateId){
     if(!n.parent) rootId = nid;
   });
   // Optional per-node fields a template may set to showcase features.
-  const OPT = ['notes','image','ref','citation','fontSize','bold','italic',
+  const OPT = ['notes','image','url','ref','citation','fontSize','bold','italic',
     'underline','strike','textColor','highlight','align','listType','collapsed','width','height',
     'html','frontmatter','raw','lang'];
   tpl.nodes.forEach(n => {
@@ -8172,7 +8284,10 @@ function convertMindToMap(d, filename){
     const n={ id, parent:parentId, x:0, y:0, text: mindTitleToText(g.title) };
     const note=g.note!=null ? String(g.note).trim() : '';
     if(note && note!=='-') n.notes = sanitizeNotes(note.replace(/\r\n?/g,'\n').replace(/\n/g,'<br>'));
-    if(g.link){ const url=String(g.link); n.notes=(n.notes||'')+`<p><a href="${escapeHtml(url)}">${escapeHtml(url)}</a></p>`; }
+    if(g.link){
+      const url=typeof normalizeNodeUrl==='function' ? normalizeNodeUrl(g.link) : String(g.link);
+      if(url) n.url=url;
+    }
     if(g.image){ const im=g.image; const url=typeof im==='string'?im:(im.url||im.src||''); if(url) n.image=url; }
     applyStyle(n, g.style);
     nodes[id]=n;
@@ -8310,6 +8425,11 @@ function parseOPML(text, filename){
     nodes[id] = { id, text:mdInlineToHtml(txt.trim()), parent:parentId, side, x:0, y:0 };
     const note = outline.getAttribute('_note') || outline.getAttribute('note');
     if(note) nodes[id].notes = escapeHtml(note);
+    const href = outline.getAttribute('url') || outline.getAttribute('htmlUrl') || outline.getAttribute('xmlUrl');
+    if(href){
+      const url=typeof normalizeNodeUrl==='function' ? normalizeNodeUrl(href) : '';
+      if(url) nodes[id].url=url;
+    }
     [...outline.children]
       .filter(c => c.tagName && c.tagName.toLowerCase()==='outline')
       .forEach(child => walk(child, id, side));
@@ -8583,7 +8703,7 @@ function parseMarkdownOutline(text, filename){
         if(mm.underline) n.underline=true;   // bold/italic/strike round-trip via visible **/*/~~ syntax instead (see buildMarkdown)
         if(mm.fontSize) n.fontSize=mm.fontSize; if(mm.listType) n.listType=mm.listType;
         if(mm.highlight) n.highlight=mm.highlight; if(mm.align) n.align=mm.align;
-        if(mm.image) n.image=mm.image; if(mm.ref) n.ref=true; if(mm.citation) n.citation=mm.citation;
+        if(mm.image) n.image=mm.image; if(mm.url) n.url=mm.url; if(mm.ref) n.ref=true; if(mm.citation) n.citation=mm.citation;
         if(mm.created) n.created=mm.created; if(mm.updated) n.updated=mm.updated;
       }
       kidsOrd(id).forEach((c,i)=>applyMeta(c.id, path+'.'+i));
@@ -9066,6 +9186,7 @@ function _nodeMeta(n){   // per-node info that JSON has but Markdown can't expre
   // (applyMeta below still reads these legacy meta fields for files exported before this.)
   if(n.ref) m.ref=1;
   if(n.citation) m.citation=n.citation;
+  if(n.url) m.url=n.url;
   if(n.created) m.created=n.created;
   if(n.updated) m.updated=n.updated;
   return Object.keys(m).length? m : null;
@@ -9708,6 +9829,7 @@ async function exportPNG(){
   const themeNodeBg = css('--node-bg')   || '#ffffff';
   const themeLine   = css('--line')      || '#d8cfbf';
   const accent      = css('--accent')    || '#e0613a';
+  const themeLink   = css('--link')      || '#b8451f';
   const mapStyle  = map.style  || 'modern';
   const mapLayout = map.layout || 'balanced';
 
@@ -9868,9 +9990,15 @@ async function exportPNG(){
     }
     ctx.fill();
     if(!isRoot && mapStyle !== 'bubble'){
-      ctx.strokeStyle = mapStyle==='sketch' ? themeInk : themeLine;
+      ctx.strokeStyle = n.url ? themeLink : (mapStyle==='sketch' ? themeInk : themeLine);
       ctx.lineWidth = mapStyle==='sketch' ? 2 : 1.5;
       ctx.stroke();
+    }
+    if(n.url){
+      const barW=Math.max(18, w-24), barX=n.x+(w-barW)/2, barY=n.y+h-8;
+      roundRect(ctx, barX, barY, barW, 3, 1.5);
+      ctx.fillStyle = isRoot ? 'rgba(255,255,255,.7)' : themeLink;
+      ctx.fill();
     }
     // Text — pick a color that contrasts with the node background
     const bg = isRoot ? (map.color || accent) : (n.color || themeNodeBg);
@@ -9985,6 +10113,17 @@ async function exportPNG(){
       ctx.lineWidth=1.5; ctx.strokeStyle=accent; ctx.stroke();
       ctx.font='11px sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
       ctx.fillStyle=themeInk; ctx.fillText('📖', cx, cy);
+      ctx.textAlign='start';
+    }
+    // Hyperlink mark — bottom-right (bottom-left on left-side nodes)
+    if(n.url){
+      const cx=(n.side==='left') ? n.x-9+11 : n.x+w-9+11;
+      const cy=n.y+h-9+11;
+      ctx.beginPath(); ctx.arc(cx, cy, 11, 0, Math.PI*2);
+      ctx.fillStyle=themeNodeBg; ctx.fill();
+      ctx.lineWidth=1.5; ctx.strokeStyle=themeLink; ctx.stroke();
+      ctx.font='11px sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.fillStyle=themeInk; ctx.fillText('🔗', cx, cy);
       ctx.textAlign='start';
     }
   });

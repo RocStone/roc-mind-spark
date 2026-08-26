@@ -1584,7 +1584,7 @@
     .stage{ width:100% !important; height:auto !important; overflow:visible !important; }
     body, .app, .stage{ background:#fff !important; }
     .node{ box-shadow:none !important; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
-    .node .token-badge, .node .notes-mark{ display:none !important; }
+    .node .token-badge, .node .notes-mark, .node .href-mark{ display:none !important; }
     @page{ margin:1cm; }
   }
 
@@ -1673,6 +1673,52 @@
     box-shadow:0 1px 3px rgba(0,0,0,.18);
   }
   .node .ref-mark:hover{transform:scale(1.1)}
+
+  /* ===== Per-node hyperlink =====
+     Card gets a link-colored edge + a short bar at the bottom so it is
+     glanceable without underlining the text (inline URLs already do that). */
+  .node.href-node:not(.root),
+  #viewport[data-style="sketch"] .node.href-node:not(.root){
+    border-color:color-mix(in srgb, var(--link) 70%, var(--line));
+  }
+  .node.href-node{ padding-bottom:13px; }
+  .node.href-node.root{ padding-bottom:16px; }
+  .node .href-bar{
+    position:absolute; left:12px; right:12px; bottom:5px; height:3px;
+    border-radius:99px; background:var(--link); pointer-events:none; opacity:.88;
+  }
+  .node.root.href-node .href-bar{ background:rgba(255,255,255,.72); }
+  .node .href-mark{
+    position:absolute; bottom:-9px; right:-9px;
+    width:22px; height:22px; border-radius:50%;
+    background:var(--node-bg); border:1.5px solid var(--link);
+    display:flex; align-items:center; justify-content:center;
+    font-size:11px; cursor:pointer; z-index:6;
+    box-shadow:0 1px 3px rgba(0,0,0,.18);
+  }
+  .node .href-mark:hover{transform:scale(1.1)}
+  .node.left .href-mark{right:auto; left:-9px}
+  .picker.href-picker{
+    flex-direction:column; align-items:stretch; gap:6px; padding:8px;
+  }
+  .picker.href-picker .href-in{
+    width:260px; max-width:72vw; box-sizing:border-box;
+    border:1px solid var(--chrome-edge); border-radius:8px;
+    padding:8px 10px; background:var(--paper); color:var(--ink);
+    font-family:var(--sans); font-size:13px;
+  }
+  .picker.href-picker .href-in:focus{
+    outline:2px solid color-mix(in srgb, var(--link) 55%, transparent); outline-offset:1px;
+  }
+  .picker.href-picker .href-actions{
+    display:flex; gap:4px; justify-content:flex-end; align-items:center;
+  }
+  .picker.href-picker .href-clear{ margin-right:auto; color:var(--ink-soft); font-size:12.5px; }
+  .picker.href-picker .href-open{ font-size:12.5px; }
+  .picker.href-picker .href-go.primary{
+    background:var(--accent); color:#fff; font-weight:600; padding:6px 12px;
+  }
+  .picker.href-picker .href-go.primary:hover{ background:var(--accent-deep); }
 
   /* ===== Global search results panel ===== */
   .global-results{

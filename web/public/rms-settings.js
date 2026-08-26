@@ -113,7 +113,7 @@
       const names={
         task:t('actTask'), child:t('actChild'), sibling:t('actSibling'), edit:t('actEdit'),
         del:t('actDel'), collapse:t('actCollapse'), notes:t('actNotes'), marker:t('actMarker'), cite:t('actCite'),
-        image:t('actImage'), bold:t('actBold'), italic:t('actItalic'), strike:t('actStrike'), underline:t('actUnderline'),
+        href:t('actHref'), image:t('actImage'), bold:t('actBold'), italic:t('actItalic'), strike:t('actStrike'), underline:t('actUnderline'),
         ul:t('actUl'), ol:t('actOl'),
       };
       return names[el.dataset.a] || el.dataset.a;

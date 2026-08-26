@@ -88,6 +88,10 @@ export function buildMapFromSpec(spec){
       const mk = n.marker.trim();
       if (mk && [...mk].length <= 2) node.marker = mk;
     }
+    if (typeof n.url === 'string') {
+      const u = n.url.trim();
+      if (u && u.length <= 2000 && /^https?:\/\/[^\s<>"'`]+$/i.test(u)) node.url = u;
+    }
     if (n.citation && typeof n.citation === 'object') {
       const c = n.citation, cit = {};
       if (Array.isArray(c.authors) && c.authors.length) cit.authors = c.authors.join(', ');

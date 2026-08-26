@@ -109,6 +109,10 @@ function buildMapFromSpec(spec) {
     if (typeof n.notes === 'string' && n.notes.trim()) node.notes = n.notes;
     if (n.collapsed === true) node.collapsed = true;
     if (n.tag != null && n.tag !== '') node.tag = String(n.tag);
+    if (typeof n.url === 'string') {
+      const u = n.url.trim();
+      if (u && u.length <= 2000 && /^https?:\/\/[^\s<>"'`]+$/i.test(u)) node.url = u;
+    }
     if (n.citation && typeof n.citation === 'object') {
       const c = n.citation, cit = {};
       if (Array.isArray(c.authors) && c.authors.length) cit.authors = c.authors.join(', ');

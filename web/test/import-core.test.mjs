@@ -150,6 +150,20 @@ describe('buildMapFromSpec — builds a valid map', () => {
     assert.equal(m.nodes.r.ref, true);
   });
 
+  test('carries a valid http(s) node url and drops junk', () => {
+    const m = buildMapFromSpec({
+      rootId: 'r',
+      nodes: [
+        { id: 'r', text: 'r', parent: null, url: 'https://arxiv.org/html/2601.03511v2' },
+        { id: 'a', text: 'a', parent: 'r', url: 'javascript:alert(1)' },
+        { id: 'b', text: 'b', parent: 'r', url: '  https://example.com/x  ' },
+      ],
+    });
+    assert.equal(m.nodes.r.url, 'https://arxiv.org/html/2601.03511v2');
+    assert.equal(m.nodes.a.url, undefined);
+    assert.equal(m.nodes.b.url, 'https://example.com/x');
+  });
+
   test('an arXiv id becomes a doi and implies the arXiv source', () => {
     const m = buildMapFromSpec({
       rootId: 'r',
