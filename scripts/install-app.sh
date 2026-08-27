@@ -6,27 +6,28 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SRC="$ROOT/dist/Roc Mind Spark.app"
 PREFIX="${1:-/Applications}"
 DEST="$PREFIX/Roc Mind Spark.app"
+DEST_BIN="$DEST/Contents/MacOS/RocMindSpark"
 LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+
+# shellcheck source=installed-app-process.sh
+source "$ROOT/scripts/installed-app-process.sh"
 
 if [[ ! -d "$SRC" ]]; then
   echo "missing $SRC — run: make app" >&2
   exit 1
 fi
 
-# Stop a running copy so we can replace the bundle.
-if pids="$(pgrep -x RocMindSpark)"; then
-  echo "$pids" | while read -r pid; do kill "$pid" 2>/dev/null || true; done
-  sleep 0.2
-fi
-if pids="$(pgrep -x RocMindSpark)"; then
-  echo "$pids" | while read -r pid; do kill -9 "$pid" 2>/dev/null || true; done
-  sleep 0.2
-fi
+# Stop only the already-installed overlay whose text executable is DEST_BIN.
+# SIGTERM is converted inside the app to NSApp.terminate(nil), which runs
+# applicationWillTerminate and waits for the held Node child. Do not kill Node.
+# APP_STOP_WAIT_SECONDS (10) is strictly greater than HeldProcessStop's
+# worst-case 5s graceful + 1s SIGKILL of the held Node.
+stop_exact_installed_app "$DEST_BIN" "$APP_STOP_WAIT_SECONDS"
 
-# Drop the leftover node on 3034 so the next launch serves the new public/ files.
-if npids="$(lsof -tiTCP:3034 -sTCP:LISTEN 2>/dev/null)"; then
-  echo "$npids" | while read -r pid; do kill "$pid" 2>/dev/null || true; done
-  sleep 0.2
+# Give that child a bounded window to release 3034. Wait/report only.
+if ! wait_port_idle 3034 5; then
+  occupied="$(report_port_listeners 3034 || true)"
+  echo "port 3034 still occupied (pid ${occupied}); leaving it running. The new app will not take it over." >&2
 fi
 
 can_write_dest() {

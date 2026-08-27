@@ -28,6 +28,9 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
     private var lastExternalOpen: (url: URL, at: Date)?
     private var openPanel: NSOpenPanel?
     private var openPanelCompletion: (@MainActor @Sendable ([URL]?) -> Void)?
+    private var boot = CanvasBootCoordinator()
+    private var statusView: CanvasStatusView?
+    private var lastBootError: Error?
 
     private(set) var isVisible = false
 
@@ -48,6 +51,12 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
             self,
             selector: #selector(anotherAppActivated),
             name: NSWorkspace.didActivateApplicationNotification,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(languageDidChange),
+            name: .rmsLanguageDidChange,
             object: nil
         )
     }
@@ -82,6 +91,7 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
             wv.bottomAnchor.constraint(equalTo: root.bottomAnchor),
         ])
         webView = wv
+        attachStatusView(to: root)
         Paths.log("webview attached")
     }
 
@@ -92,17 +102,7 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
                 reason: "Keep the mind map painted while the overlay is parked"
             )
         }
-        Task { [weak self] in
-            guard let self else { return }
-            do {
-                try await self.server.ensureRunning()
-            } catch {
-                Paths.log("preload server failed: \(error.localizedDescription)")
-                return
-            }
-            self.startLoadIfNeeded()
-            if !self.isVisible { self.parkOffscreen() }
-        }
+        runBoot(retry: false)
     }
 
     func toggle() {
@@ -112,11 +112,9 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
 
     func show() {
         Paths.opsLog("overlay-show")
-        if !didStartLoad {
-            startLoadIfNeeded()
-            Task { try? await server.ensureRunning() }
-        }
         presentNow()
+        runBoot(retry: false)
+        applyBootUI()
     }
 
     func hide(restorePrevious: Bool = true) {
@@ -193,7 +191,74 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
         Paths.log("purged webview cache")
     }
 
+    private func attachStatusView(to root: NSView) {
+        if statusView != nil { return }
+        let status = CanvasStatusView(frame: .zero)
+        status.translatesAutoresizingMaskIntoConstraints = false
+        status.onRetry = { [weak self] in self?.runBoot(retry: true) }
+        status.isHidden = true
+        root.addSubview(status)
+        NSLayoutConstraint.activate([
+            status.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            status.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            status.topAnchor.constraint(equalTo: root.topAnchor),
+            status.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+        ])
+        statusView = status
+    }
+
+    private func runBoot(retry: Bool) {
+        let accepted = retry ? boot.requestRetry() : boot.requestStart()
+        guard accepted else { return }
+        applyBootUI()
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await self.server.ensureRunning()
+                self.boot.markSucceeded()
+                self.lastBootError = nil
+                self.applyBootUI()
+                self.startLoadIfNeeded()
+                if !self.isVisible { self.parkOffscreen() }
+            } catch {
+                Paths.log("canvas boot failed: \(error.localizedDescription)")
+                self.boot.markFailed()
+                self.lastBootError = error
+                self.applyBootUI()
+            }
+        }
+    }
+
+    private func applyBootUI() {
+        switch boot.phase {
+        case .idle:
+            statusView?.isHidden = true
+        case .starting, .retrying:
+            webView?.isHidden = true
+            statusView?.showStarting()
+        case .failed:
+            webView?.isHidden = true
+            statusView?.showFailure(message: lastBootError?.localizedDescription ?? L10n.t("error.title"))
+        case .ready:
+            statusView?.isHidden = true
+            webView?.isHidden = false
+            if isVisible { panel.makeFirstResponder(webView) }
+        }
+        if isVisible, boot.phase == .failed || boot.phase == .starting || boot.phase == .retrying {
+            panel.makeFirstResponder(statusView)
+        }
+    }
+
+    @objc private func languageDidChange() {
+        if boot.phase == .failed, let lastBootError {
+            statusView?.refreshFailure(message: lastBootError.localizedDescription)
+        } else if boot.phase == .starting || boot.phase == .retrying {
+            statusView?.showStarting()
+        }
+    }
+
     private func startLoadIfNeeded() {
+        guard boot.shouldLoadCanvas else { return }
         guard webView != nil, !didStartLoad else { return }
         didStartLoad = true
         Paths.log("webview load \(AppConfig.url)")
@@ -242,7 +307,7 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
         }
     }
 
-    /// Frame a readable cluster for docs/screenshot.png. Does not persist camera.
+    /// Frame a readable cluster for a local `--demo-shot`. Does not persist camera.
     private func runDemoShot() {
         if !isVisible { show() }
         let js = """
@@ -307,7 +372,11 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
         panel.applyCoverLevel()
         panel.orderFrontRegardless()
         panel.makeKey()
-        panel.makeFirstResponder(webView)
+        if boot.shouldLoadCanvas {
+            panel.makeFirstResponder(webView)
+        } else {
+            panel.makeFirstResponder(statusView)
+        }
         isVisible = true
         duckedUnderHud = false
         duckedHudId = 0
@@ -707,7 +776,7 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
         Paths.log("webview provisionalFail \(error.localizedDescription)")
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
-            guard let self, !self.isWarm else { return }
+            guard let self, !self.isWarm, self.boot.shouldLoadCanvas else { return }
             self.didStartLoad = false
             self.startLoadIfNeeded()
         }

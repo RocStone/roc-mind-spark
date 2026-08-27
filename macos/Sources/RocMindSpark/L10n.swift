@@ -66,9 +66,13 @@ enum L10n {
         "shortcut.redo": "Redo",
         "shortcut.find": "Find",
         "shortcut.help": "Shortcut list",
-        "error.node": "Could not find node. Roc Mind Spark needs Node 22+ to run the local canvas server.",
-        "error.server": "Could not find server.js: %@",
-        "error.timeout": "The canvas server did not become ready. See %@",
+        "error.title": "Could not start the canvas",
+        "error.starting": "Starting the canvas…",
+        "error.retry": "Retry",
+        "error.node": "Could not find node. Roc Mind Spark needs Node.js 22.13.0 or later to run the local canvas server.\n\nInstall Node.js 22.13.0+, then tap Retry.",
+        "error.server": "Could not find server.js: %@\n\nThen tap Retry.",
+        "error.timeout": "The canvas server did not become ready. See %@\n\nThen tap Retry.",
+        "error.port": "Port %d is already in use by another process (pid %d: %@).\n\nRoc Mind Spark will not take it over or stop that process.\n\nFree the port, then tap Retry.",
     ]
 
     private static let zh: [String: String] = [
@@ -99,8 +103,12 @@ enum L10n {
         "shortcut.redo": "重做",
         "shortcut.find": "查找",
         "shortcut.help": "快捷键列表",
-        "error.node": "找不到 node。需要 Node 22+，用来跑画布服务。",
-        "error.server": "找不到 server.js：%@",
-        "error.timeout": "服务启动超时。看 %@",
+        "error.title": "画布无法启动",
+        "error.starting": "正在启动画布…",
+        "error.retry": "重试",
+        "error.node": "找不到 node。需要 Node.js 22.13.0 或更高版本，用来运行画布服务。\n\n装好 Node.js 22.13.0+ 后点重试。",
+        "error.server": "找不到 server.js：%@\n\n然后点重试。",
+        "error.timeout": "服务启动超时。看 %@\n\n然后点重试。",
+        "error.port": "端口 %d 已被其他进程占用（pid %d：%@）。\n\nRoc Mind Spark 不会接管或结束那个进程。\n\n释放端口后点重试。",
     ]
 }

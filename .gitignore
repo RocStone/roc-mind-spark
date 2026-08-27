@@ -1,7 +1,9 @@
 .DS_Store
 AGENTS.md
+Archive/
 macos/.build/
 dist/
+web/data/
 web/data/*.db
 web/data/*.db-wal
 web/data/*.db-shm

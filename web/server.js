@@ -12,6 +12,9 @@
  *   PORT     – HTTP port            (default 3000)
  *   DB_PATH  – SQLite database file (default ./data/mindspark.db)
  *   PUBLIC   – static files dir     (default ./public)
+ *
+ * The Mac overlay always sets PORT=3034. This process binds 127.0.0.1 only.
+ * It is not a LAN, Docker, or public-web server.
  */
 'use strict';
 const http = require('node:http');
@@ -20,6 +23,13 @@ const path = require('node:path');
 const { DatabaseSync } = require('node:sqlite');
 const opsLog = require('./ops-log');
 const mapImages = require('./map-images');
+const {
+  LISTEN_HOST,
+  PRODUCT_NAME,
+  allowedOrigin,
+  isAllowedOrigin,
+  isAllowedHost,
+} = require('./listen-bind');
 
 const PORT = process.env.PORT || 3000;
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'data', 'mindspark.db');
@@ -166,27 +176,41 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x');
   const p = url.pathname;
 
-  // Overlay may load the page from file:// and call the API on this origin.
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization');
-  if (req.method === 'OPTIONS') { res.writeHead(204); return res.end(); }
+  // Exact-origin CORS for the Mac overlay: http://127.0.0.1:<bound-port> only.
+  // Same-origin WKWebView requests have no Origin and are handled normally.
+  const addr = server.address();
+  const boundPort = addr && typeof addr === 'object' && addr.port ? addr.port : Number(PORT);
+  const origin = req.headers.origin;
+  if (origin && isAllowedOrigin(origin, boundPort)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin');
+    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization');
+  }
+  if (req.method === 'OPTIONS') {
+    if (!isAllowedOrigin(origin, boundPort)) return send(res, 403, { error: 'forbidden' });
+    res.writeHead(204);
+    return res.end();
+  }
+
+  if (!isAllowedHost(req.headers.host, boundPort)) {
+    return send(res, 403, { error: 'forbidden' });
+  }
 
   // Baseline security headers on every response.
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'no-referrer');
   res.setHeader('X-Frame-Options', 'DENY');
-  // Defense-in-depth CSP. Permits everything the app actually uses (self,
-  // inline styles/script for the bootstrap, Google Fonts, data:/blob: images,
-  // and the GitHub API for cloud mode) while blocking external script/exfil
-  // origins, framing, and plugins. Relax if you self-host extra integrations.
+  // Defense-in-depth CSP for the Mac overlay: self, inline bootstrap,
+  // DuckDuckGo favicons, Crossref DOI lookup, and LLM providers the user
+  // can trigger. Inherited GitHub cloud/OAuth is not a supported path.
   res.setHeader('Content-Security-Policy', [
     "default-src 'self'",
     "script-src 'self' 'unsafe-inline'",
     "style-src 'self' 'unsafe-inline'",
     "font-src 'self'",
     "img-src 'self' data: blob: https://icons.duckduckgo.com",
-    "connect-src 'self' https://api.github.com https://api.crossref.org https://api.anthropic.com https://api.openai.com",
+    "connect-src 'self' https://api.crossref.org https://api.anthropic.com https://api.openai.com",
     "object-src 'none'",
     "base-uri 'self'",
     "frame-ancestors 'none'"
@@ -210,9 +234,7 @@ const server = http.createServer(async (req, res) => {
       try { m = buildMapFromSpec(spec); }
       catch (e) { return send(res, 400, { error: String(e && e.message || e) }); }
       upsert(m);
-      const proto = req.headers['x-forwarded-proto'] || 'http';
-      const host = req.headers['x-forwarded-host'] || req.headers.host || ('localhost:' + PORT);
-      return send(res, 201, { id: m.id, url: `${proto}://${host}/?map=${m.id}` });
+      return send(res, 201, { id: m.id, url: allowedOrigin(boundPort) + '/?map=' + m.id });
     }
 
     const idMatch = p.match(/^\/api\/maps\/([\w-]+)$/);
@@ -275,7 +297,14 @@ const server = http.createServer(async (req, res) => {
       return row ? send(res, 200, row.data, 'application/json') : send(res, 404, { error: 'not found' });
     }
 
-    if (p === '/healthz') return send(res, 200, { ok: true });
+    if (p === '/healthz') {
+      // token is the launch nonce the overlay set in the child env. It is
+      // not API authentication; it only proves this process is the one
+      // ServerSupervisor just started.
+      const body = { ok: true, product: PRODUCT_NAME };
+      if (process.env.ROC_MINDSPARK_TOKEN) body.token = process.env.ROC_MINDSPARK_TOKEN;
+      return send(res, 200, body);
+    }
 
     if (p === '/api/ops-log' && req.method === 'POST') {
       const body = await readBody(req);
@@ -316,16 +345,22 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, () => {
-  opsLog.startOpsLogChecker();
-  console.log(`\n  MindSpark running → http://localhost:${PORT}`);
-  console.log(`  Database          → ${DB_PATH}`);
-  console.log(`  Ops log           → ${opsLog.defaultLogPath()}`);
-  const ok = fs.existsSync(path.join(PUBLIC, 'index.html'));
-  console.log(`  Frontend          → ${PUBLIC}  ${ok ? '✓ found' : '✗ NOT FOUND'}`);
-  if (!ok) {
-    console.log(`\n  ⚠  public/index.html was not found at the path above.`);
-    console.log(`     Make sure the "public" folder is next to server.js, then restart.`);
-  }
-  console.log(`  (zero dependencies — Node built-in HTTP + SQLite)\n`);
-});
+if (require.main === module) {
+  server.listen(Number(PORT), LISTEN_HOST, () => {
+    const addr = server.address();
+    const host = addr && addr.address ? addr.address : LISTEN_HOST;
+    const port = addr && addr.port ? addr.port : PORT;
+    opsLog.startOpsLogChecker();
+    console.log(`\n  Roc Mind Spark canvas → http://${host}:${port}`);
+    console.log(`  Listen              → ${host}:${port} (loopback only)`);
+    console.log(`  Database            → ${DB_PATH}`);
+    console.log(`  Ops log             → ${opsLog.defaultLogPath()}`);
+    const ok = fs.existsSync(path.join(PUBLIC, 'index.html'));
+    console.log(`  Frontend            → ${PUBLIC}  ${ok ? '✓ found' : '✗ NOT FOUND'}`);
+    if (!ok) {
+      console.log(`\n  ⚠  public/index.html was not found at the path above.`);
+      console.log(`     Make sure the "public" folder is next to server.js, then restart.`);
+    }
+    console.log(`  (zero dependencies — Node built-in HTTP + SQLite)\n`);
+  });
+}

@@ -6,8 +6,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let store = ShortcutStore.shared
     private var overlay: OverlayController!
     private var statusItem: NSStatusItem?
+    /// Retained for the process lifetime. Turns POSIX SIGTERM into a normal
+    /// `NSApp.terminate(nil)` on the main queue.
+    private var terminationBridge: POSIXTerminationBridge?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        terminationBridge = POSIXTerminationBridge {
+            DispatchQueue.main.async { NSApp.terminate(nil) }
+        }
+        terminationBridge?.install()
         installEditMenu()
         overlay = OverlayController(server: server)
         installStatusItem()

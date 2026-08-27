@@ -31,6 +31,7 @@ rsync -a \
   "$ROOT/web/server.js" "$CONTENTS/Resources/web/server.js"
 cp "$ROOT/web/ops-log.js" "$CONTENTS/Resources/web/ops-log.js"
 cp "$ROOT/web/map-images.js" "$CONTENTS/Resources/web/map-images.js"
+cp "$ROOT/web/listen-bind.js" "$CONTENTS/Resources/web/listen-bind.js"
 rsync -a "$ROOT/web/public/" "$CONTENTS/Resources/web/public/"
 
 if [[ -f "$ROOT/web/public/icon-512.png" ]]; then
@@ -47,6 +48,9 @@ if [[ -f "$ROOT/web/public/icon-512.png" ]]; then
   iconutil -c icns "$ICONSET" -o "$CONTENTS/Resources/AppIcon.icns"
   cp "$SRC" "$CONTENTS/Resources/AppIcon.png"
 fi
+
+cp "$ROOT/LICENSE" "$CONTENTS/Resources/LICENSE"
+cp "$ROOT/NOTICE" "$CONTENTS/Resources/NOTICE"
 
 chmod +x "$CONTENTS/MacOS/RocMindSpark"
 codesign --force --deep --sign - "$APP" >/dev/null

@@ -5170,7 +5170,7 @@ function openOverlayTextField(){
   const ae = document.activeElement;
   if(ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')){
     if(ae.id === 'mapTitle') return ae;
-    if(ae.closest && ae.closest('.picker, .var-form, .bp-panel, .donate-card, .rms-settings, .search-wrap')) return ae;
+    if(ae.closest && ae.closest('.picker, .var-form, .bp-panel, .rms-settings, .search-wrap')) return ae;
   }
   // WK overlay: native Cmd+V never focuses the field. A visible picker /
   // citation form still owns paste — not the selected node.
@@ -6708,7 +6708,7 @@ stage.addEventListener('touchstart', e=>{
   if(e.touches.length!==1) return;
   const t=e.touches[0];
   // Don't intercept taps on the chrome / overlay UI
-  if(t.target && t.target.closest && t.target.closest('.topbar, .zoombar, .hint, .toast, .nodebar, .empty, .search-wrap, .save-pill, .tb-group, .side, .picker, .notes-popup, .donate-modal, .theme-panel, .login-overlay, .user-pill, .minimap, .breadcrumb, .wheel-speed, .edit-float')) return;
+  if(t.target && t.target.closest && t.target.closest('.topbar, .zoombar, .hint, .toast, .nodebar, .empty, .search-wrap, .save-pill, .tb-group, .side, .picker, .notes-popup, .theme-panel, .login-overlay, .user-pill, .minimap, .breadcrumb, .wheel-speed, .edit-float')) return;
   const nodeEl=t.target.closest?.('.node');
   // Don't pan / drag when tapping inside a node that's being edited —
   // contentEditable needs to handle the touch for caret placement and selection.
@@ -11263,124 +11263,6 @@ try{ applyLook(localStorage.getItem('mindspark:look') || 'office'); }catch(e){}
 
 applyView();
 
-/* ============================================================
-   DONATE — quick-amount picker. Edit DONATE_CONFIG below to
-   point at your own payment links. Set any line to null/'' to
-   hide that provider in the modal.
-   ============================================================ */
-const DONATE_CONFIG = {
-  // Buy Me a Coffee — works globally. Replace USERNAME with yours.
-  bmac:    'https://www.buymeacoffee.com/YOUR_USERNAME',
-  // Ko-fi — works globally.
-  kofi:    'https://ko-fi.com/YOUR_USERNAME',
-  // PayPal.me — supports embedding the amount in the URL: paypal.me/YOU/5
-  paypal:  'https://www.paypal.com/paypalme/YOUR_USERNAME',
-  // UPI (India) — direct deep-link. Replace with your VPA.
-  // Example: 'upi://pay?pa=yourname@okicici&pn=MindSpark&cu=INR'
-  upi:     'upi://pay?pa=prasadpatil252@okaxis&pn=MindSpark&cu=INR',
-  // UPI QR code — works on any device. Put the image as a data URL
-  //   (paste a `data:image/png;base64,...` here)
-  // or as an external URL (e.g., '/upi-qr.png' if you place the file in /public).
-  upiQr:   '/upi-qr.png',
-  upiNote: 'prasadpatil252@okaxis',  // optional caption shown below the QR, e.g. "yourname@okicici"
-  // GitHub Sponsors
-  github:  null
-};
-const DONATE_AMOUNTS = [3, 5, 10, 25];
-
-function showDonateModal(){
-  document.querySelectorAll('.donate-modal').forEach(m=>m.remove());
-  const m=document.createElement('div');
-  m.className='donate-modal';
-  const has = k => DONATE_CONFIG[k] && !String(DONATE_CONFIG[k]).includes('YOUR_USERNAME');
-  const providers = [
-    has('bmac')   && {k:'bmac',   label:'Buy Me a Coffee', icon:'☕', url:DONATE_CONFIG.bmac,   color:'#ffdd00', supportsAmount:false},
-    has('kofi')   && {k:'kofi',   label:'Ko-fi',           icon:'♥', url:DONATE_CONFIG.kofi,   color:'#ff5e5b', supportsAmount:false},
-    has('paypal') && {k:'paypal', label:'PayPal',          icon:'P', url:DONATE_CONFIG.paypal, color:'#0070ba', supportsAmount:true},
-    has('upi')    && {k:'upi',    label:'UPI app (India)', icon:'₹', url:DONATE_CONFIG.upi,    color:'#5f259f', supportsAmount:true},
-    has('upiQr')  && {k:'upiQr',  label:'Scan UPI QR',     icon:'⚌', url:null,                  color:'#5f259f', supportsAmount:false},
-    has('github') && {k:'github', label:'GitHub Sponsors', icon:'♥', url:DONATE_CONFIG.github, color:'#bf3989', supportsAmount:false}
-  ].filter(Boolean);
-  const configured = providers.length>0;
-  m.innerHTML = `
-    <div class="donate-backdrop"></div>
-    <div class="donate-card">
-      <button class="donate-close" aria-label="Close">×</button>
-      <div class="donate-head">
-        <div class="donate-icon">♥</div>
-        <h2>Support MindSpark</h2>
-        <p>MindSpark is free and open source. If it's useful to you, a small contribution helps keep it that way.</p>
-      </div>
-      ${configured ? `
-        <div class="donate-amounts">
-          <div class="donate-label">Pick an amount</div>
-          <div class="donate-amount-row">
-            ${DONATE_AMOUNTS.map(a=>`<button class="donate-amt" data-amt="${a}">$${a}</button>`).join('')}
-            <div class="donate-custom">
-              <span>$</span><input type="number" id="donateCustomAmt" min="1" placeholder="other" />
-            </div>
-          </div>
-        </div>
-        <div class="donate-providers">
-          <div class="donate-label">Donate via</div>
-          ${providers.map(p=>`
-            <button class="donate-provider" data-k="${p.k}" style="--p-color:${p.color}">
-              <span class="dp-icon">${p.icon}</span>
-              <span class="dp-label">${p.label}</span>
-              <span class="dp-arrow">→</span>
-            </button>`).join('')}
-        </div>
-      ` : `
-        <div class="donate-empty">
-          <p><b>Donations aren't configured yet.</b></p>
-          <p class="small">If you're the host of this MindSpark instance, open <code>public/app.js</code>, scroll to <code>DONATE_CONFIG</code>, and add your Buy Me a Coffee / Ko-fi / PayPal / UPI links. The button will go live the next time you redeploy.</p>
-        </div>
-      `}
-      <div class="donate-foot">
-        <a href="#" id="shareLink">↗ Share MindSpark</a>
-      </div>
-    </div>`;
-  document.body.appendChild(m);
-
-  let chosenAmount = null;
-  const amtBtns = m.querySelectorAll('.donate-amt');
-  const customInput = m.querySelector('#donateCustomAmt');
-  amtBtns.forEach(b=>b.addEventListener('click',()=>{
-    chosenAmount = +b.dataset.amt;
-    amtBtns.forEach(x=>x.classList.toggle('on', x===b));
-    if(customInput) customInput.value='';
-  }));
-  if(customInput) customInput.addEventListener('input',()=>{
-    const v=parseFloat(customInput.value);
-    if(v>0){ chosenAmount=v; amtBtns.forEach(b=>b.classList.remove('on')); }
-  });
-  m.querySelectorAll('.donate-provider').forEach(btn=>{
-    btn.addEventListener('click',()=>{
-      const p = providers.find(x=>x.k===btn.dataset.k);
-      if(p.k === 'upiQr'){ showUpiQrView(m); return; }
-      let url = p.url;
-      if(p.supportsAmount && chosenAmount){
-        if(p.k==='paypal') url = url.replace(/\/?$/, '/'+chosenAmount);
-        else if(p.k==='upi') url = url + (url.includes('?')?'&':'?') + 'am='+chosenAmount;
-      }
-      window.open(url, '_blank', 'noopener');
-    });
-  });
-  const close = () => m.remove();
-  m.querySelector('.donate-close').onclick = close;
-  m.querySelector('.donate-backdrop').onclick = close;
-  m.querySelector('#shareLink')?.addEventListener('click',e=>{
-    e.preventDefault();
-    const url = location.origin + location.pathname;
-    if(navigator.share) navigator.share({title:'MindSpark', text:'A free, open mind-mapping app', url}).catch(()=>{});
-    else { navigator.clipboard?.writeText(url); toast('Link copied'); }
-  });
-  document.addEventListener('keydown', function esc(e){
-    if(e.key==='Escape'){ close(); document.removeEventListener('keydown', esc); }
-  });
-}
-$('#donateBtn')?.addEventListener('click', showDonateModal);
-
 // ===== Focus mode — hide all chrome, show only the canvas =====
 function toggleFocusMode(){
   const on = !document.body.classList.contains('focus-mode');
@@ -11481,7 +11363,6 @@ window.addEventListener('keydown', e=>{
   // Don't fight with editing/notes/login overlay — they handle Esc themselves
   if(document.querySelector('.node.editing')) return;
   if(document.querySelector('.notes-popup')) return;
-  if(document.querySelector('.donate-modal')) return;
   if($('#loginOverlay') && $('#loginOverlay').style.display==='flex') return;
   e.preventDefault();
   toggleFocusMode();
@@ -11506,31 +11387,6 @@ const GITHUB_URL = 'https://github.com/RocStone/roc-mind-spark';
   }
 })();
 
-// Swap the donate modal's card into a "scan UPI QR" view.
-function showUpiQrView(modal){
-  const card = modal.querySelector('.donate-card');
-  // Save the original innerHTML so we can restore it via the back button
-  if(!card.dataset.originalHTML) card.dataset.originalHTML = card.innerHTML;
-  card.innerHTML = `
-    <button class="donate-close" aria-label="Close">×</button>
-    <button class="donate-back" aria-label="Back">← Back</button>
-    <div class="qr-view">
-      <h2>Scan to pay via UPI</h2>
-      <p class="qr-sub">Open any UPI app (Google Pay, PhonePe, Paytm, BHIM) and scan the code below.</p>
-      <div class="qr-frame">
-        <img class="qr-image" src="${DONATE_CONFIG.upiQr}" alt="UPI QR code"/>
-      </div>
-      ${DONATE_CONFIG.upiNote ? `<div class="qr-note">${escapeHtml(DONATE_CONFIG.upiNote)}</div>` : ''}
-      ${DONATE_CONFIG.upi ? `<a class="qr-deeplink" href="${DONATE_CONFIG.upi}">Or tap to open in your UPI app →</a>` : ''}
-      <p class="qr-foot">Thank you for supporting MindSpark 💛</p>
-    </div>`;
-  card.querySelector('.donate-close').onclick = () => modal.remove();
-  card.querySelector('.donate-back').onclick  = () => {
-    card.innerHTML = card.dataset.originalHTML;
-    showDonateModal();  // re-wire — easier than rebuilding events
-    modal.remove();
-  };
-}
 // First-run sample: seed the bundled "ML - Overview (Demo)" map as the user's own
 // editable copy, so a brand-new sidebar isn't empty. Fetched (not embedded) to
 // keep app.js lean; on failure (offline/missing) the caller falls back to a blank map.
@@ -11611,15 +11467,9 @@ function showUserPill(){
   };
 }
 
-// ============================================================
-// OPTIONAL GitHub OAuth ("Sign in with GitHub") — second cloud login option.
-// Leave these blank to keep the app fully static/no-backend: only the personal
-// access token (PAT) flow shows. Set both to enable the OAuth button as well:
-//   clientId  : your GitHub OAuth App client_id (public)
-//   workerUrl : the deployed Cloudflare Worker base URL (holds the client_secret
-//               and does the code->token exchange). See /worker.
-// ============================================================
-const GH_OAUTH = { clientId: 'Ov23liCukvrI3Zs9p3Px', workerUrl: 'https://mindspark-oauth.githubpage.workers.dev/' };
+// Inherited OAuth fields from upstream MindSpark. The Mac overlay ships both
+// empty so it never contacts an upstream worker. Do not fill these in here.
+const GH_OAUTH = { clientId: '', workerUrl: '' };
 function oauthConfigured(){ return !!(GH_OAUTH.clientId && GH_OAUTH.workerUrl); }
 // Live collaboration & cloud share rely on the Cloudflare worker, whose CORS/origin
 // is bound to the deployed app — they can't work from local (server-mode) hosting.

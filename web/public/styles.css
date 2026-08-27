@@ -692,18 +692,16 @@
   }
   :root[data-look="handwritten"] .vf-card h2{font-weight:700}
   /* Remaining containers audited and covered in this pass — context menus,
-     pickers, the donation card, export/template popups, search box, minimap.
+     pickers, export/template popups, search box, minimap.
      Grouped since they share the same underlying structure (chrome/node-bg
      background, chrome-edge border, rounded corners) — same sketchy-border
      language as the rest of the app, not restyled individually from scratch. */
   :root[data-look="handwritten"] .row-pop,
   :root[data-look="handwritten"] .picker,
-  :root[data-look="handwritten"] .donate-card,
   :root[data-look="handwritten"] .export-pop,
   :root[data-look="handwritten"] .tpl-pop{
     border-radius:16px 6px 16px 6px; border:2px solid var(--ink);
   }
-  :root[data-look="handwritten"] .donate-card{ border-radius:20px 8px 20px 8px; }
   :root[data-look="handwritten"] .search-wrap.open{ border-radius:14px 6px 14px 6px; border:2px solid var(--ink); }
   :root[data-look="handwritten"] .minimap,
   :root[data-look="handwritten"] .wheel-speed{ border-radius:12px 4px 12px 4px; border:2px solid var(--ink); }
@@ -743,12 +741,10 @@
   :root[data-look="coffee-shop"] .vf-card h2{font-weight:700}
   :root[data-look="coffee-shop"] .row-pop,
   :root[data-look="coffee-shop"] .picker,
-  :root[data-look="coffee-shop"] .donate-card,
   :root[data-look="coffee-shop"] .export-pop,
   :root[data-look="coffee-shop"] .tpl-pop{
     border-radius:14px 5px 14px 5px; border:1.5px solid var(--ink);
   }
-  :root[data-look="coffee-shop"] .donate-card{ border-radius:18px 7px 18px 7px; }
   :root[data-look="coffee-shop"] .search-wrap.open{ border-radius:12px 5px 12px 5px; border:1.5px solid var(--ink); }
   :root[data-look="coffee-shop"] .minimap,
   :root[data-look="coffee-shop"] .wheel-speed{ border-radius:10px 4px 10px 4px; border:1.5px solid var(--ink); }
@@ -1029,82 +1025,7 @@
   }
   .user-pill button:hover{background:var(--hover); color:var(--ink)}
 
-  /* ===== Donate button + modal ===== */
-  .tb.donate-btn{color:#e0613a; font-size:17px}
-  .tb.donate-btn:hover{background:rgba(224,97,58,.12); color:#e0613a}
-
-  .donate-modal{position:fixed; inset:0; z-index:6000; font-family:var(--sans); animation:fadeIn .15s ease}
   @keyframes fadeIn{from{opacity:0}to{opacity:1}}
-  .donate-backdrop{position:absolute; inset:0; background:rgba(20,15,8,.45); backdrop-filter:blur(2px)}
-  .donate-card{
-    position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
-    background:var(--node-bg, #fff); color:var(--ink);
-    border-radius:18px; box-shadow:0 30px 80px rgba(0,0,0,.35);
-    padding:30px 32px; width:440px; max-width:92vw; max-height:90vh; overflow-y:auto;
-    border:1px solid var(--chrome-edge);
-  }
-  .donate-close{
-    position:absolute; top:12px; right:14px; width:32px; height:32px;
-    border:none; background:transparent; color:var(--ink-soft);
-    font-size:22px; line-height:1; cursor:pointer; border-radius:8px;
-  }
-  .donate-close:hover{background:var(--hover); color:var(--ink)}
-  .donate-head{text-align:center; margin-bottom:22px}
-  .donate-icon{
-    width:54px; height:54px; border-radius:50%;
-    background:radial-gradient(circle at 30% 25%, #ff8a5b, #e0613a);
-    color:#fff; font-size:26px; display:flex; align-items:center; justify-content:center;
-    margin:0 auto 14px; box-shadow:0 6px 18px rgba(224,97,58,.4);
-  }
-  .donate-head h2{font-family:var(--serif); font-weight:700; font-size:22px; margin:0 0 6px}
-  .donate-head p{color:var(--ink-soft); font-size:14px; line-height:1.55; margin:0}
-  .donate-label{font-size:11px; text-transform:uppercase; letter-spacing:.1em; color:var(--ink-soft); font-weight:700; margin-bottom:8px}
-  .donate-amounts{margin-bottom:18px}
-  .donate-amount-row{display:flex; gap:8px; flex-wrap:wrap}
-  .donate-amt{
-    flex:1; min-width:60px; padding:11px 6px;
-    background:var(--paper-2); border:1.5px solid var(--line); border-radius:9px;
-    font-family:inherit; font-weight:600; font-size:14px; color:var(--ink); cursor:pointer;
-    transition:.15s;
-  }
-  .donate-amt:hover{border-color:var(--accent); color:var(--accent)}
-  .donate-amt.on{background:var(--accent); color:#fff; border-color:var(--accent)}
-  .donate-custom{
-    flex:1.4; min-width:90px; display:flex; align-items:center; gap:4px;
-    background:var(--paper-2); border:1.5px solid var(--line); border-radius:9px;
-    padding:0 10px; color:var(--ink-soft);
-  }
-  .donate-custom input{
-    flex:1; width:0; border:none; background:transparent; outline:none;
-    font-family:inherit; font-weight:600; font-size:14px; padding:10px 0; color:var(--ink);
-  }
-  .donate-providers{display:flex; flex-direction:column; gap:6px; margin-bottom:18px}
-  .donate-provider{
-    display:flex; align-items:center; gap:12px; padding:13px 14px;
-    background:var(--paper-2); border:1px solid var(--line); border-radius:10px;
-    font-family:inherit; font-size:14px; font-weight:500; color:var(--ink);
-    cursor:pointer; transition:.15s; text-align:left;
-  }
-  .donate-provider:hover{background:var(--node-bg, #fff); border-color:var(--p-color); transform:translateX(2px)}
-  .donate-provider .dp-icon{
-    width:32px; height:32px; border-radius:8px;
-    background:var(--p-color); color:#000; opacity:.95;
-    display:flex; align-items:center; justify-content:center; font-weight:700; font-size:15px;
-    flex-shrink:0;
-  }
-  .donate-provider .dp-label{flex:1}
-  .donate-provider .dp-arrow{color:var(--ink-soft); font-size:16px}
-  .donate-empty{
-    background:var(--paper-2); border-radius:10px; padding:18px;
-    font-size:13px; color:var(--ink-soft); line-height:1.6;
-  }
-  .donate-empty .small{font-size:12px}
-  .donate-foot{
-    text-align:center; padding-top:14px;
-    border-top:1px solid var(--chrome-edge); font-size:12.5px;
-  }
-  .donate-foot a{color:var(--ink-soft); text-decoration:none; margin:0 6px}
-  .donate-foot a:hover{color:var(--accent)}
 
   /* ===== MOBILE / TOUCH ===== */
   @media (max-width: 720px){
@@ -1141,7 +1062,6 @@
     .user-pill span{display:none}                   /* avatar only */
     .search-wrap.open{width:140px}
     .search-wrap.open.replace-mode{width:min(86vw,330px)}
-    .donate-btn{display:flex}
 
     .hint{display:none}
 
@@ -1157,8 +1077,6 @@
     .login-card{padding:24px 22px}
     .login-brand h1{font-size:22px}
     .notes-popup{width:96vw}
-    .donate-card{padding:24px 22px; border-radius:14px}
-    .donate-head h2{font-size:20px}
 
     /* Theme panel becomes a bottom sheet */
     .theme-panel-large{
@@ -1171,42 +1089,13 @@
   }
 
   /* Disable browser tap-highlight on interactive UI */
-  .tb, .node, .handle, .sw, .donate-provider, .donate-amt, .theme-opt, .map-item,
+  .tb, .node, .handle, .sw, .theme-opt, .map-item,
   .nodebar button, .picker button, .login-card button {
     -webkit-tap-highlight-color:transparent;
     touch-action:manipulation;
   }
   /* Stage shouldn't double-tap-zoom on iOS */
   #stage{touch-action:none}
-
-  /* ===== QR sub-view inside the donate modal ===== */
-  .donate-back{
-    position:absolute; top:14px; left:14px;
-    border:none; background:transparent; cursor:pointer;
-    color:var(--ink-soft); font-family:inherit; font-size:13px; padding:4px 8px;
-    border-radius:6px;
-  }
-  .donate-back:hover{background:var(--hover); color:var(--ink)}
-  .qr-view{text-align:center; padding-top:8px}
-  .qr-view h2{font-family:var(--serif); font-weight:700; font-size:20px; margin:0 0 6px; color:var(--ink)}
-  .qr-sub{color:var(--ink-soft); font-size:13.5px; line-height:1.5; margin:0 0 18px}
-  .qr-frame{
-    width:240px; max-width:90%; aspect-ratio:1/1; margin:0 auto;
-    background:#fff; border-radius:12px; padding:14px;
-    box-shadow:0 4px 20px rgba(0,0,0,.12); border:1px solid var(--chrome-edge);
-  }
-  .qr-image{width:100%; height:100%; object-fit:contain; display:block}
-  .qr-note{
-    margin-top:14px; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
-    font-size:13px; color:var(--ink); background:var(--paper-2);
-    padding:7px 12px; border-radius:7px; display:inline-block;
-  }
-  .qr-deeplink{
-    display:inline-block; margin-top:14px; font-size:13.5px;
-    color:var(--accent); text-decoration:none; font-weight:500;
-  }
-  .qr-deeplink:hover{text-decoration:underline}
-  .qr-foot{margin:18px 0 0; font-size:13px; color:var(--ink-soft)}
 
   /* ===== Export popover ===== */
   .export-pop{
@@ -1867,7 +1756,6 @@
   body.shared-view #undo,
   body.shared-view #redo,
   body.shared-view #layout,
-  body.shared-view #donateBtn,
   body.shared-view .hint,
   body.shared-view .save-pill,
   body.shared-view .menu-toggle,

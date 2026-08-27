@@ -1,0 +1,61 @@
+name: Mac bug
+description: Report a problem with the Roc Mind Spark macOS overlay.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This product is the **macOS overlay** (Release ZIP or `make install` → `/Applications/Roc Mind Spark.app`).
+        Do not file Windows, Linux, Docker, Pages, or browser-only deploy bugs here.
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened?
+      description: What you saw, versus what you expected.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Install the v1.0.0 ZIP or run make install
+        2. Press ⌃⌥⇧⌘Q
+        3. …
+    validations:
+      required: true
+
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version
+      placeholder: "15.5"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: arch
+    attributes:
+      label: Mac architecture
+      options:
+        - Apple Silicon
+        - Intel (Release ZIP unsupported)
+    validations:
+      required: true
+
+  - type: input
+    id: install
+    attributes:
+      label: How you installed
+      placeholder: "v1.0.0 Release ZIP, or make install from commit …"
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs (no secrets)
+      description: Paste overlay.log / server.log snippets. Strip API keys, map titles you cannot share, and node text.

@@ -1,0 +1,38 @@
+name: Mac feature
+description: Propose a change to the Roc Mind Spark macOS overlay.
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Features must fit a **macOS 14+ overlay**. Windows, Linux, Docker, Cloudflare, and GitHub Pages are out of scope.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What is painful in the overlay today?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: What should change in macos/, web/public/, or the loopback server?
+    validations:
+      required: true
+
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Surface
+      options:
+        - Overlay / hotkey / menu bar
+        - Canvas editing
+        - Local save / privacy
+        - Packaging / distribution
+        - Other (explain)
+    validations:
+      required: true

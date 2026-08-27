@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Read-only. This workflow never publishes Releases, Pages, or images.
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    name: Test, release build, package
+    runs-on: macos-15
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.13.0'
+
+      - name: Node canvas tests
+        run: cd web && node --test "test/*.test.mjs"
+
+      - name: Swift tests
+        run: cd macos && swift test
+
+      - name: Swift release build
+        run: cd macos && swift build -c release
+
+      - name: Package ad-hoc app and release archive
+        run: make release-archive
+
+      - name: Verify bundle contents and signature
+        run: |
+          APP="dist/Roc Mind Spark.app"
+          BIN="$APP/Contents/MacOS/RocMindSpark"
+          test -f "$APP/Contents/Resources/LICENSE"
+          test -f "$APP/Contents/Resources/NOTICE"
+          codesign --verify --deep --strict "$APP"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist")" = 1.0.0
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP/Contents/Info.plist")" = 1
+          test "$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$APP/Contents/Info.plist")" = 14.0
+          test "$(lipo -archs "$BIN")" = arm64
+          if strings "$BIN" | grep -F "Sources/RocMindSpark/Paths.swift"; then
+            echo "release binary still contains Paths.swift source path" >&2
+            exit 1
+          fi
+          if strings "$BIN" | grep -E '/Users/[^/]+/|/home/[^/]+/'; then
+            echo "release binary contains a developer home path" >&2
+            exit 1
+          fi
+          if find "$APP" -type f \( -name '*.db' -o -name '*.log' -o -name '.env' -o -name '.env.*' -o -name 'AGENTS.md' \) -print | grep -q .; then
+            echo "release bundle contains local data, logs, environment files, or AGENTS.md" >&2
+            exit 1
+          fi
+
+      - name: Verify archive checksum and extracted App
+        run: |
+          cd dist
+          set -- Roc-Mind-Spark-v*-macos-arm64.zip
+          test "$#" = 1
+          ZIP="$1"
+          shasum -a 256 -c "$ZIP.sha256"
+          EXTRACT="$RUNNER_TEMP/roc-mind-spark-release"
+          mkdir -p "$EXTRACT"
+          ditto -x -k "$ZIP" "$EXTRACT"
+          APP="$EXTRACT/Roc Mind Spark.app"
+          BIN="$APP/Contents/MacOS/RocMindSpark"
+          test "$(lipo -archs "$BIN")" = arm64
+          codesign --verify --deep --strict "$APP"
+          test -f "$APP/Contents/Resources/LICENSE"
+          test -f "$APP/Contents/Resources/NOTICE"

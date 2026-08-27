@@ -12,5 +12,10 @@ let package = Package(
             name: "RocMindSpark",
             path: "Sources/RocMindSpark"
         ),
+        .testTarget(
+            name: "RocMindSparkTests",
+            dependencies: ["RocMindSpark"],
+            path: "Tests/RocMindSparkTests"
+        ),
     ]
 )
