@@ -52,4 +52,37 @@ describe('i18n', () => {
     assert.equal(ctx.window.rmsLang(), 'en');
     assert.equal(ctx.window.rmsT('language'), 'Language');
   });
+
+  test('en and zh dictionaries have the same keys', () => {
+    const { ctx } = load();
+    const { en, zh } = ctx.window.rmsI18nKeys();
+    assert.deepEqual(en, zh);
+  });
+
+  test('button labels match settings names', () => {
+    const { ctx } = load();
+    ctx.window.rmsSetLang('zh');
+    const t = ctx.window.rmsT;
+    assert.equal(t('actChild'), t('scAddChild'));
+    assert.equal(t('actSibling'), t('scAddSibling'));
+    assert.equal(t('actEdit'), t('scEditNode'));
+    assert.equal(t('actDel'), t('scDeleteNode'));
+    assert.equal(t('actCollapse'), t('scCollapse'));
+    assert.equal(t('idAddChild'), t('scAddChild'));
+    ctx.window.rmsSetLang('en');
+    assert.equal(t('actChild'), t('scAddChild'));
+    assert.equal(t('actSibling'), t('scAddSibling'));
+    assert.equal(t('scAddSiblingMod'), 'Add sibling (⌘↩)');
+  });
+
+  test('Chinese mode does not fall back to English for chrome titles', () => {
+    const { ctx } = load();
+    ctx.window.rmsSetLang('zh');
+    const t = ctx.window.rmsT;
+    assert.equal(t('scAddChild'), '添加子节点');
+    assert.equal(t('actBold'), '粗体');
+    assert.equal(t('addChildBtn'), '＋ 子节点');
+    assert.equal(t('themeColour'), '颜色主题');
+    assert.equal(t('hrefSave'), '保存');
+  });
 });

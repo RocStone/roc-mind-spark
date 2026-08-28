@@ -8,22 +8,46 @@
 
   function canvasMeta(){
     return [
-      { id:'openSettings', title:t('scOpenSettings') },
-      { id:'addChild', title:t('scAddChild') },
-      { id:'addSibling', title:t('scAddSibling') },
-      { id:'editNode', title:t('scEditNode') },
-      { id:'deleteNode', title:t('scDeleteNode') },
-      { id:'collapse', title:t('scCollapse') },
-      { id:'link', title:t('scLink') },
-      { id:'undo', title:t('scUndo') },
-      { id:'redo', title:t('scRedo') },
-      { id:'find', title:t('scFind') },
-      { id:'help', title:t('scHelp') },
+      { id:'openSettings', title:t('scOpenSettings'), group:'scGroupGeneral' },
+      { id:'help', title:t('scHelp'), group:'scGroupGeneral' },
+      { id:'addChild', title:t('scAddChild'), group:'scGroupBuild' },
+      { id:'addSibling', title:t('scAddSibling'), group:'scGroupBuild' },
+      { id:'addSiblingMod', title:t('scAddSiblingMod'), group:'scGroupBuild' },
+      { id:'editNode', title:t('scEditNode'), group:'scGroupBuild' },
+      { id:'deleteNode', title:t('scDeleteNode'), group:'scGroupBuild' },
+      { id:'deleteForward', title:t('scDeleteForward'), group:'scGroupBuild' },
+      { id:'collapse', title:t('scCollapse'), group:'scGroupBuild' },
+      { id:'link', title:t('scLink'), group:'scGroupBuild' },
+      { id:'moveSiblingUp', title:t('scMoveSiblingUp'), group:'scGroupNav' },
+      { id:'moveSiblingDown', title:t('scMoveSiblingDown'), group:'scGroupNav' },
+      { id:'moveSiblingUpAlt', title:t('scMoveSiblingUpAlt'), group:'scGroupNav' },
+      { id:'moveSiblingDownAlt', title:t('scMoveSiblingDownAlt'), group:'scGroupNav' },
+      { id:'undo', title:t('scUndo'), group:'scGroupHistory' },
+      { id:'redo', title:t('scRedo'), group:'scGroupHistory' },
+      { id:'find', title:t('scFind'), group:'scGroupHistory' },
+      { id:'findReplace', title:t('scFindReplace'), group:'scGroupHistory' },
     ];
   }
 
   const defaults = {
     openSettings: { key:',', code:'Comma', meta:true, ctrl:false, alt:false, shift:false },
+    addChild: { key:'Tab', code:'Tab', meta:false, ctrl:false, alt:false, shift:false },
+    addSibling: { key:'Enter', code:'Enter', meta:false, ctrl:false, alt:false, shift:false },
+    addSiblingMod: { key:'Enter', code:'Enter', meta:true, ctrl:false, alt:false, shift:false },
+    editNode: { key:'F2', code:'F2', meta:false, ctrl:false, alt:false, shift:false },
+    deleteNode: { key:'Backspace', code:'Backspace', meta:false, ctrl:false, alt:false, shift:false },
+    deleteForward: { key:'Delete', code:'Delete', meta:false, ctrl:false, alt:false, shift:false },
+    collapse: { key:' ', code:'Space', meta:false, ctrl:false, alt:false, shift:false },
+    link: { key:'l', code:'KeyL', meta:false, ctrl:false, alt:false, shift:false },
+    moveSiblingUp: { key:'ArrowUp', code:'ArrowUp', meta:false, ctrl:false, alt:true, shift:false },
+    moveSiblingDown: { key:'ArrowDown', code:'ArrowDown', meta:false, ctrl:false, alt:true, shift:false },
+    moveSiblingUpAlt: { key:'ArrowUp', code:'ArrowUp', meta:true, ctrl:false, alt:false, shift:true },
+    moveSiblingDownAlt: { key:'ArrowDown', code:'ArrowDown', meta:true, ctrl:false, alt:false, shift:true },
+    undo: { key:'z', code:'KeyZ', meta:true, ctrl:false, alt:false, shift:false },
+    redo: { key:'z', code:'KeyZ', meta:true, ctrl:false, alt:false, shift:true },
+    find: { key:'f', code:'KeyF', meta:true, ctrl:false, alt:false, shift:false },
+    findReplace: { key:'h', code:'KeyH', meta:true, ctrl:false, alt:false, shift:false },
+    help: { key:'/', code:'Slash', meta:false, ctrl:false, alt:false, shift:true },
   };
 
   function loadJSON(key, fallback){
@@ -61,13 +85,53 @@
     let key = spec.key || '';
     if(key===' ') key='Space';
     if(key==='Meta'||key==='Control'||key==='Alt'||key==='Shift') return bits.join(' ') || '…';
-    if(key.length===1) key=key.toUpperCase();
+    const glyphs = {
+      Enter:'↩', Tab:'Tab', ' ':'Space', Space:'Space',
+      Backspace:'⌫', Delete:'⌦', Escape:'Esc',
+      ArrowUp:'↑', ArrowDown:'↓', ArrowLeft:'←', ArrowRight:'→',
+      ',':',', '/':'/',
+    };
+    if(glyphs[key]) key = glyphs[key];
+    else if(key.length===1) key=key.toUpperCase();
     return bits.length ? bits.join(' ') + ' ' + key : key;
   }
+  window.rmsSpecLabel = specLabel;
+  window.rmsChordLabel = function(id){
+    const spec = canvasMap()[id];
+    return spec ? specLabel(spec) : '';
+  };
   function sameSpec(a, b){
     if(!a || !b) return false;
     const keyA=(a.code||'') === (b.code||'') || ((a.key||'').toLowerCase()===(b.key||'').toLowerCase());
     return keyA && !!a.meta===!!b.meta && !!a.ctrl===!!b.ctrl && !!a.alt===!!b.alt && !!a.shift===!!b.shift;
+  }
+  function canvasConflict(id, spec){
+    const canvas=canvasMap();
+    const names=canvasMeta();
+    for(let i=0;i<names.length;i++){
+      const item=names[i];
+      if(item.id===id) continue;
+      if(sameSpec(canvas[item.id], spec)) return item.title;
+    }
+    const native=window.__RMS_NATIVE__||{};
+    if(native.toggle && sameSpec(native.toggle, spec)) return t('showHide');
+    return null;
+  }
+  function buttonNameForSpec(spec, skipId){
+    const btns=buttonMap();
+    for(const bid in btns){
+      if(skipId && bid===skipId) continue;
+      if(sameSpec(btns[bid], spec)){
+        const el=findButton(bid);
+        return el ? buttonLabel(el) : t('btn');
+      }
+    }
+    return null;
+  }
+  function buttonConflict(id, spec){
+    const canvasClash=canvasConflict(null, spec);
+    if(canvasClash) return canvasClash;
+    return buttonNameForSpec(spec, id);
   }
 
   function nativePost(payload){
@@ -111,8 +175,8 @@
   function buttonLabel(el){
     if(el.dataset && el.dataset.a){
       const names={
-        task:t('actTask'), child:t('actChild'), sibling:t('actSibling'), edit:t('actEdit'),
-        del:t('actDel'), collapse:t('actCollapse'), notes:t('actNotes'), marker:t('actMarker'), cite:t('actCite'),
+        task:t('actTask'), child:t('scAddChild'), sibling:t('scAddSibling'), edit:t('scEditNode'),
+        del:t('scDeleteNode'), collapse:t('scCollapse'), notes:t('actNotes'), marker:t('actMarker'), cite:t('actCite'),
         href:t('actHref'), image:t('actImage'), bold:t('actBold'), italic:t('actItalic'), strike:t('actStrike'), underline:t('actUnderline'),
         ul:t('actUl'), ol:t('actOl'),
       };
@@ -120,8 +184,9 @@
     }
     if(el.id){
       const names={
-        settingsBtn:t('idSettings'), addChild:t('idAddChild'), undo:t('idUndo'), redo:t('idRedo'),
-        searchBtn:t('idSearch'), layout:t('idLayout'), collapseAll:t('idCollapseAll'),
+        settingsBtn:t('idSettings'), addChild:t('scAddChild'), addSiblingBtn:t('scAddSibling'),
+        undo:t('scUndo'), redo:t('scRedo'),
+        searchBtn:t('scFind'), layout:t('idLayout'), collapseAll:t('idCollapseAll'),
         mdToggle:t('idMarkdown'), themeBtn:t('idTheme'), menuExport:t('idExport'),
         focusBtn:t('idFocus'), newMap:t('idNewMap'),
       };
@@ -221,11 +286,23 @@
         if(isReservedToggleSpec(spec) || !hasMod(spec)) return;
         nativePost(Object.assign({ op:'setToggle' }, spec));
       } else if(listening.kind==='canvas'){
+        const clash=canvasConflict(listening.id, spec) || buttonNameForSpec(spec, null);
+        if(clash){
+          if(typeof toast==='function') toast(t('shortcutConflict').replace('%s', clash));
+          closeCtx(); listening=null; paintSettings(); return;
+        }
         const all=loadJSON(CANVAS_KEY, {});
         all[listening.id]=spec;
         saveJSON(CANVAS_KEY, all);
         applyCanvas();
+        if(window.rmsApplyI18n) window.rmsApplyI18n();
+        if(typeof refreshLocaleChrome==='function') refreshLocaleChrome();
       } else if(listening.kind==='button'){
+        const clash=buttonConflict(listening.id, spec);
+        if(clash){
+          if(typeof toast==='function') toast(t('shortcutConflict').replace('%s', clash));
+          closeCtx(); listening=null; paintSettings(); return;
+        }
         const all=buttonMap();
         all[listening.id]=spec;
         saveJSON(BUTTON_KEY, all);
@@ -290,6 +367,7 @@
         </div>
         <div class="rms-set-sec">
           <h3>${t('canvas')}</h3>
+          <p class="vf-sub" style="margin:0 0 8px">${t('canvasHelp')}</p>
           <div id="rmsCanvasRows"></div>
         </div>
         <div class="rms-set-sec">
@@ -341,10 +419,15 @@
     const canvas=canvasMap();
     const box=root.querySelector('#rmsCanvasRows');
     if(box){
-      box.innerHTML=canvasMeta().map(item=>
-        '<div class="rms-row"><span>'+item.title+'</span>'+
-        '<button type="button" class="rms-chord" data-rec="'+item.id+'">'+specLabel(canvas[item.id])+'</button></div>'
-      ).join('');
+      let lastGroup='';
+      box.innerHTML=canvasMeta().map(item=>{
+        const head = item.group && item.group!==lastGroup
+          ? '<div class="rms-sub">'+t(item.group)+'</div>'
+          : '';
+        lastGroup=item.group||lastGroup;
+        return head+'<div class="rms-row"><span>'+item.title+'</span>'+
+          '<button type="button" class="rms-chord" data-rec="'+item.id+'">'+specLabel(canvas[item.id])+'</button></div>';
+      }).join('');
     }
     const btns=buttonMap();
     const list=root.querySelector('#rmsButtonRows');

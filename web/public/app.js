@@ -849,14 +849,14 @@ function ensureNodeChrome(el){
     el.appendChild(wm);
   }
   if(!el.querySelector('.h-child')){
-    el.appendChild(mkNodeHandle('h-child','+','Add child topic',()=>addNode(id,false)));
+    el.appendChild(mkNodeHandle('h-child','+',chordTitle('handleChild','addChild','Add child'),()=>addNode(id,false)));
   }
   if(id!==map.rootId && !el.querySelector('.h-sibling')){
-    el.appendChild(mkNodeHandle('h-sibling','+','Add sibling topic',()=>addNode(id,true)));
+    el.appendChild(mkNodeHandle('h-sibling','+',chordTitle('handleSibling','addSibling','Add sibling'),()=>addNode(id,true)));
   }
   if(!el.querySelector('.resize-grip')){
     const grip=document.createElement('span');
-    grip.className='resize-grip'; grip.title='Drag to resize';
+    grip.className='resize-grip'; grip.title=rmsTr('dragResize','Drag to resize');
     grip.addEventListener('mousedown',ev=>{ ev.stopPropagation(); ev.preventDefault(); startResize(id,ev); });
     el.appendChild(grip);
   }
@@ -978,7 +978,7 @@ function render(){
       mk.className='node-marker';
       mk.textContent=n.marker;
       const mkLabel=(MARKERS.find(m=>m.c===n.marker)||{}).label;
-      mk.title=(mkLabel?mkLabel+' — ':'')+'click to change';
+      mk.title=(mkLabel?mkLabel+' — ':'')+rmsTr('markerClick','click to change');
       mk.addEventListener('mousedown',ev=>ev.stopPropagation());
       mk.addEventListener('click',ev=>{ ev.stopPropagation(); showMarkerPicker(mk, id); });
       el.appendChild(mk);
@@ -988,7 +988,7 @@ function render(){
       el.classList.add('task-node','task-'+n.task);
       const cb=document.createElement('span');
       cb.className='task-check task-'+n.task;
-      cb.title='Task: '+n.task+' (click to change)';
+      cb.title=rmsTr('taskClick','Todo state (click to change)');
       cb.textContent = n.task==='done' ? '✓' : (n.task==='doing' ? '◐' : '');
       cb.addEventListener('mousedown',ev=>ev.stopPropagation());
       cb.addEventListener('click',ev=>{ ev.stopPropagation(); cycleTask(id); });
@@ -1065,7 +1065,7 @@ function render(){
     if(n.ref){
       const cb=document.createElement('span');
       cb.className='ref-mark'; cb.textContent='📖';
-      cb.title='Reference — click to edit citation';
+      cb.title=rmsTr('refClick','Reference — click to edit citation');
       cb.addEventListener('mousedown',ev=>ev.stopPropagation());
       cb.addEventListener('click',ev=>{ ev.stopPropagation(); showCitationForm(id); });
       el.appendChild(cb);
@@ -1084,7 +1084,7 @@ function render(){
       const pb=document.createElement('span');
       pb.className='task-progress'+(prog.done===prog.total?' complete':'');
       pb.textContent=`✓ ${prog.done}/${prog.total}`;
-      pb.title=`${prog.done} of ${prog.total} tasks done in this branch`;
+      pb.title=rmsTr('tasksDone','%s of %s tasks done in this branch').replace('%s', prog.done).replace('%s', prog.total);
       pb.addEventListener('mousedown',ev=>ev.stopPropagation());
       pb.addEventListener('click',ev=>ev.stopPropagation());
       el.appendChild(pb);
@@ -2669,6 +2669,28 @@ let mdMode=false, _mdSyncing=false, _mdTimer=0, _mdLines=[], _mdSelSync=false, _
 // Folds are stored as a Set of _mdFullText line indices (the anchor/parent line of each
 // folded range); indices are kept in sync across edits in mdCommitVisibleEdit().
 let _mdFullText='', _mdFolds=new Set(), _mdView=null, _mdPrevVisible='';
+function applyMdPaneI18n(pane){
+  pane = pane || document.getElementById('mdPane');
+  if(!pane) return;
+  const setTitle=(sel,key,fallback)=>{ const el=pane.querySelector(sel); if(el) el.title=rmsTr(key,fallback); };
+  const ttl=pane.querySelector('.md-ttl'); if(ttl) ttl.textContent=rmsTr('idMarkdown','Markdown');
+  setTitle('.md-pdf-btn','mdDownloadPdf','Download the rendered preview as a PDF');
+  setTitle('.md-wrap-btn','mdWrap','Toggle word wrap');
+  setTitle('.md-prev-btn','mdPreview','Toggle rendered preview');
+  setTitle('.md-close','mdExit','Exit Markdown mode');
+  setTitle('.md-resize','mdResize','Drag to resize');
+  const fmt={
+    bold:'actBold', italic:'actItalic', strike:'actStrike', code:'inlineCode',
+    h1:'heading1', h2:'heading2', h3:'heading3', quote:'blockquote',
+    ul:'actUl', ol:'actOl', hr:'divider', link:'actHref', image:'actImage',
+    codeblock:'codeBlock', table:'table'
+  };
+  const fb={bold:'Bold', italic:'Italic', strike:'Strikethrough', code:'Inline code', h1:'Heading 1', h2:'Heading 2', h3:'Heading 3', quote:'Blockquote', ul:'Bulleted list', ol:'Numbered list', hr:'Divider', link:'Hyperlink', image:'Image', codeblock:'Code block', table:'Table'};
+  pane.querySelectorAll('.md-toolbar [data-fmt]').forEach(b=>{
+    const k=b.dataset.fmt;
+    if(fmt[k]) b.title=rmsTr(fmt[k], fb[k]);
+  });
+}
 function ensureMdPane(){
   if(document.getElementById('mdPane')) return;
   const app=document.querySelector('.app'), stage=document.querySelector('.stage'); if(!app||!stage) return;
@@ -2680,6 +2702,7 @@ function ensureMdPane(){
   app.insertBefore(pane, stage);
   document.body.classList.add('md-ready');
   window.addEventListener('resize', ()=>{ if(mdMode){ mdCalibrate(); mdSyncGutterRowHeights(); } });
+  applyMdPaneI18n(pane);
   pane.querySelector('.md-close').addEventListener('click',()=>toggleMdMode(false));
   pane.querySelector('.md-prev-btn').addEventListener('click', mdTogglePreview);
   pane.querySelector('.md-wrap-btn').addEventListener('click', mdToggleWrap);
@@ -2973,7 +2996,7 @@ function mdTogglePreview(){
   mdPreview=!mdPreview;
   const pane=document.getElementById('mdPane'); if(!pane) return;
   pane.classList.toggle('md-preview', mdPreview);
-  const btn=pane.querySelector('.md-prev-btn'); if(btn){ btn.classList.toggle('on', mdPreview); btn.textContent=mdPreview?'Edit':'Preview'; }
+  const btn=pane.querySelector('.md-prev-btn'); if(btn){ btn.classList.toggle('on', mdPreview); btn.textContent=mdPreview?rmsTr('mdEdit','Edit'):rmsTr('mdPreviewOn','Preview'); }
   if(mdPreview) mdRenderPreviewIfActive();
   else mdRefreshDecorations();   // gutter/highlight were display:none while previewing — re-sync now that they're visible again, rather than trusting whatever was last written while hidden
 }
@@ -3529,6 +3552,12 @@ function select(id,edit,fromPointer){
   updateBreadcrumb();
   if(mdMode && !_mdSelSync && id) mdHighlightNode(id);   // node click -> highlight its Markdown line
   if(edit) setTimeout(()=>startEdit(id),0);
+  syncAddSiblingBtn();
+}
+function syncAddSiblingBtn(){
+  const btn=document.getElementById('addSiblingBtn');
+  if(!btn) return;
+  btn.disabled=!map || !sel || sel===map.rootId;
 }
 
 /* ============================================================
@@ -3570,25 +3599,25 @@ function showBulkBar(prompt){
   bar.id = 'bulkBar'; bar.className = 'bulk-bar';
   if(prompt){
     bar.innerHTML = `<span class="bulk-count">${prompt}</span>
-      <button class="bulk-cancel" data-a="cancel">Cancel</button>`;
+      <button class="bulk-cancel" data-a="cancel">${rmsTr('notesCancel','Cancel')}</button>`;
   } else {
     bar.innerHTML = `
-      <span class="bulk-count">${multiSel.size} selected</span>
+      <span class="bulk-count">${rmsTr('bulkSelected','%s selected').replace('%s', multiSel.size)}</span>
       <div class="bulk-sep"></div>
-      <button data-a="bold" title="Bold all"><b>B</b></button>
-      <button data-a="italic" title="Italic all"><i>I</i></button>
-      <button data-a="underline" title="Underline all"><u>U</u></button>
-      <button data-a="strike" title="Strikethrough all"><s>S</s></button>
+      <button data-a="bold" title="${rmsTr('actBold','Bold')}"><b>B</b></button>
+      <button data-a="italic" title="${rmsTr('actItalic','Italic')}"><i>I</i></button>
+      <button data-a="underline" title="${rmsTr('actUnderline','Underline')}"><u>U</u></button>
+      <button data-a="strike" title="${rmsTr('actStrike','Strikethrough')}"><s>S</s></button>
       <div class="bulk-sep"></div>
-      <button data-a="size" title="Font size">A<span style="font-size:9px">▾</span></button>
-      <button data-a="align" title="Text alignment">⇆</button>
-      <button data-a="textcolor" title="Text color"><span style="border-bottom:2px solid var(--accent)">A</span></button>
-      <button data-a="highlight" title="Highlight">▦</button>
-      <button data-a="color" title="Node background">🎨</button>
+      <button data-a="size" title="${rmsTr('actSize','Font size')}">A<span style="font-size:9px">▾</span></button>
+      <button data-a="align" title="${rmsTr('actAlign','Text alignment')}">⇆</button>
+      <button data-a="textcolor" title="${rmsTr('actTextColor','Text color')}"><span style="border-bottom:2px solid var(--accent)">A</span></button>
+      <button data-a="highlight" title="${rmsTr('actHighlight','Highlight')}">▦</button>
+      <button data-a="color" title="${rmsTr('actBg','Node background')}">🎨</button>
       <div class="bulk-sep"></div>
-      <button data-a="reparent" title="Move all under a new parent">⤷</button>
-      <button data-a="delete" class="bulk-danger" title="Delete all">🗑</button>
-      <button class="bulk-cancel" data-a="cancel" title="Clear selection">✕</button>`;
+      <button data-a="reparent" title="${rmsTr('actReparent','Move under a new parent')}">⤷</button>
+      <button data-a="delete" class="bulk-danger" title="${rmsTr('scDeleteNode','Delete node')}">🗑</button>
+      <button class="bulk-cancel" data-a="cancel" title="${rmsTr('actClearSel','Clear selection')}">✕</button>`;
   }
   document.body.appendChild(bar);
   bar.addEventListener('mousedown', e=>e.stopPropagation());
@@ -3652,7 +3681,7 @@ function showBulkColorPicker(anchorBtn, kind){
   const pk = document.createElement('div');
   pk.className = 'picker';
   pk.innerHTML =
-    (allowNone ? `<button class="p-sw" style="background:transparent;position:relative" data-c="" title="None">∅</button>` : '') +
+    (allowNone ? `<button class="p-sw" style="background:transparent;position:relative" data-c="" title="${rmsTr('actNone','None')}">∅</button>` : '') +
     colors.map(c=>`<button class="p-sw" style="background:${c}" data-c="${c}"></button>`).join('');
   document.body.appendChild(pk);
   positionPopup(pk, anchorBtn);
@@ -3926,7 +3955,7 @@ function showMarkerPicker(anchor, id){
   p.innerHTML = MARKERS.map(m=>
       `<button data-v="${m.c}" title="${escapeHtml(m.label)}" class="${m.c===cur?'on':''}">${m.c}</button>`
     ).join('') +
-    `<button data-v="" title="Remove marker" class="mk-none">\u2716</button>`;
+    `<button data-v="" title="${rmsTr('markerRemove','Remove marker')}" class="mk-none">\u2716</button>`;
   document.body.appendChild(p);
   positionPopup(p, anchor, {align:'left'});
   activePicker=p;
@@ -4076,9 +4105,9 @@ function showHrefPicker(anchor, id){
   p.innerHTML=
     `<input class="href-in" type="text" inputmode="url" spellcheck="false" autocomplete="off" placeholder="https://…" value="${escapeHtml(cur)}">`+
     `<div class="href-actions">`+
-      (cur?`<button type="button" class="href-open" title="Open in browser">↗ Open</button>`:'')+
-      (cur?`<button type="button" class="href-clear">Remove</button>`:'')+
-      `<button type="button" class="href-go primary">Save</button>`+
+      (cur?`<button type="button" class="href-open" title="${rmsTr('hrefOpen','Open in browser')}">↗ ${rmsTr('hrefOpen','Open in browser')}</button>`:'')+
+      (cur?`<button type="button" class="href-clear">${rmsTr('hrefRemove','Remove')}</button>`:'')+
+      `<button type="button" class="href-go primary">${rmsTr('hrefSave','Save')}</button>`+
     `</div>`;
   document.body.appendChild(p);
   positionPopup(p, anchor, {align:'left'});
@@ -4772,7 +4801,7 @@ function runGlobalSearch(query){
   const seq=++_globalSearchSeq;
   _globalSearchT=setTimeout(async ()=>{
     const panel=ensureGlobalResults();
-    panel.innerHTML='<div class="gs-status">Searching all maps…</div>';
+    panel.innerHTML='<div class="gs-status">'+rmsTr('searchingAll','Searching all maps…')+'</div>';
     const results=await searchAllMaps(q);
     if(seq!==_globalSearchSeq) return;   // a newer search superseded this one
     renderGlobalResults(results, q);
@@ -4794,12 +4823,12 @@ function ensureGlobalResults(){
 function hideGlobalResults(){ const p=$('#globalResults'); if(p) p.style.display='none'; }
 function renderGlobalResults(results, q){
   const panel=ensureGlobalResults();
-  if(!results.length){ panel.innerHTML=`<div class="gs-status">No matches for “${escapeHtml(q)}”.</div>`; return; }
+  if(!results.length){ panel.innerHTML=`<div class="gs-status">${rmsTr('noMatchesFor','No matches for “%s”.').replace('%s', escapeHtml(q))}</div>`; return; }
   // Group by map
   const byMap={};
   results.forEach(r=>{ (byMap[r.mapId]=byMap[r.mapId]||{title:r.mapTitle, items:[]}).items.push(r); });
   const re=new RegExp('('+q.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+')','ig');
-  panel.innerHTML=`<div class="gs-head">${results.length} match${results.length===1?'':'es'} across ${Object.keys(byMap).length} map${Object.keys(byMap).length===1?'':'s'}</div>`+
+  panel.innerHTML=`<div class="gs-head">${(results.length===1?rmsTr('matchAcross','%s match across %s map'):rmsTr('matchesAcross','%s matches across %s maps')).replace('%s', results.length).replace('%s', Object.keys(byMap).length)}</div>`+
     Object.entries(byMap).map(([mid,g])=>`
       <div class="gs-group">
         <div class="gs-map">${escapeHtml(g.title)}${mid===(map&&map.id)?' <span class="gs-cur">(current)</span>':''}</div>
@@ -5031,18 +5060,64 @@ function isImeEvent(e){
 }
 // Optional overrides injected by the Roc Mind Spark shell (window.__RMS_SHORTCUTS__).
 // Absent in the plain browser — callers pass the original default as the last arg.
-function rms(name, e, fallback){
-  const spec = window.__RMS_SHORTCUTS__ && window.__RMS_SHORTCUTS__[name];
-  if(!spec) return !!fallback;
+function specMatches(spec, e){
+  if(!spec || !e) return false;
   const want = String(spec.key||'').toLowerCase();
-  const keyOk = (spec.code && e.code===spec.code)
-    || (want && (e.key||'').toLowerCase()===want)
-    || (want==='/' && e.key==='?');
+  const code = spec.code||'';
+  const key = e.key||'';
+  const eCode = e.code||'';
+  const keyOk = (code && eCode===code)
+    || (want && key.toLowerCase()===want)
+    || (want==='/' && key==='?')
+    || ((want==='enter' || code==='Enter') && (key==='Enter' || eCode==='Enter' || eCode==='NumpadEnter'))
+    || ((want===' ' || code==='Space') && (key===' ' || eCode==='Space'));
   if(!keyOk) return false;
   return !!spec.meta===!!e.metaKey
       && !!spec.ctrl===!!e.ctrlKey
       && !!spec.alt===!!e.altKey
       && !!spec.shift===!!e.shiftKey;
+}
+function rms(name, e, fallback){
+  const spec = (typeof window!=='undefined' && window.__RMS_SHORTCUTS__) ? window.__RMS_SHORTCUTS__[name] : null;
+  if(!spec) return !!fallback;
+  const specs = Array.isArray(spec) ? spec : [spec];
+  return specs.some(s => specMatches(s, e));
+}
+function rmsTr(key, fallback){
+  if(typeof window!=='undefined' && typeof window.rmsT==='function'){
+    const s=window.rmsT(key);
+    if(s && s!==key) return s;
+  }
+  return fallback!=null ? fallback : key;
+}
+function chordTitle(nameKey, chordId, fallback){
+  const name=rmsTr(nameKey, fallback);
+  const chord=(typeof window!=='undefined' && window.rmsChordLabel && chordId) ? window.rmsChordLabel(chordId) : '';
+  return chord ? name+' ('+chord+')' : name;
+}
+function refreshLocaleChrome(){
+  if(typeof window.rmsApplyI18n==='function') window.rmsApplyI18n();
+  const save=$('#saveText');
+  if(save && !$('#savePill')?.classList.contains('saving')) save.textContent=rmsTr('saved','Saved');
+  if(typeof sel!=='undefined' && sel && typeof positionNodeBar==='function') positionNodeBar();
+  if(typeof multiSel!=='undefined' && multiSel.size>=2 && typeof showBulkBar==='function') showBulkBar();
+  if(typeof refreshList==='function' && $('#mapList')) refreshList();
+  const search=$('#search');
+  if(search && typeof globalSearchMode!=='undefined'){
+    search.placeholder = globalSearchMode
+      ? rmsTr('searchAllPlaceholder','Search ALL maps…')
+      : rmsTr('findPlaceholder','Find in nodes…');
+  }
+  const exit=$('#focusExit');
+  if(exit){
+    exit.textContent='⛶ '+rmsTr('focusExit','Exit focus');
+    exit.title=rmsTr('focusExitTitle','Exit focus mode (Esc)');
+  }
+  if(typeof ensureMdPane==='function' && document.getElementById('mdPane')) applyMdPaneI18n();
+  document.querySelectorAll('.h-child').forEach(h=>{ h.title=chordTitle('handleChild','addChild','Add child'); });
+  document.querySelectorAll('.h-sibling').forEach(h=>{ h.title=chordTitle('handleSibling','addSibling','Add sibling'); });
+  document.querySelectorAll('.resize-grip').forEach(h=>{ h.title=rmsTr('dragResize','Drag to resize'); });
+  if(typeof syncAddSiblingBtn==='function') syncAddSiblingBtn();
 }
 // Finish a node edit only on Ctrl/⌘+Enter. A bare Enter must stay with the
 // IME (confirm the current candidate) and contentEditable (insert a newline).
@@ -5055,8 +5130,9 @@ function shouldFinishNodeEditOnEnter(e){
 // Bare Enter stays a newline. Modifier+Tab (app / browser switch) is left alone.
 function editSessionCreateAction(e){
   if(!e) return null;
-  if(e.key==='Tab' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) return 'child';
-  if(e.key==='Enter' && (e.ctrlKey||e.metaKey) && !e.shiftKey) return 'sibling';
+  const hit = (name, fallback) => (typeof rms==='function') ? rms(name, e, fallback) : !!fallback;
+  if(hit('addChild', e.key==='Tab' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey)) return 'child';
+  if(hit('addSiblingMod', e.key==='Enter' && (e.ctrlKey||e.metaKey) && !e.shiftKey)) return 'sibling';
   return null;
 }
 // Caps Lock remapped to Hyper (⌘+Ctrl+Alt+Shift), then Space — and
@@ -5916,15 +5992,15 @@ function showPicker(anchor, kind, current, onPick){
       `<button data-v="${s}" class="${s==current?'on':''}">${s}</button>`).join('');
   }else if(kind==='align'){
     const opts=[
-      {v:'left',  ic:'⫷', t:'Align left'},
-      {v:'center',ic:'≡', t:'Align centre'},
-      {v:'right', ic:'⫸', t:'Align right'}
+      {v:'left',  ic:'⫷', t:rmsTr('actAlignLeft','Align left')},
+      {v:'center',ic:'≡', t:rmsTr('actAlignCentre','Align centre')},
+      {v:'right', ic:'⫸', t:rmsTr('actAlignRight','Align right')}
     ];
     p.innerHTML=opts.map(o=>
       `<button data-v="${o.v}" class="${o.v===current?'on':''}" title="${o.t}"><span class="align-icon align-${o.v}">${o.ic}</span></button>`).join('');
   }else{
     const list = kind==='text' ? TEXT_COLORS : HILITES;
-    const label = kind==='text' ? 'Default' : 'None';
+    const label = kind==='text' ? rmsTr('actDefault','Default') : rmsTr('actNone','None');
     p.innerHTML =
       `<button class="p-default" data-v="">${label}</button>`+
       list.map(c=>`<button class="p-sw ${c==current?'on':''}" data-v="${c}" style="background:${c}" title="${c}"></button>`).join('');
@@ -6039,33 +6115,33 @@ function positionNodeBar(){
   const bar=document.createElement('div'); bar.className='nodebar'; bar.id='nodebar';
   bar.innerHTML=`
     <div class="nb-group">
-      <button data-a="child" title="Add child (Tab)">＋</button>
-      ${!isRoot?'<button data-a="sibling" title="Add sibling (Enter)">⤵</button>':''}
-      ${hasKids?`<button data-a="collapse" title="Collapse/expand (Space)">${map.nodes[sel].collapsed?'⊕':'⊖'}</button>`:''}
-      <button data-a="edit" title="Edit (F2)">✎</button>
-      <button data-a="notes" class="${(n.notes||'').trim()?'on':''}" title="${(n.notes||'').trim()?'Edit notes':'Add notes'}">📝</button>
-      <button data-a="task" class="${n.task?'on':''}" title="Task state (todo / doing / done)">☑</button>
-      <button data-a="marker" class="${n.marker?'on':''}" title="${n.marker?'Change marker':'Add a marker'}">${n.marker||'\u2B50'}</button>
-      <button data-a="cite" class="${n.ref?'on':''}" title="Reference / citation">📖</button>
-      <button data-a="href" class="${n.url?'on':''}" title="${n.url?'Edit hyperlink':'Add hyperlink'}">🔗</button>
-      <button data-a="image" class="${n.image?'on':''}" title="Attach image">🖼</button>
-      ${!isRoot?'<button data-a="del" title="Delete (Del)">🗑</button>':''}
+      <button data-a="child" title="${chordTitle('scAddChild','addChild','Add child')}">＋</button>
+      ${!isRoot?'<button data-a="sibling" title="'+chordTitle('scAddSibling','addSibling','Add sibling')+'">⤵</button>':''}
+      ${hasKids?`<button data-a="collapse" title="${chordTitle('scCollapse','collapse','Collapse / expand')}">${map.nodes[sel].collapsed?'⊕':'⊖'}</button>`:''}
+      <button data-a="edit" title="${chordTitle('scEditNode','editNode','Edit node')}">✎</button>
+      <button data-a="notes" class="${(n.notes||'').trim()?'on':''}" title="${(n.notes||'').trim()?rmsTr('actNotesEdit','Edit notes'):rmsTr('actNotesAdd','Add notes')}">📝</button>
+      <button data-a="task" class="${n.task?'on':''}" title="${rmsTr('actTask','Todo state')}">☑</button>
+      <button data-a="marker" class="${n.marker?'on':''}" title="${n.marker?rmsTr('actMarkerChange','Change marker'):rmsTr('actMarkerAdd','Add a marker')}">${n.marker||'\u2B50'}</button>
+      <button data-a="cite" class="${n.ref?'on':''}" title="${rmsTr('actCite','Cite')}">📖</button>
+      <button data-a="href" class="${n.url?'on':''}" title="${n.url?rmsTr('actHrefEdit','Edit hyperlink'):rmsTr('actHrefAdd','Add hyperlink')}">🔗</button>
+      <button data-a="image" class="${n.image?'on':''}" title="${rmsTr('actImage','Image')}">🖼</button>
+      ${!isRoot?'<button data-a="del" title="'+chordTitle('scDeleteNode','deleteNode','Delete node')+'">🗑</button>':''}
     </div>
     <div class="nb-div"></div>
     <div class="nb-group">
-      <button data-a="size" class="fmt-btn size-btn" title="Font size"><span>${fs}</span><span class="caret">▾</span></button>
-      <button data-a="bold" class="${n.bold?'on':''}" title="Bold"><b>B</b></button>
-      <button data-a="italic" class="${n.italic?'on':''}" title="Italic"><i>I</i></button>
-      <button data-a="strike" class="${n.strike?'on':''}" title="Strikethrough"><s>S</s></button>
-      <button data-a="underline" class="${n.underline?'on':''}" title="Underline"><u>U</u></button>
-      <button data-a="ul" class="${n.listType==='ul'?'on':''}" title="Bullet list (use Shift+Enter for new items)">•≡</button>
-      <button data-a="ol" class="${n.listType==='ol'?'on':''}" title="Numbered list (use Shift+Enter for new items)">1≡</button>
-      <button data-a="align" class="fmt-btn align-btn" title="Text alignment"><span class="align-icon align-${n.align||'center'}">≡</span><span class="caret">▾</span></button>
-      <button data-a="textColor" class="fmt-btn color-btn" title="Text color"><span class="A-mark" style="border-bottom:3px solid ${tc}">A</span><span class="caret">▾</span></button>
-      <button data-a="highlight" class="fmt-btn color-btn" title="Highlight"><span class="A-mark" style="background:${hl};padding:0 2px;border-radius:2px">A</span><span class="caret">▾</span></button>
+      <button data-a="size" class="fmt-btn size-btn" title="${rmsTr('actSize','Font size')}"><span>${fs}</span><span class="caret">▾</span></button>
+      <button data-a="bold" class="${n.bold?'on':''}" title="${rmsTr('actBold','Bold')}"><b>B</b></button>
+      <button data-a="italic" class="${n.italic?'on':''}" title="${rmsTr('actItalic','Italic')}"><i>I</i></button>
+      <button data-a="strike" class="${n.strike?'on':''}" title="${rmsTr('actStrike','Strikethrough')}"><s>S</s></button>
+      <button data-a="underline" class="${n.underline?'on':''}" title="${rmsTr('actUnderline','Underline')}"><u>U</u></button>
+      <button data-a="ul" class="${n.listType==='ul'?'on':''}" title="${rmsTr('actUl','Bulleted list')}">•≡</button>
+      <button data-a="ol" class="${n.listType==='ol'?'on':''}" title="${rmsTr('actOl','Numbered list')}">1≡</button>
+      <button data-a="align" class="fmt-btn align-btn" title="${rmsTr('actAlign','Text alignment')}"><span class="align-icon align-${n.align||'center'}">≡</span><span class="caret">▾</span></button>
+      <button data-a="textColor" class="fmt-btn color-btn" title="${rmsTr('actTextColor','Text color')}"><span class="A-mark" style="border-bottom:3px solid ${tc}">A</span><span class="caret">▾</span></button>
+      <button data-a="highlight" class="fmt-btn color-btn" title="${rmsTr('actHighlight','Highlight')}"><span class="A-mark" style="background:${hl};padding:0 2px;border-radius:2px">A</span><span class="caret">▾</span></button>
     </div>
     <div class="nb-div"></div>
-    <span class="swatches" title="Card color">${(isRoot?PALETTE:NODE_COLORS).map(c=>`<span class="sw" data-c="${c}" style="background:${c};${c==='#ffffff'?'border-color:var(--line)':''}"></span>`).join('')}</span>`;
+    <span class="swatches" title="${rmsTr('actCardColor','Card color')}">${(isRoot?PALETTE:NODE_COLORS).map(c=>`<span class="sw" data-c="${c}" style="background:${c};${c==='#ffffff'?'border-color:var(--line)':''}"></span>`).join('')}</span>`;
   viewport.appendChild(bar);
   // Position after appending so we can measure the bar's real on-screen size
   // and clamp it to stay fully inside the visible canvas, however close to
@@ -7020,9 +7096,13 @@ window.addEventListener('keydown', e=>{
             : (e.code==='ArrowDown' || e.key==='ArrowDown') ? 'down'
             : null;
   if(!dir) return;
-  const alt = e.altKey && !e.ctrlKey && !e.metaKey;
-  const chord = e.shiftKey && (e.ctrlKey || e.metaKey) && !e.altKey;
-  if(!alt && !chord) return;
+  const up = dir==='up';
+  const altDefault = e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey;
+  const chordDefault = e.shiftKey && (e.ctrlKey || e.metaKey) && !e.altKey;
+  const hit = up
+    ? (rms('moveSiblingUp', e, altDefault) || rms('moveSiblingUpAlt', e, chordDefault))
+    : (rms('moveSiblingDown', e, altDefault) || rms('moveSiblingDownAlt', e, chordDefault));
+  if(!hit) return;
   if(!sel || !map) return;
   e.preventDefault();
   e.stopPropagation();
@@ -7045,9 +7125,12 @@ window.addEventListener('keydown',e=>{
     if(multiSel.size){ e.preventDefault(); clearMultiSelect(); return; }
   }
   if(!sel||!map) return;
-  if(rms('addChild', e, e.key==='Tab')){e.preventDefault();addNode(sel,false);}
-  else if(rms('addSibling', e, e.key==='Enter')){e.preventDefault();addNode(sel,true);}
-  else if(rms('deleteNode', e, e.key==='Delete'||e.key==='Backspace')){
+  if(rms('addChild', e, e.key==='Tab' && !e.metaKey && !e.ctrlKey && !e.altKey)){e.preventDefault();addNode(sel,false);}
+  else if(rms('addSibling', e, e.key==='Enter' && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey)
+       || rms('addSiblingMod', e, e.key==='Enter' && (e.metaKey||e.ctrlKey) && !e.shiftKey && !e.altKey)){
+    e.preventDefault();addNode(sel,true);
+  }
+  else if(rms('deleteNode', e, e.key==='Backspace') || rms('deleteForward', e, e.key==='Delete')){
     e.preventDefault();
     if(multiSel.size>=2) bulkDelete();
     else deleteNode(sel);
@@ -7123,7 +7206,7 @@ $('#allMapsToggle')?.addEventListener('click', ()=>{
   const w=$('#searchWrap');
   w.classList.toggle('all-mode', globalSearchMode);
   $('#allMapsToggle').classList.toggle('on', globalSearchMode);
-  $('#search').placeholder = globalSearchMode ? 'Search ALL maps…' : 'Find in nodes…';
+  $('#search').placeholder = globalSearchMode ? rmsTr('searchAllPlaceholder','Search ALL maps…') : rmsTr('findPlaceholder','Find in nodes…');
   $('#search').focus();
   if(globalSearchMode){ runGlobalSearch($('#search').value); }
   else { hideGlobalResults(); doSearch($('#search').value); }
@@ -7157,9 +7240,7 @@ window.addEventListener('keydown', e=>{
     openSearch(false);
     return;
   }
-  if(!(e.ctrlKey||e.metaKey)) return;
-  const k = e.key.toLowerCase();
-  if(k === 'h'){
+  if(rms('findReplace', e, (e.ctrlKey||e.metaKey) && !e.altKey && !(e.ctrlKey && e.metaKey) && e.key.toLowerCase()==='h')){
     e.preventDefault();
     armEditBlurCommit();
     document.querySelector('.node.editing .node-text')?.blur();
@@ -7180,7 +7261,7 @@ function doSearch(q){
     else el.classList.add('dim');
   });
   const cnt=$('#searchCount');
-  if(cnt) cnt.textContent = q ? (searchMatches.length ? `${searchMatches.length} found` : 'none') : '';
+  if(cnt) cnt.textContent = q ? (searchMatches.length ? rmsTr('searchFound','%s found').replace('%s', searchMatches.length) : rmsTr('searchNone','none')) : '';
 }
 function focusNextMatch(){
   if(!searchMatches.length) return;
@@ -7341,9 +7422,9 @@ function openRowMenu(btn, m){
   if(typeof closeAllMenus==='function') closeAllMenus();
   closeRowMenu();
   const pop=document.createElement('div'); pop.className='row-pop'; pop._for=m.id;
-  pop.innerHTML='<button data-a="pin"><span class="rp-ic">\uD83D\uDCCC</span>'+(m.pinned?'Unpin':'Pin')+'</button>'+
-                '<button data-a="dup"><span class="rp-ic">\u2398</span>Duplicate</button>'+
-                '<button data-a="del" class="danger"><span class="rp-ic">\uD83D\uDDD1</span>Delete</button>';
+  pop.innerHTML='<button data-a="pin"><span class="rp-ic">\uD83D\uDCCC</span>'+(m.pinned?rmsTr('unpin','Unpin'):rmsTr('pin','Pin'))+'</button>'+
+                '<button data-a="dup"><span class="rp-ic">\u2398</span>'+rmsTr('duplicate','Duplicate')+'</button>'+
+                '<button data-a="del" class="danger"><span class="rp-ic">\uD83D\uDDD1</span>'+rmsTr('deleteMap','Delete')+'</button>';
   const row = btn.closest('.map-item') || btn.parentElement;
   row.appendChild(pop);                 // anchored to the row via CSS (position:absolute) — zoom-proof
   // flip above only if there isn't room below (ratio check; zoom cancels out)
@@ -7358,10 +7439,10 @@ function openRowMenu(btn, m){
   pop.querySelector('[data-a="pin"]').onclick=ev=>{ ev.stopPropagation(); closeRowMenu(); togglePin(m.id); };
   pop.querySelector('[data-a="dup"]').onclick=ev=>{ ev.stopPropagation(); closeRowMenu(); duplicateMap(m.id); };
   pop.querySelector('[data-a="del"]').onclick=async ev=>{ ev.stopPropagation(); closeRowMenu();
-    if(!confirm('Delete "'+(m.title||'Untitled')+'"?')) return;
+    if(!confirm(rmsTr('confirmDeleteMap','Delete “%s”?').replace('%s', m.title||rmsTr('untitled','Untitled')))) return;
     await Store.remove(m.id);
     if(map && map.id===m.id){ map=null; render(); }
-    refreshList(); toast('Map deleted');
+    refreshList(); toast(rmsTr('mapDeleted','Map deleted'));
   };
   _rowPop=pop;
   _rowPopOut=(e)=>{ if(_rowPop && (!e || e.type!=='mousedown' || !_rowPop.contains(e.target))) closeRowMenu(); };
@@ -7389,7 +7470,7 @@ async function refreshList(){
   (idx||[]).forEach(m=>{
     const el=document.createElement('div');
     el.className='map-item'+(map&&m.id===map.id?' active':'')+(m.pinned?' pinned':'');
-    el.innerHTML=`<span class="dot" style="background:${m.color||'#e0613a'}"></span><span class="nm">${escapeHtml(m.title||'Untitled')}</span><button class="row-menu" title="More" aria-haspopup="true" aria-label="More actions">\u22ee</button>`;
+    el.innerHTML=`<span class="dot" style="background:${m.color||'#e0613a'}"></span><span class="nm">${escapeHtml(m.title||rmsTr('untitled','Untitled'))}</span><button class="row-menu" title="${rmsTr('more','More')}" aria-haspopup="true" aria-label="${rmsTr('moreActions','More actions')}">\u22ee</button>`;
     el.style.cursor='pointer';
     el.onclick=()=>{ if(!map || map.id!==m.id) loadMap(m.id); };
     el.querySelector('.row-menu').onclick=ev=>{ ev.stopPropagation(); openRowMenu(ev.currentTarget, m); };
@@ -7406,18 +7487,18 @@ async function refreshList(){
     _seen.add(room);
     _unified.push({ room, token:x.token, title:x.title, color:x.color, addedAt:x.addedAt, mine:false }); });
   if(_unified.length){
-    const hdr=document.createElement('div'); hdr.className='map-group-label'; hdr.textContent='Shared maps';
+    const hdr=document.createElement('div'); hdr.className='map-group-label'; hdr.textContent=rmsTr('sharedMaps','Shared maps');
     list.appendChild(hdr);
     _unified.sort((a,b)=>(b.addedAt||0)-(a.addedAt||0)).forEach(sm=>{
       const activeShared=(map && map._cloudView===sm.room) || (map && map.id==='shared-'+sm.room);
       const el=document.createElement('div');
       el.className='map-item shared-row'+(activeShared?' active':'');
       const badge = sm.mine
-        ? '<span class="shared-badge" title="Shared by you">\uD83D\uDD17</span>'
-        : '<span class="shared-badge" title="'+(sm.token?'Shared with you \u00b7 editable':'Shared with you \u00b7 view only')+'">'+(sm.token?'\u270F\uFE0F':'\uD83D\uDC41')+'</span>';
+        ? '<span class="shared-badge" title="'+rmsTr('sharedByYou','Shared by you')+'">\uD83D\uDD17</span>'
+        : '<span class="shared-badge" title="'+(sm.token?rmsTr('sharedWithYouEdit','Shared with you · editable'):rmsTr('sharedWithYouView','Shared with you · view only'))+'">'+(sm.token?'\u270F\uFE0F':'\uD83D\uDC41')+'</span>';
       el.innerHTML='<span class="dot" style="background:'+(sm.color||'#e0613a')+'"></span>'+
         '<span class="nm">'+escapeHtml(sm.title||'Shared map')+'</span>'+badge+
-        '<button class="row-menu" title="More" aria-haspopup="true" aria-label="More actions">\u22ee</button>';
+        '<button class="row-menu" title="'+rmsTr('more','More')+'" aria-haspopup="true" aria-label="'+rmsTr('moreActions','More actions')+'">\u22ee</button>';
       el.style.cursor='pointer';
       el.onclick=()=>{ if(!(map && map._cloudView===sm.room)) openSharedInPlace(sm.room, sm.token); };
       el.querySelector('.row-menu').onclick=ev=>{ ev.stopPropagation(); openSharedRowMenu(ev.currentTarget, sm); };
@@ -7431,14 +7512,14 @@ function escapeHtml(s){return (s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&l
 // only the open one). Pin state lives on the map and is mirrored into the index.
 async function togglePin(id){
   const target = (map && map.id===id) ? map : await Store.get(id);
-  if(!target){ toast('Could not open map'); return; }
+  if(!target){ toast(rmsTr('couldNotOpenMap','Could not open map')); return; }
   const now = !target.pinned;
   if(now) target.pinned = true; else delete target.pinned;
   try{ await Store.save(target); }
   catch(e){ toast('Could not update pin'); return; }
   if(map && map.id===id){ if(now) map.pinned=true; else delete map.pinned; }
   refreshList();
-  toast(now ? 'Pinned to top' : 'Unpinned');
+  toast(now ? rmsTr('pinnedToTop','Pinned to top') : rmsTr('unpinned','Unpinned'));
 }
 
 /* ---------- Rich-text Notes editor popup ---------- */
@@ -7521,25 +7602,25 @@ function showNotesEditor(nodeId, opts){
   const has=(n.notes||'').replace(/<[^>]*>/g,'').trim().length>0;
   popup.innerHTML=`
     <div class="np-toolbar">
-      <button data-c="bold"          title="Bold"><b>B</b></button>
-      <button data-c="italic"        title="Italic"><i>i</i></button>
-      <button data-c="strikeThrough" title="Strikethrough"><s>S</s></button>
+      <button data-c="bold"          title="${rmsTr('actBold','Bold')}"><b>B</b></button>
+      <button data-c="italic"        title="${rmsTr('actItalic','Italic')}"><i>i</i></button>
+      <button data-c="strikeThrough" title="${rmsTr('actStrike','Strikethrough')}"><s>S</s></button>
       <div class="np-div"></div>
-      <button data-c="h1"            title="Heading 1">H1</button>
-      <button data-c="h2"            title="Heading 2">H2</button>
+      <button data-c="h1"            title="${rmsTr('heading1','Heading 1')}">H1</button>
+      <button data-c="h2"            title="${rmsTr('heading2','Heading 2')}">H2</button>
       <div class="np-div"></div>
-      <button data-c="insertUnorderedList" title="Bullet list">•≡</button>
-      <button data-c="insertOrderedList"   title="Numbered list">1≡</button>
+      <button data-c="insertUnorderedList" title="${rmsTr('actUl','Bulleted list')}">•≡</button>
+      <button data-c="insertOrderedList"   title="${rmsTr('actOl','Numbered list')}">1≡</button>
       <div class="np-div"></div>
-      <button data-c="createLink"  title="Insert link">🔗</button>
-      <button data-c="unlink"      title="Remove link">⊘🔗</button>
-      <button data-c="removeFormat" title="Clear formatting">⨯</button>
+      <button data-c="createLink"  title="${rmsTr('insertLink','Insert link')}">🔗</button>
+      <button data-c="unlink"      title="${rmsTr('removeLink','Remove link')}">⊘🔗</button>
+      <button data-c="removeFormat" title="${rmsTr('clearFormat','Clear formatting')}">⨯</button>
     </div>
-    <div class="np-editor" contenteditable="true" data-placeholder="Type your notes — Markdown-style formatting available via the toolbar."></div>
+    <div class="np-editor" contenteditable="true" data-placeholder="${rmsTr('notesPlaceholder','Type your notes — formatting is on the toolbar.')}"></div>
     <div class="np-actions">
-      ${has?'<button class="np-clear">Remove</button>':''}
-      <button class="np-cancel">Cancel</button>
-      <button class="np-save primary">Save</button>
+      ${has?'<button class="np-clear">'+rmsTr('notesRemove','Remove')+'</button>':''}
+      <button class="np-cancel">${rmsTr('notesCancel','Cancel')}</button>
+      <button class="np-save primary">${rmsTr('notesSave','Save')}</button>
     </div>`;
   document.body.appendChild(popup);
   placeNotesPopup(popup, nodeId);
@@ -7562,7 +7643,7 @@ function showNotesEditor(nodeId, opts){
       const c=btn.dataset.c;
       if(c==='h1'||c==='h2'){ execCmd('formatBlock', '<'+c+'>'); }
       else if(c==='createLink'){
-        const url=prompt('Enter URL (https://…):'); if(url) execCmd('createLink',url);
+        const url=prompt(rmsTr('enterUrl','Enter URL (https://…):')); if(url) execCmd('createLink',url);
       }
       else { execCmd(c); }
       editor.focus();
@@ -7866,7 +7947,7 @@ function scheduleSave(){
   if(map._cloudEdit){ scheduleCloudSave(); return; }   // shared cloud map saves back to the Durable Object
   const target = map;          // bind THIS map: switching maps before the timer
   _pendingSaveMap = target;    // fires must NOT redirect the write onto another map
-  $('#savePill').classList.add('saving'); $('#saveText').textContent='Saving…';
+  $('#savePill').classList.add('saving'); $('#saveText').textContent=rmsTr('saving','Saving…');
   clearTimeout(saveTimer);
   // Cloud mode talks to GitHub — debounce longer to stay well under 5000 req/h
   const delay = (MODE==='cloud') ? 1500 : 600;
@@ -7875,17 +7956,17 @@ function scheduleSave(){
     try{
       await Store.save(target);
       if(_pendingSaveMap===target) _pendingSaveMap=null;
-      $('#savePill').classList.remove('saving'); $('#saveText').textContent='Saved';
+      $('#savePill').classList.remove('saving'); $('#saveText').textContent=rmsTr('saved','Saved');
     }catch(e){
-      $('#savePill').classList.remove('saving'); $('#saveText').textContent='Retrying…';
+      $('#savePill').classList.remove('saving'); $('#saveText').textContent=rmsTr('saveRetrying','Retrying…');
       // The map was copied to local storage before the network write, so the
       // edit isn't lost. Tell the user plainly and retry once after a short wait.
       toast((MODE==='cloud')
         ? 'Couldn’t sync to GitHub just now — your changes are saved on this device and will retry.'
         : 'Couldn’t reach the server — your changes are saved on this device and will retry.');
       setTimeout(async()=>{
-        try{ await Store.save(target); if(_pendingSaveMap===target) _pendingSaveMap=null; $('#savePill').classList.remove('saving'); $('#saveText').textContent='Saved'; }
-        catch(e2){ $('#saveText').textContent='Save failed'; }
+        try{ await Store.save(target); if(_pendingSaveMap===target) _pendingSaveMap=null; $('#savePill').classList.remove('saving'); $('#saveText').textContent=rmsTr('saved','Saved'); }
+        catch(e2){ $('#saveText').textContent=rmsTr('saveFailed','Save failed'); }
       }, 4000);
     }
   },delay);
@@ -10445,6 +10526,13 @@ $('#newMap').onclick=createMap;
 $('#newMapMenu')?.addEventListener('click', e => { e.stopPropagation(); showTemplatesMenu(); });
 $('#emptyNew').onclick=createMap;
 $('#addChild').onclick=()=>{ if(!map)return; addNode(sel||map.rootId,false); };
+$('#addSiblingBtn')?.addEventListener('click', ()=>{
+  if(!map) return;
+  const id=sel||map.rootId;
+  if(id===map.rootId) return;
+  addNode(id,true);
+});
+window.addEventListener('rms-lang', ()=>{ if(typeof refreshLocaleChrome==='function') refreshLocaleChrome(); });
 // Before printing, fit the whole map into view so nothing is clipped on paper.
 let _rzReframeT=null;
 window.addEventListener('resize', ()=>{
@@ -10528,8 +10616,10 @@ $('#collapseAll')?.addEventListener('click', ()=>{
   if(!st) return;
   pushHistory();
   autoLayout();
-  const verb=st.dir==='collapse' ? 'Collapsed' : 'Expanded';
-  toast(st.step>=st.total ? `${verb} all` : `${verb} ${st.step}/${st.total}`);
+  const verb=st.dir==='collapse' ? rmsTr('collapsed','Collapsed') : rmsTr('expanded','Expanded');
+  toast(st.step>=st.total
+    ? rmsTr('collapseToastAll','%s all').replace('%s', verb)
+    : rmsTr('collapseToastStep','%s %s/%s').replace('%s', verb).replace('%s', st.step).replace('%s', st.total));
 });
 $('#undo').onclick=undo; $('#redo').onclick=redo;
 document.getElementById('mdToggle')?.addEventListener('click',()=>toggleMdMode());
@@ -11107,7 +11197,7 @@ $('#themeBtn').onclick=(e)=>{
   themePanel.className='theme-panel theme-panel-large';
   themePanel.innerHTML = `
     <div class="tp-section">
-      <div class="tp-label">Colour theme</div>
+      <div class="tp-label">${rmsTr('themeColour','Colour theme')}</div>
       <div class="tp-grid">
         ${THEMES.map(t=>`
           <button class="theme-opt${t.id===curTheme?' active':''}" data-cat="theme" data-id="${t.id}">
@@ -11116,16 +11206,16 @@ $('#themeBtn').onclick=(e)=>{
       </div>
     </div>
     <div class="tp-section tp-section-special">
-      <div class="tp-label">I am</div>
+      <div class="tp-label">${rmsTr('themeLook','I am')}</div>
       <div class="tp-grid">
         ${LOOKS.map(l=>`
           <button class="theme-opt${l.id===curLook?' active':''}" data-cat="look" data-id="${l.id}">
-            ${buildLookThumb(l)}<span class="theme-name">${l.name}</span>
+            ${buildLookThumb(l)}<span class="theme-name">${({office:rmsTr('lookOffice',l.name),'coffee-shop':rmsTr('lookCoffee',l.name),handwritten:rmsTr('lookSchool',l.name)}[l.id]||l.name)}</span>
           </button>`).join('')}
       </div>
     </div>
     <div class="tp-section">
-      <div class="tp-label">Map style</div>
+      <div class="tp-label">${rmsTr('themeStyle','Map style')}</div>
       <div class="tp-grid">
         ${MAP_STYLES.map(s=>`
           <button class="theme-opt${s.id===curStyle?' active':''}" data-cat="style" data-id="${s.id}" title="${s.desc}">
@@ -11134,8 +11224,8 @@ $('#themeBtn').onclick=(e)=>{
       </div>
     </div>
     <div class="tp-section">
-      <div class="tp-label">Layout
-        <button class="tp-cog" title="Layout settings (JSON)">\u2699</button>
+      <div class="tp-label">${rmsTr('themeLayout','Layout')}
+        <button class="tp-cog" title="${rmsTr('themeLayoutJson','Layout settings (JSON)')}">\u2699</button>
       </div>
       <div class="tp-grid tp-scroll-row">
         ${allLayouts().map(l=>`
@@ -11145,9 +11235,9 @@ $('#themeBtn').onclick=(e)=>{
       </div>
     </div>
     <div class="tp-section">
-      <div class="tp-label">Display size <span class="tp-hint">scales the whole interface</span></div>
+      <div class="tp-label">${rmsTr('themeSize','Display size')} <span class="tp-hint">${rmsTr('themeSizeHint','scales the whole interface')}</span></div>
       <div class="tp-scale">
-        <button class="scale-opt${isUiScaleAuto()?' active':''}" data-scale="auto">Auto</button>
+        <button class="scale-opt${isUiScaleAuto()?' active':''}" data-scale="auto">${rmsTr('themeAuto','Auto')}</button>
         ${[80,90,100,110,125].map(p=>`
           <button class="scale-opt${(!isUiScaleAuto() && p===Math.round(getUiScale()*100))?' active':''}" data-scale="${p}">${p}%</button>`).join('')}
       </div>
@@ -11272,12 +11362,12 @@ function toggleFocusMode(){
     if(!exit){
       exit = document.createElement('button');
       exit.id = 'focusExit'; exit.className = 'focus-exit';
-      exit.innerHTML = '⛶ Exit focus';
-      exit.title = 'Exit focus mode (Esc)';
+      exit.innerHTML = '⛶ '+rmsTr('focusExit','Exit focus');
+      exit.title = rmsTr('focusExitTitle','Exit focus mode (Esc)');
       exit.onclick = toggleFocusMode;
       document.body.appendChild(exit);
     }
-    toast('Focus mode — Esc to exit');
+    toast(rmsTr('focusToast','Focus mode — Esc to exit'));
   } else {
     exit?.remove();
   }
@@ -11298,6 +11388,7 @@ function showKeyboardHelp(){
     [tr('kbBuilding','Building the map'),[
       ['Tab',            tr('kbAddChild','Add a child node')],
       ['Enter',          tr('kbAddSibling','Add a sibling node')],
+      ['Ctrl/⌘ + Enter', tr('kbAddSiblingMod','Add a sibling node')],
       ['Alt + ↑ / ↓',    tr('kbMoveSibling','Move / swap sibling node up / down')],
       ['Ctrl/⌘ + Shift + ↑ / ↓', tr('kbMoveSiblingAlt','Same, if Option is taken by the OS')],
       ['F2 / double-click', tr('kbEdit','Edit the selected node')],
@@ -12236,10 +12327,10 @@ async function _recoverCloudSave(ce){
 }
 async function _doCloudSave(ce, retried){
   const url=sharedApiUrl(ce.id);
-  if(!url){ $('#saveText').textContent='Save failed'; return; }
+  if(!url){ $('#saveText').textContent=rmsTr('saveFailed','Save failed'); return; }
   const cur=_shareePayload(map);
   const ops=cloudDiff(map._cloudBase||cur, cur);
-  if(!ops.length){ $('#savePill').classList.remove('saving'); $('#saveText').textContent='Saved'; return; }
+  if(!ops.length){ $('#savePill').classList.remove('saving'); $('#saveText').textContent=rmsTr('saved','Saved'); return; }
   try{
     const r=await _collabFetch(url, { method:'PATCH', headers:{'Content-Type':'application/json','X-Edit-Token':ce.token}, body:JSON.stringify({ops}) });
     if(!r.ok) throw new Error('HTTP '+r.status);
@@ -12247,15 +12338,15 @@ async function _doCloudSave(ce, retried){
     if(res && res.map) adoptCloudMerged(res.map);
     map._cloudBase=_cloneObj(_shareePayload(map));   // base = what's now on the server
     _cloudPollSig = JSON.stringify(res && res.map ? res.map : _shareePayload(map));
-    $('#savePill').classList.remove('saving'); $('#saveText').textContent='Saved';
+    $('#savePill').classList.remove('saving'); $('#saveText').textContent=rmsTr('saved','Saved');
   }catch(e){
     if(!retried && /\b403\b/.test(String(e.message))){
       if(await _recoverCloudSave(ce)) return _doCloudSave(map._cloudEdit, true);
-      $('#savePill').classList.remove('saving'); $('#saveText').textContent='Save failed';
+      $('#savePill').classList.remove('saving'); $('#saveText').textContent=rmsTr('saveFailed','Save failed');
       toast('This shared link is out of sync. Ask the map owner for a fresh edit link.');
       return;
     }
-    $('#savePill').classList.remove('saving'); $('#saveText').textContent='Save failed';
+    $('#savePill').classList.remove('saving'); $('#saveText').textContent=rmsTr('saveFailed','Save failed');
     toast('Couldn\u2019t save shared map: '+(e.message||e));
   }
 }
@@ -12264,7 +12355,7 @@ function scheduleCloudSave(){
   if(map._opening) return;                    // just opened this shared map — not a user edit
   const cur=_shareePayload(map);
   if(!cloudDiff(map._cloudBase||cur, cur).length) return;   // nothing actually changed — don't flash "Saving…"
-  $('#savePill').classList.add('saving'); $('#saveText').textContent='Saving…';
+  $('#savePill').classList.add('saving'); $('#saveText').textContent=rmsTr('saving','Saving…');
   clearTimeout(_cloudSaveTimer);
   _cloudSaveTimer=setTimeout(()=>{ _cloudSaveTimer=0; _doCloudSave(ce); }, 1200);
 }
