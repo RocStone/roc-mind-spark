@@ -2,17 +2,21 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { loadFns } from './helpers/load-app-fns.mjs';
 
-const { isImeEvent, shouldCommitEditOnBlur, shouldCommitEditOnPointerTarget, shouldCommitEditOnEscape, isEditSessionChrome, shouldFinishNodeEditOnEnter, isImeSwitchEvent, editSessionCreateAction, editSessionUndoAction } = loadFns([
+const { isImeEvent, shouldCommitEditOnBlur, shouldCommitEditOnPointerTarget, shouldCommitEditOnEscape, isEditSessionChrome, shouldFinishNodeEditOnEnter, isImeSwitchEvent, editSessionCreateAction, editSessionUndoAction, markImeCompositionEnd, isImeConfirmEnter, clearImeConfirmEnter } = loadFns([
   'isImeEvent',
   'shouldCommitEditOnBlur',
   'shouldCommitEditOnPointerTarget',
   'shouldCommitEditOnEscape',
   'isEditSessionChrome',
+  'nowMs',
+  'markImeCompositionEnd',
+  'clearImeConfirmEnter',
+  'isImeConfirmEnter',
   'shouldFinishNodeEditOnEnter',
   'isImeSwitchEvent',
   'editSessionCreateAction',
   'editSessionUndoAction',
-]);
+], { IME_CONFIRM_MS: 80, _imeConfirmUntil: 0 });
 
 describe('isImeEvent — do not steal 中文 IME keys', () => {
   test('plain latin typing is not IME', () => {
@@ -121,21 +125,23 @@ describe('isImeSwitchEvent — Caps Lock / Hyper+Space must stay with the OS IME
   });
 });
 
-describe('shouldFinishNodeEditOnEnter — do not steal IME confirm Enter', () => {
-  test('bare Enter does not finish the edit', () => {
-    assert.equal(shouldFinishNodeEditOnEnter({ key: 'Enter', ctrlKey: false, metaKey: false }), false);
+describe('shouldFinishNodeEditOnEnter — IME confirm stays with the IME', () => {
+  test('bare Enter finishes the edit when the IME is idle', () => {
+    clearImeConfirmEnter();
+    assert.equal(shouldFinishNodeEditOnEnter({ key: 'Enter', ctrlKey: false, metaKey: false }), true);
   });
 
   test('Shift+Enter does not finish the edit', () => {
     assert.equal(shouldFinishNodeEditOnEnter({ key: 'Enter', shiftKey: true, ctrlKey: false, metaKey: false }), false);
   });
 
-  test('⌘+Enter finishes the edit', () => {
-    assert.equal(shouldFinishNodeEditOnEnter({ key: 'Enter', ctrlKey: false, metaKey: true }), true);
+  test('composing Enter does not finish the edit', () => {
+    assert.equal(shouldFinishNodeEditOnEnter({ key: 'Enter', isComposing: true }), false);
+    assert.equal(shouldFinishNodeEditOnEnter({ key: 'Enter', keyCode: 229 }), false);
   });
 
-  test('Ctrl+Enter finishes the edit', () => {
-    assert.equal(shouldFinishNodeEditOnEnter({ key: 'Enter', ctrlKey: true, metaKey: false }), true);
+  test('⌘+Enter still finishes the edit', () => {
+    assert.equal(shouldFinishNodeEditOnEnter({ key: 'Enter', ctrlKey: false, metaKey: true }), true);
   });
 
   test('other keys do not finish', () => {
@@ -144,7 +150,20 @@ describe('shouldFinishNodeEditOnEnter — do not steal IME confirm Enter', () =>
   });
 });
 
-describe('editSessionCreateAction — Tab child / ⌘+Enter sibling while editing', () => {
+describe('isImeConfirmEnter — Enter right after compositionend is the IME confirm', () => {
+  test('Enter immediately after compositionend is swallowed', () => {
+    markImeCompositionEnd();
+    assert.equal(isImeConfirmEnter({ key: 'Enter' }), true);
+    assert.equal(editSessionCreateAction({ key: 'Enter' }), null);
+  });
+
+  test('other keys after compositionend are not swallowed', () => {
+    markImeCompositionEnd();
+    assert.equal(isImeConfirmEnter({ key: 'Tab' }), false);
+  });
+});
+
+describe('editSessionCreateAction — Tab child / Enter sibling while editing', () => {
   test('bare Tab creates a child', () => {
     assert.equal(editSessionCreateAction({ key: 'Tab' }), 'child');
     assert.equal(editSessionCreateAction({ key: 'Tab', shiftKey: false, ctrlKey: false, metaKey: false, altKey: false }), 'child');
@@ -157,15 +176,24 @@ describe('editSessionCreateAction — Tab child / ⌘+Enter sibling while editin
     assert.equal(editSessionCreateAction({ key: 'Tab', altKey: true }), null);
   });
 
-  test('⌘+Enter and Ctrl+Enter create a sibling', () => {
+  test('bare Enter creates a sibling when the IME is idle', () => {
+    clearImeConfirmEnter();
+    assert.equal(editSessionCreateAction({ key: 'Enter' }), 'sibling');
+  });
+
+  test('⌘+Enter and Ctrl+Enter still create a sibling', () => {
     assert.equal(editSessionCreateAction({ key: 'Enter', metaKey: true }), 'sibling');
     assert.equal(editSessionCreateAction({ key: 'Enter', ctrlKey: true }), 'sibling');
   });
 
-  test('bare Enter / Shift+Enter stay a newline', () => {
-    assert.equal(editSessionCreateAction({ key: 'Enter' }), null);
+  test('Shift+Enter stays a newline', () => {
     assert.equal(editSessionCreateAction({ key: 'Enter', shiftKey: true }), null);
     assert.equal(editSessionCreateAction({ key: 'Enter', shiftKey: true, metaKey: true }), null);
+  });
+
+  test('composing Enter does not create a sibling', () => {
+    assert.equal(editSessionCreateAction({ key: 'Enter', isComposing: true }), null);
+    assert.equal(editSessionCreateAction({ key: 'Enter', keyCode: 229 }), null);
   });
 
   test('other keys and a missing event do nothing', () => {

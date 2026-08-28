@@ -4929,7 +4929,7 @@ function startBlockEdit(id, el){
   };
   let composing=false, blurTimer=0;
   const onCompositionStart=()=>{ composing=true; };
-  const onCompositionEnd=()=>{ composing=false; };
+  const onCompositionEnd=()=>{ composing=false; if(typeof markImeCompositionEnd==='function') markImeCompositionEnd(); };
   const onBlur=()=>{
     if(composing) return;
     clearTimeout(blurTimer);
@@ -5119,20 +5119,44 @@ function refreshLocaleChrome(){
   document.querySelectorAll('.resize-grip').forEach(h=>{ h.title=rmsTr('dragResize','Drag to resize'); });
   if(typeof syncAddSiblingBtn==='function') syncAddSiblingBtn();
 }
-// Finish a node edit only on Ctrl/⌘+Enter. A bare Enter must stay with the
-// IME (confirm the current candidate) and contentEditable (insert a newline).
+// IME confirm Enter often arrives AFTER compositionend, with isComposing
+// already false. Swallow that one key; a later Enter is a real shortcut.
+const IME_CONFIRM_MS=80;
+let _imeConfirmUntil=0;
+function nowMs(){
+  return (typeof performance!=='undefined' && performance.now) ? performance.now() : Date.now();
+}
+function markImeCompositionEnd(){
+  _imeConfirmUntil=nowMs()+IME_CONFIRM_MS;
+}
+function clearImeConfirmEnter(){
+  _imeConfirmUntil=0;
+}
+function isImeConfirmEnter(e){
+  if(!e || e.key!=='Enter') return false;
+  return nowMs()<_imeConfirmUntil;
+}
+// Bare Enter saves and adds a sibling, unless the IME is confirming a candidate
+// or the user asked for a newline with Shift+Enter.
 function shouldFinishNodeEditOnEnter(e){
-  return !!(e && e.key==='Enter' && (e.ctrlKey||e.metaKey));
+  if(!e || e.key!=='Enter' || e.shiftKey || e.altKey) return false;
+  if(typeof isImeEvent==='function' && isImeEvent(e)) return false;
+  if(isImeConfirmEnter(e)) return false;
+  return true;
 }
 // While editing a node title:
 //   Tab            -> commit, add a child, start editing it
-//   Ctrl/⌘+Enter   -> commit, add a sibling, start editing it
-// Bare Enter stays a newline. Modifier+Tab (app / browser switch) is left alone.
+//   Enter          -> commit, add a sibling, start editing it
+//   Ctrl/⌘+Enter   -> same sibling action (kept as an alias)
+// Shift+Enter stays a newline. IME Enter is not this function's job.
 function editSessionCreateAction(e){
   if(!e) return null;
+  if(typeof isImeEvent==='function' && isImeEvent(e)) return null;
+  if(typeof isImeConfirmEnter==='function' && isImeConfirmEnter(e)) return null;
   const hit = (name, fallback) => (typeof rms==='function') ? rms(name, e, fallback) : !!fallback;
   if(hit('addChild', e.key==='Tab' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey)) return 'child';
-  if(hit('addSiblingMod', e.key==='Enter' && (e.ctrlKey||e.metaKey) && !e.shiftKey)) return 'sibling';
+  if(hit('addSibling', e.key==='Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey)) return 'sibling';
+  if(hit('addSiblingMod', e.key==='Enter' && (e.ctrlKey||e.metaKey) && !e.shiftKey && !e.altKey)) return 'sibling';
   return null;
 }
 // Caps Lock remapped to Hyper (⌘+Ctrl+Alt+Shift), then Space — and
@@ -5896,6 +5920,7 @@ function startEdit(id){
   };
   const onCompositionEnd=()=>{
     composing=false;
+    if(typeof markImeCompositionEnd==='function') markImeCompositionEnd();
     tryMarkdownShortcut();
     updateFormulaAutocomplete(host, id);
     if(_editRAF) cancelAnimationFrame(_editRAF);
@@ -5968,7 +5993,7 @@ function startEdit(id){
     const undoAct=editSessionUndoAction(e);
     if(undoAct){ e.preventDefault(); e.stopPropagation(); performHistoryChord(undoAct); return; }
     if(!e.ctrlKey && !e.metaKey && !e.altKey && e.key && e.key.length===1) clearEditReplaceAll();
-    if(isImeEvent(e) || composing || isImeSwitchEvent(e)) return;
+    if(isImeEvent(e) || composing || isImeSwitchEvent(e) || isImeConfirmEnter(e)) return;
     if(formulaAutocompleteKeydown(e)) return;   // popup open: let it handle nav/select/dismiss first
     // Standard contentEditable shortcuts: Ctrl/Cmd+B / I / U toggle inline
     if((e.ctrlKey||e.metaKey) && !e.shiftKey){
@@ -11437,8 +11462,8 @@ function showKeyboardHelp(){
       ['Ctrl/⌘ + B / I / U', tr('kbFormat','Bold / italic / underline the selection')],
       ['select + UL/OL btn', tr('kbLists','Make each selected line a bullet')],
       ['Tab',            tr('kbSaveChild','Save and add a child node')],
-      ['Ctrl/⌘ + Enter', tr('kbSaveSibling','Save and add a sibling node')],
-      ['Enter / Shift + Enter', tr('kbNewline','Newline within the node text')],
+      ['Enter',          tr('kbSaveSibling','Save and add a sibling node')],
+      ['Shift + Enter',  tr('kbNewline','Newline within the node text')],
       ['Esc',            tr('kbEsc','Save the edit / close a popup')],
     ]],
     [tr('kbHistory','History'),[

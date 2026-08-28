@@ -7,8 +7,8 @@ import { loadFns } from './helpers/load-app-fns.mjs';
 
 const window = { __RMS_SHORTCUTS__: null };
 const { rms, editSessionCreateAction } = loadFns(
-  ['specMatches', 'rms', 'editSessionCreateAction'],
-  { window }
+  ['specMatches', 'rms', 'isImeEvent', 'nowMs', 'isImeConfirmEnter', 'editSessionCreateAction'],
+  { window, IME_CONFIRM_MS: 80, _imeConfirmUntil: 0 }
 );
 
 const ev = (over = {}) => ({
@@ -57,13 +57,15 @@ describe('rms — optional shortcut overrides from the Mac shell', () => {
     assert.equal(rms('addSiblingMod', enter, false), false);
   });
 
-  test('editSessionCreateAction follows addSiblingMod override', () => {
+  test('editSessionCreateAction follows addSibling and addSiblingMod', () => {
     window.__RMS_SHORTCUTS__ = {
       addChild: { key: 'Tab', code: 'Tab', meta: false, ctrl: false, alt: false, shift: false },
+      addSibling: { key: 'Enter', code: 'Enter', meta: false, ctrl: false, alt: false, shift: false },
       addSiblingMod: { key: 'Enter', code: 'Enter', meta: true, ctrl: false, alt: false, shift: false },
     };
+    assert.equal(editSessionCreateAction(ev({ key: 'Enter', code: 'Enter' })), 'sibling');
     assert.equal(editSessionCreateAction(ev({ key: 'Enter', code: 'Enter', metaKey: true })), 'sibling');
-    assert.equal(editSessionCreateAction(ev({ key: 'Enter', code: 'Enter' })), null);
+    assert.equal(editSessionCreateAction(ev({ key: 'Enter', code: 'Enter', shiftKey: true })), null);
   });
 });
 
