@@ -177,7 +177,7 @@
       const names={
         task:t('actTask'), child:t('scAddChild'), sibling:t('scAddSibling'), edit:t('scEditNode'),
         del:t('scDeleteNode'), collapse:t('scCollapse'), notes:t('actNotes'), marker:t('actMarker'), cite:t('actCite'),
-        href:t('actHref'), image:t('actImage'), bold:t('actBold'), italic:t('actItalic'), strike:t('actStrike'), underline:t('actUnderline'),
+        href:t('actHref'), image:t('actImage'), mdtable:t('actMdTable'), bold:t('actBold'), italic:t('actItalic'), strike:t('actStrike'), underline:t('actUnderline'),
         ul:t('actUl'), ol:t('actOl'),
       };
       return names[el.dataset.a] || el.dataset.a;

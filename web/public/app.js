@@ -920,7 +920,10 @@ function render(){
     // (e.g. Back to School's 1.2em) would let text visually spill past the
     // card's own border rather than the box growing to fit it.
     if(n.width){ el.style.width=n.width+'px'; el.style.maxWidth='none'; }
-    if(n.height){ el.style.minHeight=n.height+'px'; }
+    if(n.height){
+      if(isTableNode(n)){ el.style.height=n.height+'px'; el.style.maxHeight='none'; }
+      else el.style.minHeight=n.height+'px';
+    }
     // Reference/citation nodes get a distinct class
     if(n.ref) el.classList.add('ref-node');
     if(n.url) el.classList.add('href-node');
@@ -997,7 +1000,13 @@ function render(){
     // Text lives in its own span so contentEditable doesn't tangle with the handles
     const t=document.createElement('span'); t.className='node-text';
     if(n.hr){ el.classList.add('hr-node'); t.classList.add('node-hr'); t.textContent=''; }
-    else if(n.html){ el.classList.add('block-node'); if(n.frontmatter) el.classList.add('frontmatter-node'); t.classList.add('node-block'); t.innerHTML = sanitizeNotes(n.html); }
+    else if(n.html){
+      el.classList.add('block-node');
+      if(n.frontmatter) el.classList.add('frontmatter-node');
+      if(isTableNode(n)) el.classList.add('table-node');
+      t.classList.add('node-block');
+      t.innerHTML = sanitizeNotes(n.html);
+    }
     else {
       const plainCheck = nodeTextPlain(n.text||'').trim();
       if(plainCheck.startsWith('=')){
@@ -1331,6 +1340,112 @@ const NOTES_TAGS = ['h1','h2','h3','blockquote','pre','code','table','thead','tb
 // promote a hidden <script> to the top level where a snapshotted loop misses it.
 const DROP_TAGS = new Set(['script','style','iframe','object','embed','noscript','svg','math','template','link','meta','base','frame','frameset','title','xmp']);
 function sanitizeNotes(html){ return sanitizeInlineHTML(html, NOTES_TAGS); }
+
+function isTableNode(n){
+  if(!n || n.frontmatter) return false;
+  if(n.table) return true;
+  return !!(n.html && /<table[\s>]/i.test(n.html));
+}
+function splitPipeRow(line){
+  return String(line||'').replace(/^\s*\|/, '').replace(/\|\s*$/, '').split('|').map(c => c.trim());
+}
+function isGfmSepLine(line){
+  if(!line || line.indexOf('-')<0) return false;
+  const cells=splitPipeRow(line);
+  return cells.length>=1 && cells.every(c => {
+    const t=String(c).replace(/\s/g,'');
+    return /^:?-+:?$/.test(t) && t.indexOf('-')>=0;
+  });
+}
+function normalizeTableGrid(headers, rows){
+  const cols=headers.length;
+  if(cols<2) return null;
+  const body=(rows||[]).map(r => {
+    const row=r.slice();
+    while(row.length<cols) row.push('');
+    return row.slice(0, cols);
+  });
+  return { headers, rows: body };
+}
+function parseGfmMarkdownTable(text){
+  const lines=String(text||'').split('\n').map(l => l.trim()).filter(l => l);
+  if(lines.length<2) return null;
+  if(lines[0].indexOf('|')<0) return null;
+  const sepAt=lines.findIndex((l,i) => i>0 && isGfmSepLine(l));
+  if(sepAt<0){
+    const rows=lines.map(splitPipeRow);
+    if(!rows.every(r => r.length===rows[0].length)) return null;
+    return normalizeTableGrid(rows[0], rows.slice(1));
+  }
+  const headers=splitPipeRow(lines[0]);
+  const body=lines.slice(sepAt+1).filter(l => l.indexOf('|')>=0).map(splitPipeRow);
+  return normalizeTableGrid(headers, body);
+}
+function parseDelimitedTable(lines, delim){
+  const rows=lines.filter(l => String(l).trim()!=='').map(l => String(l).split(delim).map(c => c.trim()));
+  if(rows.length<2) return null;
+  const n=rows[0].length;
+  if(n<2) return null;
+  if(!rows.every(r => r.length===n)) return null;
+  return normalizeTableGrid(rows[0], rows.slice(1));
+}
+function parseFlatCopiedTable(lines){
+  const nonempty=lines.map(l => String(l).replace(/\s+$/,'')).filter(l => l!=='');
+  const headAt=nonempty.findIndex(l => l.indexOf('\t')>=0 && l.split('\t').length>=2);
+  if(headAt<0) return null;
+  const headers=nonempty[headAt].split('\t').map(c => c.trim());
+  const n=headers.length;
+  if(n<2) return null;
+  const rest=nonempty.slice(headAt+1);
+  if(!rest.length) return null;
+  if(rest.every(l => l.split('\t').length===n)){
+    return normalizeTableGrid(headers, rest.map(l => l.split('\t').map(c => c.trim())));
+  }
+  if(rest.some(l => l.indexOf('\t')>=0)) return null;
+  if(rest.length<n) return null;
+  const rows=[];
+  for(let i=0;i<rest.length;i+=n){
+    const row=rest.slice(i, i+n).map(c => c.trim());
+    while(row.length<n) row.push('');
+    rows.push(row);
+  }
+  return normalizeTableGrid(headers, rows);
+}
+function parseMarkdownTable(raw){
+  const text=String(raw==null?'':raw).replace(/^\uFEFF/, '').replace(/\r\n/g,'\n').replace(/\r/g,'\n').trim();
+  if(!text) return null;
+  const gfm=parseGfmMarkdownTable(text);
+  if(gfm) return gfm;
+  const lines=text.split('\n');
+  const tsv=parseDelimitedTable(lines, '\t');
+  if(tsv) return tsv;
+  return parseFlatCopiedTable(lines);
+}
+function markdownTableToHtml(grid){
+  if(!grid || !grid.headers || grid.headers.length<2) return '';
+  const esc=s => String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const head='<thead><tr>'+grid.headers.map(h => '<th>'+esc(h)+'</th>').join('')+'</tr></thead>';
+  const body='<tbody>'+(grid.rows||[]).map(r => '<tr>'+grid.headers.map((_,i) => '<td>'+esc(r[i]||'')+'</td>').join('')+'</tr>').join('')+'</tbody>';
+  return '<table>'+head+body+'</table>';
+}
+function htmlTableToGrid(html){
+  if(!html || typeof document==='undefined') return null;
+  const tpl=document.createElement('template');
+  tpl.innerHTML=html;
+  const table=tpl.content.querySelector('table');
+  if(!table) return null;
+  const rows=[...table.querySelectorAll('tr')].map(tr => [...tr.querySelectorAll('th,td')].map(c => (c.textContent||'').trim()));
+  if(rows.length<1 || rows[0].length<2) return null;
+  return normalizeTableGrid(rows[0], rows.slice(1));
+}
+function htmlTableToMarkdown(html){
+  const grid=htmlTableToGrid(html);
+  if(!grid) return '';
+  const cell=c => String(c==null?'':c).replace(/\|/g,'\\|');
+  const row=cells => '| '+cells.map(cell).join(' | ')+' |';
+  const sep='| '+grid.headers.map(()=> '---').join(' | ')+' |';
+  return [row(grid.headers), sep].concat(grid.rows.map(row)).join('\n');
+}
 // ---------------------------------------------------------------------------
 // Minimal, dependency-free LaTeX -> MathML converter. Covers the common inline
 // subset: sub/superscripts, Greek, operators/relations/arrows/sets, \frac,
@@ -4138,6 +4253,78 @@ function showHrefPicker(anchor, id){
     document.addEventListener('mousedown',off);
   },0);
 }
+function applyMdTable(id, raw){
+  const n=map.nodes[id]; if(!n) return false;
+  flushOpenEditToModel();
+  const grid=parseMarkdownTable(raw);
+  if(!grid) return false;
+  n.html=markdownTableToHtml(grid);
+  n.table=true;
+  n.text=grid.headers.filter(Boolean).slice(0,4).join(' · ') || rmsTr('actMdTable','Markdown table');
+  if(!n.width) n.width=480;
+  if(!n.height) n.height=240;
+  n.updated=Date.now();
+  pushHistory(); render(); autoLayout();
+  return true;
+}
+function clearMdTable(id){
+  const n=map.nodes[id]; if(!n) return false;
+  flushOpenEditToModel();
+  delete n.html;
+  delete n.table;
+  n.updated=Date.now();
+  pushHistory(); render(); autoLayout();
+  return true;
+}
+function showMdTablePicker(anchor, id){
+  const n=map.nodes[id]; if(!n) return;
+  if(READONLY) return;
+  if(activePicker){ activePicker.remove(); activePicker=null; }
+  const cur=isTableNode(n) ? htmlTableToMarkdown(n.html||'') : '';
+  const p=document.createElement('div');
+  p.className='picker href-picker mdtable-picker'; p._anchor=anchor;
+  p.innerHTML=
+    `<div class="mdt-label">${rmsTr('actMdTableHint','Paste a Markdown table, or a table copied from somewhere else.')}</div>`+
+    `<textarea class="mdt-in" rows="10" spellcheck="false" placeholder="${rmsTr('actMdTablePh','| A | B |')}">${escapeHtml(cur)}</textarea>`+
+    `<div class="mdt-err" hidden></div>`+
+    `<div class="href-actions">`+
+      (cur?`<button type="button" class="href-clear">${rmsTr('hrefRemove','Remove')}</button>`:'')+
+      `<button type="button" class="href-go primary">${rmsTr('hrefSave','Save')}</button>`+
+    `</div>`;
+  document.body.appendChild(p);
+  positionPopup(p, anchor, {align:'left'});
+  activePicker=p;
+  const input=p.querySelector('.mdt-in');
+  const err=p.querySelector('.mdt-err');
+  let off=null;
+  const close=()=>{
+    if(off) document.removeEventListener('mousedown',off);
+    p.remove(); if(activePicker===p) activePicker=null;
+  };
+  const fail=()=>{
+    err.hidden=false;
+    err.textContent=rmsTr('actMdTableErr','Couldn’t read that as a table');
+    input.focus();
+  };
+  const save=()=>{ if(applyMdTable(id, input.value)) close(); else fail(); };
+  p.addEventListener('mousedown',ev=>ev.stopPropagation());
+  p.addEventListener('keydown',ev=>ev.stopPropagation());
+  input.addEventListener('keydown',ev=>{
+    if(ev.isComposing || ev.keyCode===229) return;
+    if(ev.key==='Enter' && (ev.metaKey||ev.ctrlKey)){ ev.preventDefault(); save(); }
+    else if(ev.key==='Escape'){ ev.preventDefault(); close(); }
+  });
+  p.querySelector('.href-go').onclick=ev=>{ ev.stopPropagation(); save(); };
+  p.querySelector('.href-clear')?.addEventListener('click',ev=>{ ev.stopPropagation(); clearMdTable(id); close(); });
+  setTimeout(()=>{
+    input.focus();
+    if(cur) input.select();
+    off=ev=>{
+      if(!p.contains(ev.target)) close();
+    };
+    document.addEventListener('mousedown',off);
+  },0);
+}
 function cycleTask(id){
   const n=map.nodes[id]; if(!n) return;
   // Nodebar clicks do not blur-commit (so inline B/I/U keep their selection).
@@ -6176,6 +6363,7 @@ function positionNodeBar(){
       <button data-a="cite" class="${n.ref?'on':''}" title="${rmsTr('actCite','Cite')}">📖</button>
       <button data-a="href" class="${n.url?'on':''}" title="${n.url?rmsTr('actHrefEdit','Edit hyperlink'):rmsTr('actHrefAdd','Add hyperlink')}">🔗</button>
       <button data-a="image" class="${n.image?'on':''}" title="${rmsTr('actImage','Image')}">🖼</button>
+      <button data-a="mdtable" class="${isTableNode(n)?'on':''}" title="${rmsTr('actMdTable','Markdown table')}">▦</button>
       ${!isRoot?'<button data-a="del" title="'+chordTitle('scDeleteNode','deleteNode','Delete node')+'">🗑</button>':''}
     </div>
     <div class="nb-div"></div>
@@ -6268,6 +6456,7 @@ function positionNodeBar(){
           if(confirm('Remove this image?')) detachImageFromNode(sel);
         } else attachImageToNode(sel);
       }
+      else if(a==='mdtable'){ showMdTablePicker(b, sel); return; }
       else if(a==='size') showPicker(b,'size',fs,v=>{ map.nodes[sel].fontSize=v; pushHistory(); render(); });
       else if(a==='align') showPicker(b,'align',n.align||'center',v=>{ map.nodes[sel].align=v; pushHistory(); render(); });
       else if(a==='textColor') showPicker(b,'text',n.textColor,v=>{ map.nodes[sel].textColor=v; pushHistory(); render(); });
@@ -6979,8 +7168,22 @@ function readWheelSpeed(){
 }
 let wheelSpeed=readWheelSpeed();
 
+function wheelConsumedByScrollable(e){
+  const box=e.target && e.target.closest && e.target.closest('.table-node .node-block');
+  if(!box) return false;
+  const dy=e.deltaY||0, dx=e.deltaX||0;
+  if(Math.abs(dy)>=Math.abs(dx)){
+    if(dy<0 && box.scrollTop>0) return true;
+    if(dy>0 && box.scrollTop+box.clientHeight<box.scrollHeight-1) return true;
+  } else {
+    if(dx<0 && box.scrollLeft>0) return true;
+    if(dx>0 && box.scrollLeft+box.clientWidth<box.scrollWidth-1) return true;
+  }
+  return false;
+}
 stage.addEventListener('wheel',e=>{
   if(e.target && e.target.closest && e.target.closest('.wheel-speed')) return;
+  if(wheelConsumedByScrollable(e)) return;
   e.preventDefault();
   const p=_stagePointCam(e.clientX, e.clientY);
   const px=p.x, py=p.y;
