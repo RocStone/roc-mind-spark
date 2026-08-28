@@ -84,13 +84,20 @@ struct KeyChord: Codable, Equatable, Hashable, Sendable {
     static let commandComma = KeyChord(keyCode: 43, command: true, control: false, option: false, shift: false)
     static let tab = KeyChord(keyCode: 48, command: false, control: false, option: false, shift: false)
     static let enter = KeyChord(keyCode: 36, command: false, control: false, option: false, shift: false)
+    static let commandEnter = KeyChord(keyCode: 36, command: true, control: false, option: false, shift: false)
     static let f2 = KeyChord(keyCode: 120, command: false, control: false, option: false, shift: false)
     static let delete = KeyChord(keyCode: 51, command: false, control: false, option: false, shift: false)
+    static let forwardDelete = KeyChord(keyCode: 117, command: false, control: false, option: false, shift: false)
     static let space = KeyChord(keyCode: 49, command: false, control: false, option: false, shift: false)
     static let letterL = KeyChord(keyCode: 37, command: false, control: false, option: false, shift: false)
+    static let optionUp = KeyChord(keyCode: 126, command: false, control: false, option: true, shift: false)
+    static let optionDown = KeyChord(keyCode: 125, command: false, control: false, option: true, shift: false)
+    static let commandShiftUp = KeyChord(keyCode: 126, command: true, control: false, option: false, shift: true)
+    static let commandShiftDown = KeyChord(keyCode: 125, command: true, control: false, option: false, shift: true)
     static let commandZ = KeyChord(keyCode: 6, command: true, control: false, option: false, shift: false)
     static let commandShiftZ = KeyChord(keyCode: 6, command: true, control: false, option: false, shift: true)
     static let commandF = KeyChord(keyCode: 3, command: true, control: false, option: false, shift: false)
+    static let commandH = KeyChord(keyCode: 4, command: true, control: false, option: false, shift: false)
     static let question = KeyChord(keyCode: 44, command: false, control: false, option: false, shift: true)
 
     private static func isModifierKeyCode(_ code: UInt32) -> Bool {
@@ -217,13 +224,20 @@ enum ShortcutID: String, CaseIterable, Codable, Identifiable {
     case openSettings
     case addChild
     case addSibling
+    case addSiblingMod
     case editNode
     case deleteNode
+    case deleteForward
     case collapse
     case link
+    case moveSiblingUp
+    case moveSiblingDown
+    case moveSiblingUpAlt
+    case moveSiblingDownAlt
     case undo
     case redo
     case find
+    case findReplace
     case help
 
     var id: String { rawValue }
@@ -234,13 +248,20 @@ enum ShortcutID: String, CaseIterable, Codable, Identifiable {
         case .openSettings: return L10n.t("shortcut.openSettings")
         case .addChild: return L10n.t("shortcut.addChild")
         case .addSibling: return L10n.t("shortcut.addSibling")
+        case .addSiblingMod: return L10n.t("shortcut.addSiblingMod")
         case .editNode: return L10n.t("shortcut.editNode")
         case .deleteNode: return L10n.t("shortcut.deleteNode")
+        case .deleteForward: return L10n.t("shortcut.deleteForward")
         case .collapse: return L10n.t("shortcut.collapse")
         case .link: return L10n.t("shortcut.link")
+        case .moveSiblingUp: return L10n.t("shortcut.moveSiblingUp")
+        case .moveSiblingDown: return L10n.t("shortcut.moveSiblingDown")
+        case .moveSiblingUpAlt: return L10n.t("shortcut.moveSiblingUpAlt")
+        case .moveSiblingDownAlt: return L10n.t("shortcut.moveSiblingDownAlt")
         case .undo: return L10n.t("shortcut.undo")
         case .redo: return L10n.t("shortcut.redo")
         case .find: return L10n.t("shortcut.find")
+        case .findReplace: return L10n.t("shortcut.findReplace")
         case .help: return L10n.t("shortcut.help")
         }
     }
@@ -262,13 +283,20 @@ enum ShortcutID: String, CaseIterable, Codable, Identifiable {
         case .openSettings: return .commandComma
         case .addChild: return .tab
         case .addSibling: return .enter
+        case .addSiblingMod: return .commandEnter
         case .editNode: return .f2
         case .deleteNode: return .delete
+        case .deleteForward: return .forwardDelete
         case .collapse: return .space
         case .link: return .letterL
+        case .moveSiblingUp: return .optionUp
+        case .moveSiblingDown: return .optionDown
+        case .moveSiblingUpAlt: return .commandShiftUp
+        case .moveSiblingDownAlt: return .commandShiftDown
         case .undo: return .commandZ
         case .redo: return .commandShiftZ
         case .find: return .commandF
+        case .findReplace: return .commandH
         case .help: return .question
         }
     }
