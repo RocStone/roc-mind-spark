@@ -5305,7 +5305,7 @@ function editorCopyPayload({ selectedText, allText, selectAllPending }){
   return '';
 }
 function openEditorTextEl(){
-  if(typeof _editFloat!=='undefined' && _editFloat) return _editFloat;
+  if(typeof _editFloat!=='undefined' && _editFloat) return editFloatLiveTextEl(_editFloat);
   if(typeof document === 'undefined' || !document.querySelector) return null;
   const el = document.querySelector('.node.editing');
   if(!el) return null;
@@ -5341,6 +5341,7 @@ function styleEditFloat(el){
   float.style.fontWeight=cs.fontWeight;
   float.style.lineHeight=(lh && lh!=='normal' && !lh.endsWith('%')) ? (parseFloat(lh)*k)+'px' : lh;
   float.style.textAlign=cs.textAlign;
+  float.style.justifyContent=cs.justifyContent;
   float.style.paddingTop=_csPx(cs,'paddingTop',k)+'px';
   float.style.paddingRight=_csPx(cs,'paddingRight',k)+'px';
   float.style.paddingBottom=_csPx(cs,'paddingBottom',k)+'px';
@@ -5398,6 +5399,25 @@ function cancelOpenEdit(){
   _editTyped=false;
   if(typeof clearEditReplaceAll==='function') clearEditReplaceAll();
 }
+function editFloatLiveTextEl(float){
+  if(!float) return null;
+  if(float.querySelector){
+    const body=float.querySelector('.edit-float-text');
+    if(body) return body;
+  }
+  return float;
+}
+function nodeEditChromeClone(el){
+  const wrap=document.createElement('span');
+  wrap.className='edit-float-chrome';
+  wrap.setAttribute('contenteditable','false');
+  wrap.setAttribute('aria-hidden','true');
+  if(!el || !el.querySelectorAll) return wrap;
+  el.querySelectorAll('.node-marker, .task-check').forEach(n=>{
+    wrap.appendChild(n.cloneNode(true));
+  });
+  return wrap;
+}
 function mountEditFloat(el, textEl){
   if(!el || !textEl || typeof document==='undefined') return textEl;
   if(!document.documentElement.classList.contains('rms-wk')) return textEl;
@@ -5405,18 +5425,24 @@ function mountEditFloat(el, textEl){
   const float=document.createElement('div');
   float.className='edit-float';
   float.dataset.nodeId=el.dataset.id||'';
-  float.innerHTML=textEl.innerHTML;
+  const chrome=nodeEditChromeClone(el);
+  const body=document.createElement('span');
+  body.className='edit-float-text node-text';
+  body.innerHTML=textEl.innerHTML;
+  if(chrome.childNodes.length) float.appendChild(chrome);
+  float.appendChild(body);
   stage.appendChild(float);
   _editFloat=float;
   el.classList.add('edit-placeholder');
   styleEditFloat(el);
   placeEditFloat(el);
-  armEditorHost(float);
-  return float;
+  armEditorHost(body);
+  return body;
 }
 function unmountEditFloat(el, textEl){
   if(!_editFloat) return;
-  if(textEl) textEl.innerHTML=_editFloat.innerHTML;
+  const live=editFloatLiveTextEl(_editFloat);
+  if(textEl && live) textEl.innerHTML=live.innerHTML;
   if(el && el.classList && el.classList.remove) el.classList.remove('edit-placeholder');
   discardEditOverlay();
 }
@@ -5799,7 +5825,7 @@ function flushOpenEditToModel(){
   const n = id && map.nodes[id];
   if(!n) return null;
   if(el && el.classList && el.classList.contains('editing-block')) return id;
-  const textEl = float || (el && ((el.querySelector && el.querySelector('.node-text')) || el));
+  const textEl = (float && editFloatLiveTextEl(float)) || (el && ((el.querySelector && el.querySelector('.node-text')) || el));
   if(!textEl) return null;
   applyNodeEditCapture(n, captureNodeEditText(textEl));
   syncAutoTitleFromRoot(id);

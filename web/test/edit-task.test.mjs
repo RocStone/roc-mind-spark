@@ -92,7 +92,7 @@ describe('cycleTask while a node is being edited', () => {
     global.document = { querySelector: sel => sel === '.node.editing' ? el : null };
 
     const { cycleTask } = loadFns(
-      ['captureNodeEditText', 'applyNodeEditCapture', 'syncAutoTitleFromRoot', 'flushOpenEditToModel', 'cycleTask'],
+      ['captureNodeEditText', 'applyNodeEditCapture', 'syncAutoTitleFromRoot', 'editFloatLiveTextEl', 'flushOpenEditToModel', 'cycleTask'],
       {
         map,
         INLINE_HTML_RE,
@@ -117,7 +117,7 @@ describe('cycleTask while a node is being edited', () => {
     const map = { nodes: { n1: { text: 'kept', task: 'todo' } }, rootId: 'root' };
     global.document = { querySelector: () => null };
     const { cycleTask } = loadFns(
-      ['captureNodeEditText', 'applyNodeEditCapture', 'syncAutoTitleFromRoot', 'flushOpenEditToModel', 'cycleTask'],
+      ['captureNodeEditText', 'applyNodeEditCapture', 'syncAutoTitleFromRoot', 'editFloatLiveTextEl', 'flushOpenEditToModel', 'cycleTask'],
       {
         map,
         INLINE_HTML_RE,

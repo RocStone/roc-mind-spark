@@ -405,9 +405,28 @@
   .node.edit-placeholder{visibility:hidden}
   .edit-float{
     position:absolute; z-index:8; box-sizing:border-box;
+    display:flex; align-items:center; justify-content:center;
     cursor:text; user-select:text; -webkit-user-select:text;
     outline:2.5px solid var(--accent); outline-offset:2px;
     white-space:pre-wrap; word-break:break-word;
+  }
+  .edit-float-chrome{
+    display:inline-flex; align-items:center; flex-shrink:0;
+    user-select:none; -webkit-user-select:none; pointer-events:none;
+  }
+  .edit-float-text{min-width:0; outline:none; cursor:text;}
+  .edit-float .task-check{
+    flex-shrink:0; width:18px; height:18px; margin-right:7px;
+    border:2px solid var(--line-2); border-radius:5px;
+    display:inline-flex; align-items:center; justify-content:center;
+    font-size:12px; font-weight:700; vertical-align:middle;
+    background:var(--node-bg);
+  }
+  .edit-float .task-check.task-doing{border-color:#c98a1a; color:#c98a1a}
+  .edit-float .task-check.task-done{background:#4a9d5b; border-color:#4a9d5b; color:#fff}
+  .edit-float .node-marker{
+    flex-shrink:0; margin-right:6px; font-size:17px; line-height:1;
+    user-select:none; vertical-align:middle;
   }
   .node.dim{opacity:.28}
   .node.match{outline:2.5px solid var(--teal);outline-offset:2px}
