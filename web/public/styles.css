@@ -254,6 +254,11 @@
   .node.hr-node .node-hr{display:block;width:54px;height:0;border-top:2px solid var(--ink-soft,#98a2b3);opacity:.6}
   #mdEditor{overflow:auto;resize:none;outline:none;background:transparent;color:transparent;caret-color:var(--ink)}
   #mdEditor::selection{background:color-mix(in srgb, var(--accent) 28%, transparent)}
+  /* While click-and-drag selecting, show native textarea ink and hide the
+     per-line highlight overlay so WK does not composite thousands of rows
+     under a transparent field on every mouse move. */
+  #mdPane.md-selecting #mdEditor{color:var(--ink);background:var(--paper)}
+  #mdPane.md-selecting .md-hl{visibility:hidden}
   /* markdown syntax colors — driven by theme variables, so they follow the theme */
   #mdPane .hl-head{color:var(--accent);font-weight:700}
   #mdPane .hl-comment{color:var(--ink-soft);opacity:.6;font-style:italic}
@@ -404,7 +409,7 @@
   .node.editing .node-text{outline:none;user-select:text;-webkit-user-select:text;cursor:text}
   .node.edit-placeholder{visibility:hidden}
   .edit-float{
-    position:absolute; z-index:8; box-sizing:border-box;
+    position:fixed; z-index:40; box-sizing:border-box;
     display:flex; align-items:center; justify-content:center;
     cursor:text; user-select:text; -webkit-user-select:text;
     outline:2.5px solid var(--accent); outline-offset:2px;
@@ -1396,7 +1401,11 @@
     font-family:inherit; font-size:13px;
   }
   .rms-ctx button:hover{background:var(--hover)}
+  .rms-ctx button:disabled{opacity:.4; cursor:default}
+  .rms-ctx button:disabled:hover{background:transparent}
+  .rms-ctx-sep{height:1px; margin:4px 6px; background:var(--chrome-edge); pointer-events:none}
   .rms-ctx-wait{color:var(--accent); cursor:default}
+  html.lang-zh .text-edit-menu{font-family:"PingFang SC",var(--sans)}
 
   /* ===== Keyboard help overlay (press ?) ===== */
   .kb-help{position:fixed; inset:0; z-index:6000; font-family:var(--sans); animation:fadeIn .15s ease}

@@ -2777,6 +2777,32 @@ function relayoutDuringEdit(id){
    ============================================================ */
 /* ---- Markdown mode: edit the map as text with a live two-way preview (v1) ---- */
 let mdMode=false, _mdSyncing=false, _mdTimer=0, _mdLines=[], _mdSelSync=false, _mdActiveLine=0, mdPreview=false, mdWrap=false, _mdLH=20, _mdPT=12;
+let _mdPosCache={pos:-1, line:0}, _mdSelRAF=0;
+function mdInvalidatePosCache(){
+  _mdPosCache={pos:-1, line:0};
+}
+function mdLineColFromPos(text, pos, cache){
+  const s=String(text==null?'':text);
+  let p=pos|0;
+  if(p<0) p=0;
+  if(p>s.length) p=s.length;
+  let line=0;
+  const cached=cache && typeof cache.pos==='number' && typeof cache.line==='number'
+    && cache.pos>=0 && cache.pos<=s.length && cache.line>=0;
+  if(cached && p>=cache.pos){
+    line=cache.line;
+    for(let i=cache.pos;i<p;i++) if(s.charCodeAt(i)===10) line++;
+  } else if(cached){
+    line=cache.line;
+    for(let i=cache.pos-1;i>=p;i--) if(s.charCodeAt(i)===10) line--;
+  } else {
+    for(let i=0;i<p;i++) if(s.charCodeAt(i)===10) line++;
+  }
+  if(cache){ cache.pos=p; cache.line=line; }
+  const lastNl=s.lastIndexOf('\n', p-1);
+  const col=p-(lastNl+1);
+  return {line, col};
+}
 // ---- Fold-aware text model ----
 // `_mdFullText` is the ALWAYS-COMPLETE markdown (source of truth for parsing back into
 // the map). `ed.value` only ever holds the *visible* subset of its lines — whatever's
@@ -2838,14 +2864,20 @@ function ensureMdPane(){
       if(mdHandleEnter(ed)){ e.preventDefault(); mdAfterEdit(); }
     }
   });
-  const syncNodeFromCaret=()=>{ if(_mdSelSync) return; const vline=ed.value.slice(0,ed.selectionStart).split('\n').length-1; const line=_mdView?_mdView.visLineToFull[vline]:vline; let id=null; for(let l=line;l>=0;l--){ if(_mdLines[l]){ id=_mdLines[l]; break; } } if(id && map.nodes[id]){ _mdSelSync=true; select(id); _mdSelSync=false; } };
-  // Full decoration refresh (not just mdUpdateActive) on click: guarantees the gutter and
-  // overlay rows are freshly rebuilt from the textarea's *current* value before we mark the
-  // active one, and re-syncs scroll — so a click can never land against a stale row or a
-  // scroll position the browser has since adjusted (e.g. when the click also brings a
-  // previously-partial row fully into view).
-  ed.addEventListener('click', ()=>{ mdRefreshDecorations(); syncNodeFromCaret(); requestAnimationFrame(()=>mdRefreshDecorations()); });
-  document.addEventListener('selectionchange', ()=>{ if(mdMode && document.activeElement===document.getElementById('mdEditor')) mdUpdateActive(); });
+  const syncNodeFromCaret=()=>{ if(_mdSelSync) return; const vline=mdLineColFromPos(ed.value, ed.selectionStart, _mdPosCache).line; const line=_mdView?_mdView.visLineToFull[vline]:vline; let id=null; for(let l=line;l>=0;l--){ if(_mdLines[l]){ id=_mdLines[l]; break; } } if(id && map.nodes[id]){ _mdSelSync=true; select(id); _mdSelSync=false; } };
+  // Click-and-drag selection used to rebuild the whole highlight overlay twice
+  // (click + rAF). Mark the active line and sync the map caret instead.
+  ed.addEventListener('click', ()=>{ mdUpdateActive(); syncNodeFromCaret(); });
+  ed.addEventListener('mousedown', e=>{ if(e.button===0) pane.classList.add('md-selecting'); });
+  const endMdSelect=()=>pane.classList.remove('md-selecting');
+  window.addEventListener('mouseup', endMdSelect);
+  window.addEventListener('blur', endMdSelect);
+  document.addEventListener('selectionchange', ()=>{
+    if(!mdMode) return;
+    if(document.activeElement!==document.getElementById('mdEditor')) return;
+    if(_mdSelRAF) return;
+    _mdSelRAF=requestAnimationFrame(()=>{ _mdSelRAF=0; mdUpdateActive(); });
+  });
   ed.addEventListener('keyup', e=>{ mdUpdateActive(); if(e.key && e.key.indexOf('Arrow')===0) syncNodeFromCaret(); });
   // Fold toggles live in the gutter (one per foldable line) — the only place that can
   // receive clicks, since the overlay sits *underneath* the invisible-but-interactive
@@ -3318,18 +3350,25 @@ function mdSyncScroll(){
 }
 function mdUpdateActive(){
   const ed=document.getElementById('mdEditor'); if(!ed) return;
-  const before=ed.value.slice(0, ed.selectionStart);
-  const line=before.split('\n').length-1, col=before.length-(before.lastIndexOf('\n')+1);
-  _mdActiveLine=line;
-  document.querySelectorAll('#mdPane .md-gutter .gl.active').forEach(e=>e.classList.remove('active'));
-  const g=document.querySelector('#mdPane .md-gutter .gl[data-l="'+line+'"]'); if(g) g.classList.add('active');
-  document.querySelectorAll('#mdPane .md-hl .hl-line.active').forEach(e=>e.classList.remove('active'));
-  const hlRow=document.querySelector('#mdPane .md-hl .hl-line[data-l="'+line+'"]'); if(hlRow) hlRow.classList.add('active');
+  const {line, col}=mdLineColFromPos(ed.value, ed.selectionStart, _mdPosCache);
+  if(line!==_mdActiveLine){
+    _mdActiveLine=line;
+    const gut=document.querySelector('#mdPane .md-gutter');
+    if(gut){
+      gut.querySelectorAll('.gl.active').forEach(e=>e.classList.remove('active'));
+      const g=gut.querySelector('.gl[data-l="'+line+'"]'); if(g) g.classList.add('active');
+    }
+    const hl=document.querySelector('#mdPane .md-hl');
+    if(hl){
+      hl.querySelectorAll('.hl-line.active').forEach(e=>e.classList.remove('active'));
+      const hlRow=hl.querySelector('.hl-line[data-l="'+line+'"]'); if(hlRow) hlRow.classList.add('active');
+    }
+  }
   const pos=document.querySelector('#mdPane .md-pos'); if(pos) pos.textContent='Ln '+(line+1)+', Col '+(col+1);
-  mdSyncScroll();   // re-pin the overlay/gutter's own scroll offset to the textarea's, in case
-                    // whatever triggered this call (click, arrow-key nav) also scrolled it
+  mdSyncScroll();
 }
 function mdRefreshDecorations(){
+  mdInvalidatePosCache();
   const ed=document.getElementById('mdEditor'); if(!ed) return;
   const hl=document.querySelector('#mdPane .md-hl-inner'), gut=document.querySelector('#mdPane .md-gutter-inner'); if(!hl||!gut) return;
   const view=mdBuildView(); _mdView=view;
@@ -3454,6 +3493,7 @@ function mdCommitVisibleEdit(){
   _mdPrevVisible=newVis;   // ed.value itself is left exactly as the browser already has it
 }
 function mdAfterEdit(){
+  mdInvalidatePosCache();
   mdCommitVisibleEdit();
   mdRefreshDecorations();
   clearTimeout(_mdTimer);
@@ -5464,7 +5504,41 @@ function openOverlayTextField(){
   return document.querySelector('.picker input, .picker textarea, .var-form input, .var-form textarea');
 }
 function overlayTextFieldOwnsClipboard(){
-  return !!openOverlayTextField();
+  if(openOverlayTextField()) return true;
+  return !!focusedValueField();
+}
+function isValueTextField(el){
+  if(!el) return false;
+  const tag=el.tagName;
+  return tag==='INPUT' || tag==='TEXTAREA';
+}
+function focusedValueField(){
+  if(typeof document==='undefined') return null;
+  const ae=document.activeElement;
+  if(!ae || !isValueTextField(ae)) return null;
+  if(typeof isAppTextField==='function' && !isAppTextField(ae)) return null;
+  return ae;
+}
+function fieldSelectedText(el){
+  if(!el) return '';
+  if(isValueTextField(el)){
+    const v=el.value||'';
+    const a=el.selectionStart, b=el.selectionEnd;
+    if(a!=null && b!=null && b>a) return v.slice(a, b);
+    return '';
+  }
+  return typeof editorSelectedText==='function' ? editorSelectedText(el) : '';
+}
+function fieldCutSelected(el){
+  if(!el || !isValueTextField(el)) return '';
+  const text=fieldSelectedText(el);
+  if(!text) return '';
+  const v=el.value||'';
+  const a=el.selectionStart, b=el.selectionEnd;
+  el.value=v.slice(0, a)+v.slice(b);
+  try{ el.setSelectionRange(a, a); }catch(_){}
+  if(typeof emitEditorInput==='function') emitEditorInput(el);
+  return text;
 }
 function insertFieldText(el, text){
   if(!el) return false;
@@ -5539,9 +5613,22 @@ function editFloatStagePos(viewObj, el){
   const k=v.k||1;
   return {left:(v.x||0)+(el && el.offsetLeft || 0)*k, top:(v.y||0)+(el && el.offsetTop || 0)*k};
 }
+function editFloatStyleScale(){
+  const k=(typeof view!=='undefined' && view && view.k)||1;
+  // Body-fixed float is outside .app's UI-scale transform, so bake _uiZ in.
+  if(typeof document!=='undefined' && _editFloat && _editFloat.parentNode===document.body){
+    return k*((typeof _uiZ==='function')?_uiZ():1);
+  }
+  return k;
+}
+function editFloatViewportPos(el){
+  if(!el || typeof el.getBoundingClientRect!=='function') return {left:0, top:0};
+  const r=el.getBoundingClientRect();
+  return {left:r.left, top:r.top};
+}
 function styleEditFloat(el){
   if(!_editFloat || !el || typeof getComputedStyle!=='function') return;
-  const k=(typeof view!=='undefined' && view && view.k)||1;
+  const k=editFloatStyleScale();
   const cs=getComputedStyle(el);
   const float=_editFloat;
   const lh=cs.lineHeight;
@@ -5565,6 +5652,12 @@ function styleEditFloat(el){
 }
 function placeEditFloat(el){
   if(!_editFloat || !el) return;
+  if(typeof document!=='undefined' && _editFloat.parentNode===document.body){
+    const pos=editFloatViewportPos(el);
+    _editFloat.style.left=pos.left+'px';
+    _editFloat.style.top=pos.top+'px';
+    return;
+  }
   const pos=editFloatStagePos(typeof view!=='undefined' ? view : {x:0,y:0,k:1}, el);
   _editFloat.style.left=pos.left+'px';
   _editFloat.style.top=pos.top+'px';
@@ -5642,7 +5735,10 @@ function mountEditFloat(el, textEl){
   body.innerHTML=textEl.innerHTML;
   if(chrome.childNodes.length) float.appendChild(chrome);
   float.appendChild(body);
-  stage.appendChild(float);
+  // Park on <body>, outside .app { transform:scale }. WK maps mouse-to-caret
+  // through a CSS transform with a lag — that is the click-and-drag selection
+  // hitch on a node. position:fixed + GBR matches the on-screen card.
+  (document.body||stage).appendChild(float);
   _editFloat=float;
   el.classList.add('edit-placeholder');
   styleEditFloat(el);
@@ -5666,7 +5762,14 @@ function emitEditorInput(textEl){
   try{ textEl.dispatchEvent(new Event('input', { bubbles: true })); }catch(_){}
 }
 function editorSelectedText(textEl){
-  if(!textEl || typeof window === 'undefined' || !window.getSelection) return '';
+  if(!textEl) return '';
+  if(textEl.tagName==='TEXTAREA' || textEl.tagName==='INPUT'){
+    const v=textEl.value||'';
+    const a=textEl.selectionStart, b=textEl.selectionEnd;
+    if(a!=null && b!=null && b>a) return v.slice(a, b);
+    return '';
+  }
+  if(typeof window === 'undefined' || !window.getSelection) return '';
   const wsel = window.getSelection();
   if(!wsel || !wsel.rangeCount || wsel.isCollapsed) return '';
   if(!textEl.contains(wsel.anchorNode) && wsel.anchorNode !== textEl && !textEl.contains(wsel.focusNode)) return '';
@@ -5676,6 +5779,10 @@ function selectEditorContents(textEl){
   if(!textEl || typeof document === 'undefined') return;
   try{
     if(typeof textEl.focus === 'function') textEl.focus();
+    if((textEl.tagName==='TEXTAREA' || textEl.tagName==='INPUT') && typeof textEl.select === 'function'){
+      textEl.select();
+      return;
+    }
     const range = document.createRange();
     range.selectNodeContents(textEl);
     const wsel = window.getSelection();
@@ -5840,6 +5947,8 @@ function onEditorPaste(e){
 function rmsClipboardCopy(){
   const field = typeof openOverlayTextField==='function' ? openOverlayTextField() : null;
   if(field) return overlayFieldCopyPayload(field);
+  const valueField = focusedValueField();
+  if(valueField) return fieldSelectedText(valueField);
   const target = openClipboardTarget();
   if(target){
     const inNotes = !!(target.closest && target.closest('.notes-popup'));
@@ -5882,6 +5991,8 @@ function rmsClipboardCut(){
     if(typeof emitEditorInput==='function') emitEditorInput(field);
     return text;
   }
+  const valueField = focusedValueField();
+  if(valueField) return fieldCutSelected(valueField);
   const text = rmsClipboardCopy();
   const textEl = openClipboardTarget();
   if(textEl && text){
@@ -5912,6 +6023,8 @@ function rmsClipboardPaste(text){
   if(!str) return false;
   const overlay = typeof openOverlayTextField==='function' ? openOverlayTextField() : null;
   if(overlay) return insertFieldText(overlay, str);
+  const valueField = focusedValueField();
+  if(valueField) return insertFieldText(valueField, str);
   if(typeof document !== 'undefined' && isAppTextField(document.activeElement) && !openClipboardTarget()) return false;
   const textEl = openClipboardTarget();
   if(textEl){
@@ -5943,6 +6056,11 @@ function rmsClipboardSelectAll(){
   const field = typeof openOverlayTextField==='function' ? openOverlayTextField() : null;
   if(field){
     try{ if(typeof field.focus==='function') field.focus(); if(typeof field.select==='function') field.select(); }catch(_){}
+    return true;
+  }
+  const valueField = focusedValueField();
+  if(valueField){
+    try{ if(typeof valueField.focus==='function') valueField.focus(); if(typeof valueField.select==='function') valueField.select(); }catch(_){}
     return true;
   }
   const textEl = openClipboardTarget();
@@ -6923,7 +7041,7 @@ function _applyMove(){
   }
 }
 window.addEventListener('mousemove',e=>{
-  if(_liveEditing && !marquee && !panning && !resizing && !dragNode) return;
+  if(!marquee && !panning && !resizing && !dragNode) return;
   const pt=_evtXY(e);
   if(marquee){
     e.preventDefault();
@@ -10765,10 +10883,114 @@ function download(blob,name){const a=document.createElement('a');a.href=URL.crea
 /* ---------- toast ---------- */
 let toastT;function toast(msg){const t=$('#toast');t.textContent=msg;t.classList.add('show');clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),2000);}
 
+function textEditContextTarget(target){
+  if(!target || !target.closest) return null;
+  if(target.closest('.rms-ctx, .rms-settings, .kb-card, .vf-card')) return null;
+  return target.closest('textarea, input:not([type="button"]):not([type="submit"]):not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]), [contenteditable="true"], .edit-float, .node.editing');
+}
+function textEditHasSelection(){
+  const field=focusedValueField() || (typeof openOverlayTextField==='function' && openOverlayTextField());
+  if(field){
+    const a=field.selectionStart, b=field.selectionEnd;
+    return a!=null && b!=null && b>a;
+  }
+  const target=typeof openClipboardTarget==='function' ? openClipboardTarget() : null;
+  if(target && typeof editorSelectedText==='function') return !!editorSelectedText(target);
+  const s=typeof window!=='undefined' && window.getSelection && window.getSelection();
+  return !!(s && s.rangeCount && !s.isCollapsed);
+}
+function closeTextEditContextMenu(){
+  if(typeof document==='undefined' || !document.querySelectorAll) return;
+  document.querySelectorAll('.text-edit-menu').forEach(p=>{ try{p.remove();}catch(_){} });
+}
+function nativeEditAction(act){
+  try{
+    const h=window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.rmsNative;
+    if(h && typeof h.postMessage==='function'){
+      h.postMessage({op:'edit', act:act});
+      return true;
+    }
+  }catch(_){}
+  return false;
+}
+function runTextEditAction(act){
+  if(nativeEditAction(act)) return;
+  if(act==='copy'){
+    const text=typeof rmsClipboardCopy==='function' ? rmsClipboardCopy() : '';
+    if(text && typeof writeClipboardText==='function') writeClipboardText(text);
+    return;
+  }
+  if(act==='cut'){
+    const text=typeof rmsClipboardCut==='function' ? rmsClipboardCut() : '';
+    if(text && typeof writeClipboardText==='function') writeClipboardText(text);
+    return;
+  }
+  if(act==='paste'){
+    if(typeof navigator!=='undefined' && navigator.clipboard && navigator.clipboard.readText){
+      navigator.clipboard.readText().then(t=>{ if(typeof rmsClipboardPaste==='function') rmsClipboardPaste(t); }).catch(()=>{});
+    }
+    return;
+  }
+  if(act==='selectAll' && typeof rmsClipboardSelectAll==='function') rmsClipboardSelectAll();
+  if(act==='undo' && typeof rmsClipboardUndo==='function') rmsClipboardUndo();
+  if(act==='redo' && typeof rmsClipboardRedo==='function') rmsClipboardRedo();
+}
+function showTextEditContextMenu(e){
+  const target=textEditContextTarget(e && e.target);
+  if(!target) return false;
+  closeTextEditContextMenu();
+  const p=document.createElement('div');
+  p.className='rms-ctx text-edit-menu';
+  const x0=(e && e.clientX)||8, y0=(e && e.clientY)||8;
+  p.style.left=x0+'px';
+  p.style.top=y0+'px';
+  const hasSel=textEditHasSelection();
+  const ro=typeof READONLY!=='undefined' && READONLY;
+  const item=(act, label, enabled)=>`<button type="button" data-a="${act}" ${enabled?'':'disabled'}>${label}</button>`;
+  p.innerHTML=
+    item('undo', rmsTr('undo','Undo'), true)+
+    item('redo', rmsTr('redo','Redo'), true)+
+    '<div class="rms-ctx-sep"></div>'+
+    item('cut', rmsTr('ctxCut','Cut'), hasSel && !ro)+
+    item('copy', rmsTr('ctxCopy','Copy'), hasSel)+
+    item('paste', rmsTr('ctxPaste','Paste'), !ro)+
+    '<div class="rms-ctx-sep"></div>'+
+    item('selectAll', rmsTr('ctxSelectAll','Select All'), true);
+  document.body.appendChild(p);
+  const r=p.getBoundingClientRect();
+  if(r.right>innerWidth-8) p.style.left=Math.max(8, innerWidth-r.width-8)+'px';
+  if(r.bottom>innerHeight-8) p.style.top=Math.max(8, innerHeight-r.height-8)+'px';
+  p.addEventListener('mousedown', ev=>{
+    ev.preventDefault();
+    ev.stopPropagation();
+  });
+  p.querySelectorAll('button[data-a]').forEach(b=>{
+    b.addEventListener('click', ev=>{
+      ev.preventDefault();
+      ev.stopPropagation();
+      if(b.disabled) return;
+      const act=b.dataset.a;
+      closeTextEditContextMenu();
+      runTextEditAction(act);
+    });
+  });
+  setTimeout(()=>{
+    const off=ev=>{
+      if(!p.contains(ev.target)){
+        closeTextEditContextMenu();
+        document.removeEventListener('mousedown', off, true);
+      }
+    };
+    document.addEventListener('mousedown', off, true);
+  }, 0);
+  return true;
+}
+
 // Kill Chromium / WKWebView's default context menu. App-owned menus (button
-// shortcut bind, etc.) listen on the same event and still run.
+// shortcut bind, text edit, etc.) listen on the same event and still run.
 function suppressNativeContextMenu(e){
-  e.preventDefault();
+  if(e && e.preventDefault) e.preventDefault();
+  if(typeof showTextEditContextMenu==='function') showTextEditContextMenu(e);
 }
 
 /* ============================================================

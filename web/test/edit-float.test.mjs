@@ -8,6 +8,21 @@ import { loadFns, extractConst } from './helpers/load-app-fns.mjs';
 
 const INLINE_HTML_RE = extractConst('INLINE_HTML_RE');
 
+describe('editFloatViewportPos — body-fixed float uses on-screen GBR', () => {
+  const { editFloatViewportPos } = loadFns(['editFloatViewportPos']);
+
+  test('reads left/top from getBoundingClientRect', () => {
+    assert.deepEqual(
+      editFloatViewportPos({ getBoundingClientRect: () => ({ left: 40.5, top: 12 }) }),
+      { left: 40.5, top: 12 }
+    );
+  });
+
+  test('missing element is origin', () => {
+    assert.deepEqual(editFloatViewportPos(null), { left: 0, top: 0 });
+  });
+});
+
 describe('editFloatStagePos — float sits on #stage in the viewport matrix', () => {
   const { editFloatStagePos } = loadFns(['editFloatStagePos']);
 

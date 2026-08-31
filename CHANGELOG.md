@@ -4,7 +4,9 @@ Versions follow the macOS bundle `CFBundleShortVersionString` and the matching G
 
 ## [Unreleased]
 
-No changes yet.
+- Click-and-drag text selection in a node no longer tracks through the UI-scale transform.
+- Markdown pane selection no longer rebuilds the highlight overlay on every mouse move.
+- Right-click in a text field offers Cut / Copy / Paste / Undo / Redo / Select All. Cmd+C / Cmd+V in the Markdown editor copy and paste the selection.
 
 ## [1.0.0] - 2026-08-27
 

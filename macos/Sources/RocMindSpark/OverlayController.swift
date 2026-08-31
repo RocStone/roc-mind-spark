@@ -651,6 +651,19 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
                 ShortcutStore.shared.setChord(chord, for: .toggleOverlay)
                 pushNativeState()
             }
+            return
+        }
+        if op == "edit" {
+            guard let map = webView as? MapWebView else { return }
+            switch spec["act"] as? String {
+            case "copy": map.copy(nil)
+            case "cut": map.cut(nil)
+            case "paste": map.paste(nil)
+            case "selectAll": map.selectAll(nil)
+            case "undo": map.undo(nil)
+            case "redo": map.redo(nil)
+            default: break
+            }
         }
     }
 
@@ -961,6 +974,8 @@ private final class MapWebView: WKWebView {
     @objc func cut(_ sender: Any?) { nativeCut() }
     @objc func paste(_ sender: Any?) { nativePaste() }
     override func selectAll(_ sender: Any?) { nativeSelectAll() }
+    @objc func undo(_ sender: Any?) { nativeUndo() }
+    @objc func redo(_ sender: Any?) { nativeRedo() }
 
     fileprivate func handleClipboardShortcut(_ event: NSEvent) -> Bool {
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)

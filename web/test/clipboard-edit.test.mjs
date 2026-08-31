@@ -32,6 +32,9 @@ const {
   'nodeClipboardPlain',
   'isAppTextField',
   'shouldTakeNodeClipboard',
+  'isValueTextField',
+  'focusedValueField',
+  'fieldSelectedText',
 ]);
 
 describe('clipboardEditAction — Cmd/Ctrl clipboard chords stay with the editor', () => {
@@ -157,7 +160,7 @@ describe('shouldTakeNodeClipboard', () => {
       querySelector: sel => (typeof sel === 'string' && sel.includes('.picker')) ? hrefIn : null,
     };
     const { openOverlayTextField, overlayTextFieldOwnsClipboard, shouldTakeNodeClipboard } = loadFns(
-      ['openOverlayTextField', 'overlayTextFieldOwnsClipboard', 'openNotesEditorEl', 'openEditorTextEl', 'openClipboardTarget', 'isAppTextField', 'shouldTakeNodeClipboard']
+      ['openOverlayTextField', 'overlayTextFieldOwnsClipboard', 'openNotesEditorEl', 'openEditorTextEl', 'openClipboardTarget', 'isAppTextField', 'shouldTakeNodeClipboard', 'isValueTextField', 'focusedValueField']
     );
     assert.equal(openOverlayTextField(), hrefIn);
     assert.equal(overlayTextFieldOwnsClipboard(), true);
@@ -317,9 +320,13 @@ describe('rmsClipboardPaste — native shell Cmd+V / Typeless', () => {
     const { rmsClipboardPaste, armEditReplaceAll } = loadFns(
       [
         'isAppTextField',
+        'openOverlayTextField',
         'openEditorTextEl',
         'openNotesEditorEl',
         'openClipboardTarget',
+        'isValueTextField',
+        'focusedValueField',
+        'insertFieldText',
         'armEditReplaceAll',
         'peekEditReplaceAll',
         'clearEditReplaceAll',
@@ -358,6 +365,8 @@ describe('rmsClipboardPaste — native shell Cmd+V / Typeless', () => {
         'isAppTextField',
         'openOverlayTextField',
         'overlayTextFieldOwnsClipboard',
+        'isValueTextField',
+        'focusedValueField',
         'insertFieldText',
         'emitEditorInput',
         'openEditorTextEl',
@@ -395,9 +404,13 @@ describe('rmsClipboardPaste — native shell Cmd+V / Typeless', () => {
     const { rmsClipboardPaste } = loadFns(
       [
         'isAppTextField',
+        'openOverlayTextField',
         'openEditorTextEl',
         'openNotesEditorEl',
         'openClipboardTarget',
+        'isValueTextField',
+        'focusedValueField',
+        'insertFieldText',
         'peekEditReplaceAll',
         'clearEditReplaceAll',
         'emitEditorInput',
@@ -452,6 +465,10 @@ describe('rmsClipboardCopyImageUrl — copy a selected image node', () => {
         'editorSelectedText',
         'peekEditReplaceAll',
         'editorClipboardPayload',
+        'openOverlayTextField',
+        'isValueTextField',
+        'focusedValueField',
+        'fieldSelectedText',
         'rmsClipboardCopy',
         'rmsClipboardCopyImageUrl',
         'rmsClipboardCopyPayload',

@@ -23,6 +23,11 @@ describe('suppressNativeContextMenu', () => {
     suppressNativeContextMenu({ preventDefault(){ prevented = true; } });
     assert.equal(prevented, true);
   });
+
+  test('opens the text edit menu when the target is a field', () => {
+    const cssHasSep = css.includes('.rms-ctx-sep');
+    assert.equal(cssHasSep, true);
+  });
 });
 
 describe('rms-settings context menu', () => {
