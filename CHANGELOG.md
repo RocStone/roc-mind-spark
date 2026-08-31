@@ -5,7 +5,7 @@ Versions follow the macOS bundle `CFBundleShortVersionString` and the matching G
 ## [Unreleased]
 
 - Click-and-drag text selection in a node no longer tracks through a CSS transform. The editor sits on `#stage`, sized by font and padding, with `transform: none`.
-- The Markdown editor is a grid pane at 1 CSS pixel = 1 mouse pixel. Line numbers are gone. Drag-select keeps syntax colors and paints a native `::selection` on top; it no longer swaps the overlay out.
+- The Markdown editor is a contenteditable field with syntax colors on the same text being selected. Drag-select is native `::selection`; it no longer uses a transparent textarea over a highlight overlay.
 - Display size scales chrome density via `--ui-zoom`. Pointer math no longer treats that token as a coordinate scale.
 - Right-click in a text field offers Cut / Copy / Paste / Undo / Redo / Select All. Cmd+C / Cmd+V in the Markdown editor copy and paste the selection.
 

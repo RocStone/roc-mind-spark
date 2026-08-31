@@ -1,4 +1,4 @@
-.PHONY: build app release-archive install run test clean
+.PHONY: build app release-archive install run test clean md-select-eval
 
 PREFIX ?= /Applications
 APP_NAME = Roc Mind Spark.app
@@ -21,6 +21,9 @@ run: install
 test:
 	cd web && node --test "test/*.test.mjs"
 	cd macos && swift test
+
+md-select-eval:
+	swift scripts/md-select-eval.swift "$(CURDIR)/scripts/md-select-eval.html"
 
 clean:
 	rm -rf macos/.build dist

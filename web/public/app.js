@@ -2686,7 +2686,7 @@ function relayoutDuringEdit(id){
    ============================================================ */
 /* ---- Markdown mode: edit the map as text with a live two-way preview (v1) ---- */
 let mdMode=false, _mdSyncing=false, _mdTimer=0, _mdLines=[], _mdSelSync=false, _mdActiveLine=0, mdPreview=false, mdWrap=false, _mdLH=20, _mdPT=12;
-let _mdPosCache={pos:-1, line:0}, _mdSelRAF=0;
+let _mdPosCache={pos:-1, line:0}, _mdSelRAF=0, _mdComposing=false;
 function mdInvalidatePosCache(){
   _mdPosCache={pos:-1, line:0};
 }
@@ -2697,6 +2697,124 @@ function mdPaneViewportBox(slotRect, scale){
 }
 function placeMdPane(){
   // Markdown lives in the app grid at 1 CSS px = 1 mouse px. Nothing to pin.
+}
+function mdPlain(el){
+  el=el||document.getElementById('mdEditor');
+  if(!el) return '';
+  if(el.tagName==='TEXTAREA' || el.tagName==='INPUT') return el.value||'';
+  let t='';
+  const walk=n=>{
+    if(!n) return;
+    if(n.nodeType===3){ t+=n.nodeValue; return; }
+    if(n.nodeType!==1) return;
+    if(n.getAttribute && n.getAttribute('contenteditable')==='false') return;
+    for(let c=n.firstChild;c;c=c.nextSibling) walk(c);
+  };
+  walk(el);
+  return t;
+}
+function mdGetSel(el){
+  el=el||document.getElementById('mdEditor');
+  if(!el) return {s:0,e:0};
+  if(el.tagName==='TEXTAREA' || el.tagName==='INPUT') return {s:el.selectionStart|0, e:el.selectionEnd|0};
+  const sel=typeof window!=='undefined' && window.getSelection && window.getSelection();
+  if(!sel || !sel.rangeCount) return {s:0,e:0};
+  const r=sel.getRangeAt(0);
+  if(!el.contains(r.startContainer) && r.startContainer!==el) return {s:0,e:0};
+  let s=-1, e=-1, acc=0;
+  const walk=n=>{
+    if(s>=0 && e>=0) return;
+    if(n.nodeType===3){
+      if(s<0 && n===r.startContainer) s=acc+r.startOffset;
+      if(e<0 && n===r.endContainer) e=acc+r.endOffset;
+      acc+=n.nodeValue.length;
+      return;
+    }
+    if(n.nodeType!==1) return;
+    if(n.getAttribute && n.getAttribute('contenteditable')==='false') return;
+    for(let c=n.firstChild;c;c=c.nextSibling) walk(c);
+  };
+  walk(el);
+  if(s<0) s=0;
+  if(e<0) e=s;
+  return {s, e};
+}
+function mdNodeAt(el, index){
+  let acc=0, found=null, foundOff=0;
+  const walk=n=>{
+    if(found) return;
+    if(n.nodeType===3){
+      const next=acc+n.nodeValue.length;
+      if(index<=next){ found=n; foundOff=index-acc; return; }
+      acc=next;
+      return;
+    }
+    if(n.nodeType!==1) return;
+    if(n.getAttribute && n.getAttribute('contenteditable')==='false') return;
+    for(let c=n.firstChild;c;c=c.nextSibling) walk(c);
+  };
+  walk(el);
+  if(found) return {node:found, off:foundOff};
+  return {node:el, off:el.childNodes.length};
+}
+function mdSetSel(el, s, e){
+  el=el||document.getElementById('mdEditor');
+  if(!el) return;
+  s=s|0; e=e|0;
+  if(e<s){ const t=s; s=e; e=t; }
+  if(el.tagName==='TEXTAREA' || el.tagName==='INPUT'){
+    try{ el.selectionStart=s; el.selectionEnd=e; }catch(_){}
+    return;
+  }
+  const a=mdNodeAt(el, Math.max(0,s));
+  const b=mdNodeAt(el, Math.max(0,e));
+  try{
+    const r=document.createRange();
+    r.setStart(a.node, a.off);
+    r.setEnd(b.node, b.off);
+    const sel=window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(r);
+  }catch(_){}
+}
+function mdPaint(el, text, keepSel){
+  el=el||document.getElementById('mdEditor');
+  if(!el) return;
+  if(keepSel==null) keepSel=true;
+  const sel=keepSel?mdGetSel(el):{s:0,e:0};
+  const html=(typeof mdHighlight==='function') ? mdHighlight(text, _mdView) : String(text||'');
+  el.innerHTML=html||'';
+  if(keepSel) mdSetSel(el, sel.s, sel.e);
+}
+function mdBindEditor(el){
+  if(!el || el._mdBound) return el;
+  el._mdBound=true;
+  Object.defineProperty(el, 'value', {
+    configurable:true,
+    get(){ return mdPlain(el); },
+    set(v){
+      const text=String(v==null?'':v);
+      if(mdPlain(el)===text && el.firstChild) return;
+      mdPaint(el, text, true);
+    }
+  });
+  Object.defineProperty(el, 'selectionStart', {
+    configurable:true,
+    get(){ return mdGetSel(el).s; },
+    set(v){ const cur=mdGetSel(el); mdSetSel(el, v|0, cur.e); }
+  });
+  Object.defineProperty(el, 'selectionEnd', {
+    configurable:true,
+    get(){ return mdGetSel(el).e; },
+    set(v){ const cur=mdGetSel(el); mdSetSel(el, cur.s, v|0); }
+  });
+  Object.defineProperty(el, 'readOnly', {
+    configurable:true,
+    get(){ return el.contentEditable==='false'; },
+    set(v){ el.contentEditable = v ? 'false' : 'true'; }
+  });
+  el.setSelectionRange=function(a,b){ mdSetSel(el, a, b==null?a:b); };
+  return el;
 }
 function mdLineColFromPos(text, pos, cache){
   const s=String(text==null?'':text);
@@ -2754,8 +2872,7 @@ function ensureMdPane(){
   const app=document.querySelector('.app'), stage=document.querySelector('.stage'); if(!app||!stage) return;
   const pane=document.createElement('div'); pane.id='mdPane';
   pane.innerHTML='<div class="md-head"><span class="md-ttl">Markdown</span><span class="md-pos"></span><button class="md-pdf-btn" title="Download the rendered preview as a PDF">Download PDF</button><button class="md-wrap-btn" title="Toggle word wrap">Wrap</button><button class="md-prev-btn" title="Toggle rendered preview">Preview</button><button class="md-close" title="Exit Markdown mode (Esc)">\u2715</button></div>'
-    +'<div class="md-toolbar"><button data-fmt="bold" title="Bold"><b>B</b></button><button data-fmt="italic" title="Italic"><i>I</i></button><button data-fmt="strike" title="Strikethrough"><s>S</s></button><button data-fmt="code" title="Inline code">&lt;/&gt;</button><span class="md-sep"></span><button data-fmt="h1" title="Heading 1">H1</button><button data-fmt="h2" title="Heading 2">H2</button><button data-fmt="h3" title="Heading 3">H3</button><span class="md-sep"></span><button data-fmt="quote" title="Blockquote">\u275D</button><button data-fmt="ul" title="Bullet list">\u2022</button><button data-fmt="ol" title="Numbered list">1.</button><button data-fmt="hr" title="Divider">\u2014</button><span class="md-sep"></span><button data-fmt="link" title="Link">\uD83D\uDD17</button><button data-fmt="image" title="Image">\uD83D\uDDBC</button><button data-fmt="codeblock" title="Code block">\u2317</button><button data-fmt="table" title="Table">\u25A6</button></div><div class="md-body"><div class="md-code"><pre class="md-hl" aria-hidden="true"><div class="md-hl-inner"></div></pre>'
-    +'<textarea id="mdEditor" spellcheck="false" wrap="off" placeholder="# Central idea&#10;- a branch&#10;  - a leaf"></textarea><div class="md-prev" aria-hidden="true"></div></div></div>'
+    +'<div class="md-toolbar"><button data-fmt="bold" title="Bold"><b>B</b></button><button data-fmt="italic" title="Italic"><i>I</i></button><button data-fmt="strike" title="Strikethrough"><s>S</s></button><button data-fmt="code" title="Inline code">&lt;/&gt;</button><span class="md-sep"></span><button data-fmt="h1" title="Heading 1">H1</button><button data-fmt="h2" title="Heading 2">H2</button><button data-fmt="h3" title="Heading 3">H3</button><span class="md-sep"></span><button data-fmt="quote" title="Blockquote">\u275D</button><button data-fmt="ul" title="Bullet list">\u2022</button><button data-fmt="ol" title="Numbered list">1.</button><button data-fmt="hr" title="Divider">\u2014</button><span class="md-sep"></span><button data-fmt="link" title="Link">\uD83D\uDD17</button><button data-fmt="image" title="Image">\uD83D\uDDBC</button><button data-fmt="codeblock" title="Code block">\u2317</button><button data-fmt="table" title="Table">\u25A6</button></div><div class="md-body"><div class="md-code"><pre id="mdEditor" class="md-editor" contenteditable="true" spellcheck="false" role="textbox" aria-multiline="true" data-placeholder="# Central idea&#10;- a branch&#10;  - a leaf"></pre><div class="md-prev" aria-hidden="true"></div></div></div>'
     +'<div class="md-resize" title="Drag to resize"></div>';
   app.insertBefore(pane, stage);
   document.body.classList.add('md-ready');
@@ -2766,14 +2883,16 @@ function ensureMdPane(){
   pane.querySelector('.md-wrap-btn').addEventListener('click', mdToggleWrap);
   pane.querySelector('.md-pdf-btn').addEventListener('click', mdDownloadPdf);
   pane.querySelector('.md-toolbar').addEventListener('mousedown', e=>{ const b=e.target.closest('button[data-fmt]'); if(b){ e.preventDefault(); mdFormat(b.dataset.fmt); } });
-  const ed=pane.querySelector('#mdEditor');
+  const ed=mdBindEditor(pane.querySelector('#mdEditor'));
   let _mdPointerSel=false;
-  ed.addEventListener('input', mdAfterEdit);
-  ed.addEventListener('scroll', ()=>{
-    pane.classList.add('md-scrolling');
-    mdSyncScroll();
-    clearTimeout(ed._mdScrollWill);
-    ed._mdScrollWill=setTimeout(()=>pane.classList.remove('md-scrolling'), 120);
+  ed.addEventListener('compositionstart', ()=>{ _mdComposing=true; });
+  ed.addEventListener('compositionend', ()=>{ _mdComposing=false; mdAfterEdit(); });
+  ed.addEventListener('input', ()=>{ if(!_mdComposing) mdAfterEdit(); });
+  ed.addEventListener('paste', e=>{
+    e.preventDefault();
+    const t=(e.clipboardData && e.clipboardData.getData('text/plain'))||'';
+    if(typeof insertFieldText==='function') insertFieldText(ed, t);
+    else mdInsertText(t);
   });
   ed.addEventListener('keydown',e=>{
     if(e.key==='Escape'){ e.preventDefault(); toggleMdMode(false); return; }
@@ -2784,12 +2903,13 @@ function ensureMdPane(){
       if(k==='i'){ e.preventDefault(); mdFormat('italic'); return; } }
     if(e.key==='Tab'){ e.preventDefault(); const a=ed.selectionStart,b=ed.selectionEnd; ed.value=ed.value.slice(0,a)+'  '+ed.value.slice(b); ed.selectionStart=ed.selectionEnd=a+2; mdAfterEdit(); }
     if(e.key==='Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey){
-      if(mdHandleEnter(ed)){ e.preventDefault(); mdAfterEdit(); }
+      e.preventDefault();
+      if(!mdHandleEnter(ed)) mdInsertText('\n');
+      else mdAfterEdit();
     }
   });
   const syncNodeFromCaret=()=>{ if(_mdSelSync) return; const vline=mdLineColFromPos(ed.value, ed.selectionStart, _mdPosCache).line; const line=_mdView?_mdView.visLineToFull[vline]:vline; let id=null; for(let l=line;l>=0;l--){ if(_mdLines[l]){ id=_mdLines[l]; break; } } if(id && map.nodes[id]){ _mdSelSync=true; select(id); _mdSelSync=false; } };
-  // Drag-select is native textarea ::selection. Do not toggle overlay CSS or
-  // rebuild highlight HTML. Skip chrome (Ln/Col) until the gesture ends.
+  // Native selection on the highlighted text. Do not rebuild HTML while dragging.
   ed.addEventListener('click', ()=>{ mdUpdateActive(); syncNodeFromCaret(); });
   ed.addEventListener('mousedown', e=>{ if(e.button===0) _mdPointerSel=true; });
   const endMdSelect=()=>{
@@ -2800,7 +2920,7 @@ function ensureMdPane(){
   window.addEventListener('mouseup', endMdSelect);
   window.addEventListener('blur', endMdSelect);
   document.addEventListener('selectionchange', ()=>{
-    if(!mdMode || _mdPointerSel) return;
+    if(!mdMode || _mdPointerSel || _mdComposing) return;
     if(document.activeElement!==document.getElementById('mdEditor')) return;
     if(_mdSelRAF) return;
     _mdSelRAF=requestAnimationFrame(()=>{ _mdSelRAF=0; mdUpdateActive(); });
@@ -3220,12 +3340,11 @@ function mdHighlight(text, view){
     else if(inFence){ html='<span class="hl-code">'+esc(raw)+'</span>'; if(/^\s*(```+|~~~+)\s*$/.test(raw)) inFence=false; }
     else if(/^\s*(```+|~~~+)/.test(raw)){ inFence=true; html='<span class="hl-fence">'+esc(raw)+'</span>'; }
     else html=_hlLine(raw);
-    let chip='';
     if(view){
       const fi=view.visLineToFull[i];
       const info=fi!=null ? view.foldInfo.get(fi) : null;
       if(info){
-        chip=' <span class="md-fold-chip">\u22EF '+info.count+' line'+(info.count===1?'':'s')+' folded</span>';
+        html='<span data-fold="'+info.count+'">'+(html||'')+'</span>';
         // The lines this fold hides might contain whatever would have closed an
         // in-progress comment/fence (opened on this line, or already open before it) —
         // scan them via the full text (without rendering them) so that state resolves
@@ -3242,7 +3361,7 @@ function mdHighlight(text, view){
     // Real block-level rows (not just newline-joined spans) so the active-line highlight
     // is a plain CSS class on the actual row — always pixel-perfect, in or out of view,
     // with no separate position math to keep in sync while clicking/scrolling.
-    parts.push((html||'')+chip);
+    parts.push(html||'');
     if(i<lines.length-1) parts.push('\n');
   }
   return parts.join('');
@@ -3274,7 +3393,7 @@ function mdUpdateActive(){
 function mdRefreshDecorations(){
   mdInvalidatePosCache();
   const ed=document.getElementById('mdEditor'); if(!ed) return;
-  const hl=document.querySelector('#mdPane .md-hl-inner'); if(!hl) return;
+  const hl=document.querySelector('#mdPane .md-hl-inner');
   const gut=document.querySelector('#mdPane .md-gutter-inner');
   const view=mdBuildView(); _mdView=view;
   // ed.value is expected to already match this view — mdCommitVisibleEdit's job on every
@@ -3286,8 +3405,8 @@ function mdRefreshDecorations(){
   // blindly — only touches ed.value (and the cursor) on the rare mismatch, not on every
   // refresh, so normal typing is unaffected.
   const expectedVis = mdVisibleText(view);
-  if(ed.value !== expectedVis){ ed.value = expectedVis; _mdPrevVisible = expectedVis; }
-  hl.innerHTML=mdHighlight(ed.value, view);
+  mdPaint(ed, expectedVis, true);
+  _mdPrevVisible = expectedVis;
   if(gut) gut.innerHTML=mdRenderGutter(view);
   mdSyncGutterRowHeights(hl, gut);
   mdCalibrate();
@@ -5414,6 +5533,7 @@ function overlayTextFieldOwnsClipboard(){
 }
 function isValueTextField(el){
   if(!el) return false;
+  if(el.id==='mdEditor') return true;
   const tag=el.tagName;
   return tag==='INPUT' || tag==='TEXTAREA';
 }
@@ -5449,7 +5569,7 @@ function insertFieldText(el, text){
   if(!el) return false;
   const str = String(text == null ? '' : text);
   try{ if(typeof el.focus === 'function') el.focus(); }catch(_){}
-  if(el.tagName !== 'INPUT' && el.tagName !== 'TEXTAREA'){
+  if(el.id!=='mdEditor' && el.tagName !== 'INPUT' && el.tagName !== 'TEXTAREA'){
     return typeof insertEditorText === 'function' ? insertEditorText(el, str, false) : false;
   }
   const v = el.value || '';

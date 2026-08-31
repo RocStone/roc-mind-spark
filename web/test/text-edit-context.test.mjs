@@ -9,6 +9,21 @@ const here = dirname(fileURLToPath(import.meta.url));
 const src = readFileSync(join(here, '..', 'public', 'app.js'), 'utf8');
 const css = readFileSync(join(here, '..', 'public', 'styles.css'), 'utf8');
 
+describe('mdHighlight fold marker', () => {
+  test('fold count is a data-fold attribute, not extra text', () => {
+    const view = {
+      visLineToFull: [0],
+      foldInfo: new Map([[0, { start: 0, end: 4, count: 3 }]]),
+      fullLines: ['# a', 'b', 'c', 'd'],
+    };
+    const { mdHighlight, _hlLine } = loadFns(['_hlLine', 'mdHighlight']);
+    void _hlLine;
+    const html = mdHighlight('# a', view);
+    assert.match(html, /data-fold="3"/);
+    assert.doesNotMatch(html, /md-fold-chip/);
+  });
+});
+
 describe('mdLineColFromPos', () => {
   const { mdLineColFromPos } = loadFns(['mdLineColFromPos']);
 
@@ -163,11 +178,13 @@ describe('click-and-drag selection hot path', () => {
     assert.doesNotMatch(src, /class="md-gutter"/);
   });
 
-  test('Markdown drag-select keeps syntax colors and uses native ::selection', () => {
+  test('Markdown drag-select is native selection on contenteditable colored text', () => {
+    assert.match(src, /<pre id="mdEditor"/);
+    assert.match(src, /id="mdEditor"[^>]*contenteditable="true"/);
+    assert.doesNotMatch(src, /<textarea id="mdEditor"/);
     assert.doesNotMatch(css, /#mdPane\.md-selecting/);
-    assert.doesNotMatch(src, /classList\.add\('md-selecting'\)/);
     assert.match(css, /#mdEditor::selection\{[^}]*background:/);
-    assert.match(css, /#mdEditor\{[^}]*color:\s*transparent/);
+    assert.doesNotMatch(css, /#mdEditor\{[^}]*color:\s*transparent/);
   });
 
   test('display-size tokens are not a pointer scale', () => {

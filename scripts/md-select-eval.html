@@ -1,0 +1,139 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>md-select-eval</title>
+<style>
+  html,body{margin:0;background:#f4efe6;font:13px/20px ui-monospace,Menlo,monospace;color:#23201b}
+  #host{position:relative;width:560px;height:360px;margin:16px;background:#fff;overflow:hidden;border:1px solid #ddd}
+  .hl,.ta,canvas#cv{position:absolute;inset:0;margin:0;padding:12px 14px;border:0;font:13px/20px ui-monospace,Menlo,monospace;white-space:pre;box-sizing:border-box}
+  .hl{overflow:hidden;pointer-events:none;color:#23201b;z-index:1}
+  .ta-ghost{background:transparent;color:transparent;-webkit-text-fill-color:transparent;caret-color:#23201b;z-index:2;resize:none;outline:none}
+  .ta-solid{background:#fff;color:#23201b;caret-color:#23201b;z-index:2;resize:none;outline:none}
+  .ta-ghost::selection,.ta-solid::selection{background:rgba(224,97,58,.32);color:transparent;-webkit-text-fill-color:transparent}
+  .ce{position:absolute;inset:0;margin:0;padding:12px 14px;overflow:auto;white-space:pre;font:13px/20px ui-monospace,Menlo,monospace;outline:none;z-index:2}
+  .ce::selection{background:rgba(224,97,58,.32)}
+  canvas#cv{z-index:1;pointer-events:none}
+  .hl-head{color:#e0613a;font-weight:700}
+  .hl-bullet{color:#e0613a;font-weight:700}
+  .hl-strong{font-weight:700}
+  .hl-em{font-style:italic}
+  .hl-code-inline{color:#b8451f}
+</style>
+<div id="host"></div>
+<script>
+const LINES = 280;
+const TEXT = Array.from({length:LINES}, (_,i)=>{
+  if(i%17===0) return '# heading '+i;
+  if(i%5===0) return '- **bold** topic '+i+' / 划选这段文字 `code` '+i;
+  return '- topic '+i+' / 这是一段用来划选的文字 '+i;
+}).join('\n');
+
+function hlHtml(text){
+  return text.split('\n').map(raw=>{
+    const esc=t=>t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    let s=esc(raw);
+    if(/^# /.test(raw)) return '<span class="hl-head">'+s+'</span>';
+    s=s.replace(/^(\- )/, '<span class="hl-bullet">$1</span>');
+    s=s.replace(/\*\*[^*]+\*\*/g, m=>'<span class="hl-strong">'+m+'</span>');
+    s=s.replace(/`[^`]+`/g, m=>'<span class="hl-code-inline">'+m+'</span>');
+    return s;
+  }).join('\n');
+}
+
+const CASES = {
+  'bare-textarea': () => '<textarea class="ta ta-solid" id="ed"></textarea>',
+  'ghost-span-overlay': () => '<pre class="hl" id="ov">'+hlHtml(TEXT)+'</pre><textarea class="ta ta-ghost" id="ed"></textarea>',
+  'ghost-plain-overlay': () => '<pre class="hl" id="ov"></pre><textarea class="ta ta-ghost" id="ed"></textarea>',
+  'ce-plain': () => '<div class="ce" id="ed" contenteditable="true" spellcheck="false"></div>',
+  'ce-spans': () => '<div class="ce" id="ed" contenteditable="true" spellcheck="false"></div>',
+  'ghost-canvas': () => '<canvas id="cv"></canvas><textarea class="ta ta-ghost" id="ed"></textarea>',
+};
+
+let moves=[], sels=[], lastMove=0;
+function edEl(){ return document.getElementById('ed'); }
+function isTa(el){ return el && el.tagName==='TEXTAREA'; }
+
+function selRange(el){
+  if(!el) return {a:-1,b:-1};
+  if(isTa(el)) return {a:el.selectionStart|0, b:el.selectionEnd|0};
+  const s=getSelection();
+  if(!s || !s.rangeCount) return {a:-1,b:-1};
+  const r=s.getRangeAt(0);
+  const pre=r.cloneRange();
+  pre.selectNodeContents(el);
+  pre.setEnd(r.startContainer, r.startOffset);
+  const a=pre.toString().length;
+  return {a, b:a+s.toString().length};
+}
+
+function onMove(e){
+  lastMove=performance.now();
+  moves.push({t:lastMove, x:e.clientX, y:e.clientY});
+}
+function onSel(){
+  const t=performance.now();
+  const r=selRange(edEl());
+  sels.push({t, a:r.a, b:r.b, sinceMove:+(t-lastMove).toFixed(2)});
+}
+
+function paintCanvas(){
+  const cv=document.getElementById('cv'); if(!cv) return;
+  const host=document.getElementById('host');
+  const dpr=window.devicePixelRatio||1;
+  cv.width=Math.floor(host.clientWidth*dpr);
+  cv.height=Math.floor(host.clientHeight*dpr);
+  cv.style.width=host.clientWidth+'px';
+  cv.style.height=host.clientHeight+'px';
+  const ctx=cv.getContext('2d');
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  ctx.font='13px ui-monospace, Menlo, monospace';
+  ctx.textBaseline='top';
+  const pad=12, lh=20;
+  TEXT.split('\n').forEach((line,i)=>{
+    ctx.fillStyle = /^# /.test(line) ? '#e0613a' : '#23201b';
+    ctx.fillText(line, 14, pad+i*lh);
+  });
+}
+
+function setup(name){
+  moves=[]; sels=[]; lastMove=0;
+  const host=document.getElementById('host');
+  host.innerHTML = (CASES[name]||CASES['bare-textarea'])();
+  const el=edEl();
+  if(isTa(el)) el.value=TEXT;
+  else if(name==='ce-spans') el.innerHTML=hlHtml(TEXT);
+  else if(el) el.textContent=TEXT;
+  const ov=document.getElementById('ov');
+  if(ov && name==='ghost-plain-overlay') ov.textContent=TEXT;
+  if(name==='ghost-canvas') paintCanvas();
+  el.addEventListener('mousemove', onMove);
+  document.addEventListener('selectionchange', onSel);
+  el.focus();
+  const r=el.getBoundingClientRect();
+  return {left:r.left, top:r.top, width:r.width, height:r.height, name};
+}
+
+function summarize(){
+  const dts=sels.map(s=>s.sinceMove).filter(x=>x>=0 && x<500);
+  dts.sort((a,b)=>a-b);
+  const pct=p=> dts.length ? dts[Math.min(dts.length-1, Math.floor(p/100*(dts.length-1)))] : null;
+  const changed=sels.filter((s,i)=> i===0 || s.a!==sels[i-1].a || s.b!==sels[i-1].b);
+  return {
+    moves: moves.length,
+    sels: sels.length,
+    selChanges: changed.length,
+    medianLagMs: pct(50),
+    p90LagMs: pct(90),
+    maxLagMs: dts.length ? dts[dts.length-1] : null,
+    firstSel: sels[0]||null,
+    lastSel: sels[sels.length-1]||null,
+  };
+}
+
+window.__EVAL = {
+  names: Object.keys(CASES),
+  setup,
+  summarize,
+  TEXT_LEN: TEXT.length,
+};
+window.__EVAL_READY = true;
+</script>
