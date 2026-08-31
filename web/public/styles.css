@@ -195,7 +195,7 @@
   #mdPane .md-body{display:flex;flex:1;min-height:0;overflow:hidden}
   #mdPane .md-code{position:relative;flex:1;min-width:0;overflow:hidden}
   #mdPane .md-hl,#mdEditor{position:absolute;inset:0;margin:0;box-sizing:border-box;padding:12px 14px;border:0;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;line-height:20px;white-space:pre;tab-size:2}
-  #mdPane .md-hl{overflow:hidden;pointer-events:none;color:var(--ink)}
+  #mdPane .md-hl{overflow:hidden;pointer-events:none;color:var(--ink);contain:paint}
   /* Scroll-sync targets a plain inner wrapper via transform, not the outer .md-hl/.md-gutter
      (which must stay put so their own overflow:hidden keeps clipping the visible window). */
   #mdPane .md-hl-inner,#mdPane .md-gutter-inner{will-change:auto}
@@ -247,13 +247,11 @@
   /* horizontal-rule divider node */
   .node.hr-node{min-width:54px;box-shadow:none}
   .node.hr-node .node-hr{display:block;width:54px;height:0;border-top:2px solid var(--ink-soft,#98a2b3);opacity:.6}
-  #mdEditor{overflow:auto;resize:none;outline:none;background:transparent;color:transparent;caret-color:var(--ink);transform:none}
-  #mdEditor::selection{background:rgba(224,97,58,.28)}
-  /* While click-and-drag selecting, show native textarea ink and take the
-     per-line highlight overlay out of the render tree. visibility:hidden still
-     leaves a compositor layer of every .hl-line; display:none does not. */
-  #mdPane.md-selecting #mdEditor{color:var(--ink);background:var(--paper)}
-  #mdPane.md-selecting .md-hl{display:none !important}
+  #mdEditor{overflow:auto;resize:none;outline:none;background:transparent;color:transparent;-webkit-text-fill-color:transparent;caret-color:var(--ink);transform:none}
+  #mdEditor::placeholder{color:var(--ink-soft);-webkit-text-fill-color:var(--ink-soft)}
+  /* Native selection rectangle on the transparent textarea. Syntax colors stay
+     on .md-hl underneath — do not swap the overlay out while dragging. */
+  #mdEditor::selection{background:rgba(224,97,58,.32);color:transparent;-webkit-text-fill-color:transparent}
   /* markdown syntax colors — driven by theme variables, so they follow the theme */
   #mdPane .hl-head{color:var(--accent);font-weight:700}
   #mdPane .hl-comment{color:var(--ink-soft);opacity:.6;font-style:italic}

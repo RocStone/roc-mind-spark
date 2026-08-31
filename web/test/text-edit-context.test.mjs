@@ -149,7 +149,6 @@ describe('click-and-drag selection hot path', () => {
 
   test('a markdown click does not rebuild the highlight overlay', () => {
     assert.match(src, /ed\.addEventListener\('click',\s*\(\)=>\{\s*mdUpdateActive\(\);\s*syncNodeFromCaret\(\);/);
-    assert.match(src, /pane\.classList\.add\('md-selecting'\)/);
     assert.doesNotMatch(
       src,
       /ed\.addEventListener\('click',\s*\(\)=>\{\s*mdRefreshDecorations\(\)/
@@ -161,9 +160,14 @@ describe('click-and-drag selection hot path', () => {
     assert.match(css, /\.edit-float\{[^}]*position:\s*absolute/);
     assert.match(css, /\.edit-float\{[^}]*transform:\s*none/);
     assert.match(src, /float\.style\.transform='none'/);
-    assert.match(css, /#mdPane\.md-selecting #mdEditor\{color:var\(--ink\)/);
-    assert.match(css, /#mdPane\.md-selecting \.md-hl\{display:\s*none/);
     assert.doesNotMatch(src, /class="md-gutter"/);
+  });
+
+  test('Markdown drag-select keeps syntax colors and uses native ::selection', () => {
+    assert.doesNotMatch(css, /#mdPane\.md-selecting/);
+    assert.doesNotMatch(src, /classList\.add\('md-selecting'\)/);
+    assert.match(css, /#mdEditor::selection\{[^}]*background:/);
+    assert.match(css, /#mdEditor\{[^}]*color:\s*transparent/);
   });
 
   test('display-size tokens are not a pointer scale', () => {
@@ -175,7 +179,6 @@ describe('click-and-drag selection hot path', () => {
   test('Markdown editor is a grid pane, not a body-fixed portal', () => {
     assert.match(src, /app\.insertBefore\(pane, stage\)/);
     assert.doesNotMatch(src, /slot\.id='mdSlot'/);
-    assert.match(src, /if\(pane\.classList\.contains\('md-selecting'\)\) return;/);
     assert.match(css, /#mdPane\{[^}]*position:\s*relative/);
   });
 });

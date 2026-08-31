@@ -2767,9 +2767,9 @@ function ensureMdPane(){
   pane.querySelector('.md-pdf-btn').addEventListener('click', mdDownloadPdf);
   pane.querySelector('.md-toolbar').addEventListener('mousedown', e=>{ const b=e.target.closest('button[data-fmt]'); if(b){ e.preventDefault(); mdFormat(b.dataset.fmt); } });
   const ed=pane.querySelector('#mdEditor');
+  let _mdPointerSel=false;
   ed.addEventListener('input', mdAfterEdit);
   ed.addEventListener('scroll', ()=>{
-    if(pane.classList.contains('md-selecting')) return;
     pane.classList.add('md-scrolling');
     mdSyncScroll();
     clearTimeout(ed._mdScrollWill);
@@ -2788,16 +2788,19 @@ function ensureMdPane(){
     }
   });
   const syncNodeFromCaret=()=>{ if(_mdSelSync) return; const vline=mdLineColFromPos(ed.value, ed.selectionStart, _mdPosCache).line; const line=_mdView?_mdView.visLineToFull[vline]:vline; let id=null; for(let l=line;l>=0;l--){ if(_mdLines[l]){ id=_mdLines[l]; break; } } if(id && map.nodes[id]){ _mdSelSync=true; select(id); _mdSelSync=false; } };
-  // Click-and-drag selection used to rebuild the whole highlight overlay twice
-  // (click + rAF). Mark the active line and sync the map caret instead.
+  // Drag-select is native textarea ::selection. Do not toggle overlay CSS or
+  // rebuild highlight HTML. Skip chrome (Ln/Col) until the gesture ends.
   ed.addEventListener('click', ()=>{ mdUpdateActive(); syncNodeFromCaret(); });
-  ed.addEventListener('mousedown', e=>{ if(e.button===0) pane.classList.add('md-selecting'); });
-  const endMdSelect=()=>pane.classList.remove('md-selecting');
+  ed.addEventListener('mousedown', e=>{ if(e.button===0) _mdPointerSel=true; });
+  const endMdSelect=()=>{
+    if(!_mdPointerSel) return;
+    _mdPointerSel=false;
+    mdUpdateActive();
+  };
   window.addEventListener('mouseup', endMdSelect);
   window.addEventListener('blur', endMdSelect);
   document.addEventListener('selectionchange', ()=>{
-    if(!mdMode) return;
-    if(pane.classList.contains('md-selecting')) return;
+    if(!mdMode || _mdPointerSel) return;
     if(document.activeElement!==document.getElementById('mdEditor')) return;
     if(_mdSelRAF) return;
     _mdSelRAF=requestAnimationFrame(()=>{ _mdSelRAF=0; mdUpdateActive(); });
@@ -3245,8 +3248,6 @@ function mdHighlight(text, view){
   return parts.join('');
 }
 function mdSyncScroll(){
-  const pane=document.getElementById('mdPane');
-  if(pane && pane.classList.contains('md-selecting')) return;
   const ed=document.getElementById('mdEditor'); if(!ed) return;
   const hl=document.querySelector('#mdPane .md-hl-inner'), gut=document.querySelector('#mdPane .md-gutter-inner');
   // A transform on the INNER wrapper, not `scrollTop` on the outer (clipping) element itself.
