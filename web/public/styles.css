@@ -212,7 +212,8 @@
   #mdPane .md-hl{overflow:hidden;pointer-events:none;color:var(--ink)}
   /* Scroll-sync targets a plain inner wrapper via transform, not the outer .md-hl/.md-gutter
      (which must stay put so their own overflow:hidden keeps clipping the visible window). */
-  #mdPane .md-hl-inner,#mdPane .md-gutter-inner{will-change:transform}
+  #mdPane .md-hl-inner,#mdPane .md-gutter-inner{will-change:auto}
+  #mdPane.md-scrolling .md-hl-inner,#mdPane.md-scrolling .md-gutter-inner{will-change:transform}
   #mdPane .md-hl .hl-line{min-height:20px}
   /* active-line highlight: a real background on the actual row div — it's always exactly
      where the caret is, in or out of view, with no separate pixel math to keep in sync
@@ -262,11 +263,12 @@
   .node.hr-node .node-hr{display:block;width:54px;height:0;border-top:2px solid var(--ink-soft,#98a2b3);opacity:.6}
   #mdEditor{overflow:auto;resize:none;outline:none;background:transparent;color:transparent;caret-color:var(--ink)}
   #mdEditor::selection{background:color-mix(in srgb, var(--accent) 28%, transparent)}
-  /* While click-and-drag selecting, show native textarea ink and hide the
-     per-line highlight overlay so WK does not composite thousands of rows
-     under a transparent field on every mouse move. */
+  /* While click-and-drag selecting, show native textarea ink and take the
+     per-line highlight overlay out of the render tree. visibility:hidden still
+     leaves a compositor layer of every .hl-line; display:none does not. */
   #mdPane.md-selecting #mdEditor{color:var(--ink);background:var(--paper)}
-  #mdPane.md-selecting .md-hl{visibility:hidden}
+  #mdPane.md-selecting .md-hl,
+  #mdPane.md-selecting .md-gutter{display:none !important}
   /* markdown syntax colors — driven by theme variables, so they follow the theme */
   #mdPane .hl-head{color:var(--accent);font-weight:700}
   #mdPane .hl-comment{color:var(--ink-soft);opacity:.6;font-style:italic}
@@ -417,7 +419,7 @@
   .node.editing .node-text{outline:none;user-select:text;-webkit-user-select:text;cursor:text}
   .node.edit-placeholder{visibility:hidden}
   .edit-float{
-    position:fixed; z-index:40; box-sizing:border-box;
+    position:fixed; z-index:40; box-sizing:border-box; contain:layout paint;
     display:flex; align-items:center; justify-content:center;
     cursor:text; user-select:text; -webkit-user-select:text;
     outline:2.5px solid var(--accent); outline-offset:2px;

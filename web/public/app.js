@@ -714,6 +714,8 @@ let saveTimer=null, _pendingSaveMap=null;
 const viewport=$('#viewport'), edges=$('#edges'), stage=$('#stage'), zoomVal=$('#zoomVal');
 if(viewport){
   viewport.addEventListener('pointerover', e=>{
+    if(typeof _liveEditing!=='undefined' && _liveEditing) return;
+    if(document.body && document.body.classList.contains('rms-node-edit')) return;
     const node=e.target && e.target.closest && e.target.closest('.node');
     if(node) ensureNodeChrome(node);
   });
@@ -2889,7 +2891,13 @@ function ensureMdPane(){
   pane.querySelector('.md-toolbar').addEventListener('mousedown', e=>{ const b=e.target.closest('button[data-fmt]'); if(b){ e.preventDefault(); mdFormat(b.dataset.fmt); } });
   const ed=pane.querySelector('#mdEditor');
   ed.addEventListener('input', mdAfterEdit);
-  ed.addEventListener('scroll', mdSyncScroll);
+  ed.addEventListener('scroll', ()=>{
+    if(pane.classList.contains('md-selecting')) return;
+    pane.classList.add('md-scrolling');
+    mdSyncScroll();
+    clearTimeout(ed._mdScrollWill);
+    ed._mdScrollWill=setTimeout(()=>pane.classList.remove('md-scrolling'), 120);
+  });
   ed.addEventListener('keydown',e=>{
     if(e.key==='Escape'){ e.preventDefault(); toggleMdMode(false); return; }
     if((e.ctrlKey||e.metaKey) && !e.altKey){ const k=(e.key||'').toLowerCase();
@@ -3371,6 +3379,8 @@ function mdHighlight(text, view){
   return parts.join('');
 }
 function mdSyncScroll(){
+  const pane=document.getElementById('mdPane');
+  if(pane && pane.classList.contains('md-selecting')) return;
   const ed=document.getElementById('mdEditor'); if(!ed) return;
   const hl=document.querySelector('#mdPane .md-hl-inner'), gut=document.querySelector('#mdPane .md-gutter-inner');
   // A transform on the INNER wrapper, not `scrollTop` on the outer (clipping) element itself.
@@ -6136,6 +6146,7 @@ function armEditorHost(textEl){
   textEl.setAttribute('contenteditable', 'true');
   textEl.setAttribute('role', 'textbox');
   textEl.setAttribute('aria-multiline', 'true');
+  textEl.setAttribute('spellcheck', 'false');
   armEditReplaceAll();
 }
 function disarmEditorHost(textEl){

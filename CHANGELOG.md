@@ -5,7 +5,7 @@ Versions follow the macOS bundle `CFBundleShortVersionString` and the matching G
 ## [Unreleased]
 
 - Click-and-drag text selection in a node no longer tracks through the UI-scale transform.
-- The Markdown editor sits outside that transform and does not rebuild its highlight overlay while dragging a selection.
+- The Markdown editor sits outside that transform. While dragging a selection it shows native text and takes the per-line highlight overlay out of the render tree.
 - Right-click in a text field offers Cut / Copy / Paste / Undo / Redo / Select All. Cmd+C / Cmd+V in the Markdown editor copy and paste the selection.
 
 ## [1.0.0] - 2026-08-27
