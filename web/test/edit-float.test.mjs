@@ -8,7 +8,7 @@ import { loadFns, extractConst } from './helpers/load-app-fns.mjs';
 
 const INLINE_HTML_RE = extractConst('INLINE_HTML_RE');
 
-describe('editFloatViewportPos — body-fixed float uses on-screen GBR', () => {
+describe('editFloatViewportPos — leftover helper still reads on-screen GBR', () => {
   const { editFloatViewportPos } = loadFns(['editFloatViewportPos']);
 
   test('reads left/top from getBoundingClientRect', () => {

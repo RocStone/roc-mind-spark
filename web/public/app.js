@@ -496,142 +496,22 @@ if(typeof window!=='undefined' && window.addEventListener){
   window.addEventListener('pagehide', ()=>{ try{ flushOpLog(); }catch(e){} });
 }
 let userZoom=null;            // user-chosen camera zoom, preserved across map switches
-// The whole UI may be scaled by CSS `zoom` (display size). getBoundingClientRect
-// then returns VISUAL px, but the #viewport transform works in LAYOUT px — so
-// convert by dividing by the active UI zoom for any camera math.
-// The whole UI may be scaled by CSS `zoom` (display size). How that interacts
-// with getBoundingClientRect differs by browser/version (some return layout px,
-// some zoom-scaled "visual" px). Rather than assume, MEASURE the factor with a
-// 100px probe so camera math converts rect/pointer coords to the #viewport's
-// layout space correctly on every browser. Cached; invalidated on scale change.
-let _rzCache=null;
-let _ptrMul=null;
-function _cssZoom(){
-  try{
-    const v=parseFloat(typeof document!=='undefined' && document.documentElement && document.documentElement.style.getPropertyValue('--ui-zoom'));
-    if(v && v>0) return v;
-  }catch(e){}
-  try{
-    const app=typeof document!=='undefined' && document.querySelector && document.querySelector('.app');
-    const a=app && parseFloat(app.style.zoom);
-    if(a && a>0) return a;
-  }catch(e){}
-  const z=parseFloat(typeof document!=='undefined' && document.documentElement && document.documentElement.style.zoom);
-  return (z && z>0) ? z : 1;
-}
-function _uiZResolve({stageRectWidth, stageOffsetWidth, probeWidth, cssZoom}){
-  if(stageOffsetWidth>1 && stageRectWidth>1){
-    const r=stageRectWidth/stageOffsetWidth;
-    // WK CSS zoom: GBR ignores zoom (bug 77998), so the ratio is ~1 even when
-    // the page is scaled. Prefer the intended --ui-zoom in that case.
-    if(Math.abs(r-1)<0.02 && cssZoom && Math.abs(cssZoom-1)>0.02) return cssZoom;
-    return r;
-  }
-  if(probeWidth>0){
-    const m=probeWidth/100;
-    // Off-screen probes in WKWebView often ignore CSS zoom and report 100.
-    // Do not lock that lie in if the page is actually zoomed.
-    if(Math.abs(m-1)<0.02 && cssZoom && Math.abs(cssZoom-1)>0.02) return cssZoom;
-    return m;
-  }
-  return (cssZoom && cssZoom>0) ? cssZoom : 1;
-}
-function _uiZ(){
-  if(_rzCache!=null) return _rzCache;
-  const cssZoom=_cssZoom();
-  try{
-    if(typeof stage!=='undefined' && stage && stage.offsetWidth>1){
-      const rw=stage.getBoundingClientRect().width;
-      if(rw>1){
-        _rzCache=_uiZResolve({stageRectWidth:rw, stageOffsetWidth:stage.offsetWidth, probeWidth:0, cssZoom});
-        return _rzCache;
-      }
-    }
-    let p=typeof document!=='undefined' && document.getElementById('__zprobe');
-    if(!p && typeof document!=='undefined'){
-      p=document.createElement('div'); p.id='__zprobe'; p.setAttribute('aria-hidden','true');
-      p.style.cssText='position:fixed;left:0;top:0;width:100px;height:1px;opacity:0;pointer-events:none';
-      (document.documentElement||document.body).appendChild(p);
-    }
-    const w=p?p.getBoundingClientRect().width:0;
-    const z=_uiZResolve({stageRectWidth:0, stageOffsetWidth:0, probeWidth:w, cssZoom});
-    if(!(w>0 && Math.abs(w/100-1)<0.02 && Math.abs(cssZoom-1)>0.02)) _rzCache=z;
-    return z;
-  }catch(e){}
-  return cssZoom;
-}
-function _choosePointerScale(cx, cy, rect, z, cssZoom){
-  if(!rect || !(rect.width>8) || !(rect.height>8)) return (Math.abs(z-1)<0.02 && cssZoom && Math.abs(cssZoom-1)>0.02) ? cssZoom : 1;
-  const cands=[1];
-  if(z && Math.abs(z-1)>0.02) cands.push(z);
-  if(cssZoom && Math.abs(cssZoom-1)>0.02){
-    if(cands.indexOf(cssZoom)<0) cands.push(cssZoom);
-    // Do not try 1/cssZoom. Under transform:scale, clientX is already in the
-    // same visual space as GBR; the inverse (~1.11 at 90%) wins on the left
-    // edge of a card and then the whole gesture tracks off the pointer.
-  }
-  const mx=(rect.left+rect.right)/2, my=(rect.top+rect.bottom)/2;
-  let best=1, bestD=Infinity;
-  for(const m of cands){
-    const d=Math.hypot(cx*m-mx, cy*m-my);
-    if(d<bestD){ bestD=d; best=m; }
-  }
-  return best;
-}
-function _gbrScale(){
-  try{
-    if(typeof stage!=='undefined' && stage && stage.offsetWidth>1){
-      const rw=stage.getBoundingClientRect().width;
-      if(rw>1) return rw/stage.offsetWidth;
-    }
-  }catch(e){}
-  return 1;
-}
-function _gbrIsVisual(){
-  return Math.abs(_gbrScale()-1)>0.04;
-}
-function _calibratePointer(e){
-  if(_ptrMul!=null || !e) return;
-  // clientX is always visual. Under transform:scale, GBR is visual too, so
-  // the multiplier is 1. Under WK CSS zoom, GBR is layout; canvas math uses
-  // visual deltas divided by _uiZ(), so keep the pointer in visual space.
-  if(typeof document!=='undefined' && document.documentElement
-      && document.documentElement.classList && document.documentElement.classList.contains('rms-wk')){
-    _ptrMul=1;
-    return;
-  }
-  const z=_uiZ();
-  const cssZoom=_cssZoom();
-  const el=e.target;
-  const sid=el && el.id;
-  const huge=el && (
-    (typeof stage!=='undefined' && el===stage) ||
-    sid==='viewport' || sid==='edges' ||
-    (typeof document!=='undefined' && (el===document.body || el===document.documentElement))
-  );
-  if(!el || huge || typeof el.getBoundingClientRect!=='function'){
-    _ptrMul=1;
-    return;
-  }
-  _ptrMul=_choosePointerScale(e.clientX, e.clientY, el.getBoundingClientRect(), z, cssZoom);
-}
+// Display size (--ui-zoom) is chrome density only. It does not scale .app,
+// so clientX and getBoundingClientRect already live in the same CSS-pixel
+// space as #stage / #viewport. Call sites that still divide by _uiZ() keep
+// working because this is always 1.
+function _uiZ(){ return 1; }
 function _evtXY(e){
-  _calibratePointer(e);
-  const m=_ptrMul==null?1:_ptrMul;
-  return {x:e.clientX*m, y:e.clientY*m, rawX:e.clientX, rawY:e.clientY};
-}
-if(typeof document!=='undefined' && document.addEventListener){
-  document.addEventListener('pointerdown', function(e){ _ptrMul=null; _calibratePointer(e); }, true);
+  return {x:e.clientX, y:e.clientY, rawX:e.clientX, rawY:e.clientY};
 }
 function _stageSize(){
   if(stage && stage.offsetWidth>1) return {w:stage.offsetWidth, h:stage.offsetHeight};
-  const r=stage.getBoundingClientRect(); const z=_uiZ(); return {w:r.width/z, h:r.height/z};
+  const r=stage.getBoundingClientRect();
+  return {w:r.width, h:r.height};
 }
 function _stagePoint(cx,cy){
   const r=stage.getBoundingClientRect();
-  const z=_uiZ();
-  if(_gbrIsVisual()) return {x:(cx-r.left)/z, y:(cy-r.top)/z};
-  return {x:cx/z-r.left, y:cy/z-r.top};
+  return {x:cx-r.left, y:cy-r.top};
 }
 // Per-map camera (zoom + pan), saved in localStorage so each map reopens exactly
 // where the user left it. Kept out of the map object so it never bumps the map's
@@ -818,8 +698,7 @@ function scheduleView(){
 }
 function _stagePointCam(cx,cy){
   const r=_stageRectCam || (_stageRectCam=stage.getBoundingClientRect());
-  const z=_uiZ();
-  return {x:(cx-r.left)/z, y:(cy-r.top)/z};
+  return {x:cx-r.left, y:cy-r.top};
 }
 function mapViewRect(v, stageW, stageH, pad){
   const k=v.k||1;
@@ -2817,31 +2696,7 @@ function mdPaneViewportBox(slotRect, scale){
   return {left:slotRect.left*z, top:slotRect.top*z, width:slotRect.width*z, height:slotRect.height*z};
 }
 function placeMdPane(){
-  const pane=typeof document!=='undefined' && document.getElementById && document.getElementById('mdPane');
-  const slot=typeof document!=='undefined' && document.getElementById && document.getElementById('mdSlot');
-  if(!pane) return;
-  if(!mdMode || !slot){
-    pane.style.left='';
-    pane.style.top='';
-    pane.style.width='';
-    pane.style.height='';
-    return;
-  }
-  const z=(typeof _gbrIsVisual==='function' && _gbrIsVisual()) ? 1 : ((typeof _cssZoom==='function' && _cssZoom()) || 1);
-  const box=mdPaneViewportBox(slot.getBoundingClientRect(), z);
-  if(!box) return;
-  pane.style.left=box.left+'px';
-  pane.style.top=box.top+'px';
-  pane.style.width=box.width+'px';
-  pane.style.height=box.height+'px';
-}
-function mdTrackSlotUntilSettled(){
-  let n=0;
-  const tick=()=>{
-    placeMdPane();
-    if(++n<24) requestAnimationFrame(tick);
-  };
-  requestAnimationFrame(tick);
+  // Markdown lives in the app grid at 1 CSS px = 1 mouse px. Nothing to pin.
 }
 function mdLineColFromPos(text, pos, cache){
   const s=String(text==null?'':text);
@@ -2902,17 +2757,9 @@ function ensureMdPane(){
     +'<div class="md-toolbar"><button data-fmt="bold" title="Bold"><b>B</b></button><button data-fmt="italic" title="Italic"><i>I</i></button><button data-fmt="strike" title="Strikethrough"><s>S</s></button><button data-fmt="code" title="Inline code">&lt;/&gt;</button><span class="md-sep"></span><button data-fmt="h1" title="Heading 1">H1</button><button data-fmt="h2" title="Heading 2">H2</button><button data-fmt="h3" title="Heading 3">H3</button><span class="md-sep"></span><button data-fmt="quote" title="Blockquote">\u275D</button><button data-fmt="ul" title="Bullet list">\u2022</button><button data-fmt="ol" title="Numbered list">1.</button><button data-fmt="hr" title="Divider">\u2014</button><span class="md-sep"></span><button data-fmt="link" title="Link">\uD83D\uDD17</button><button data-fmt="image" title="Image">\uD83D\uDDBC</button><button data-fmt="codeblock" title="Code block">\u2317</button><button data-fmt="table" title="Table">\u25A6</button></div><div class="md-body"><div class="md-code"><pre class="md-hl" aria-hidden="true"><div class="md-hl-inner"></div></pre>'
     +'<textarea id="mdEditor" spellcheck="false" wrap="off" placeholder="# Central idea&#10;- a branch&#10;  - a leaf"></textarea><div class="md-prev" aria-hidden="true"></div></div></div>'
     +'<div class="md-resize" title="Drag to resize"></div>';
-  const slot=document.createElement('div');
-  slot.id='mdSlot';
-  slot.setAttribute('aria-hidden','true');
-  app.insertBefore(slot, stage);
-  // Park the real editor on <body>, outside .app { transform:scale }. WK maps
-  // mouse-to-caret through that transform — that is the remaining Markdown
-  // click-and-drag hitch. The slot keeps the grid column; placeMdPane copies
-  // the slot's on-screen box onto the untransformed pane.
-  document.body.appendChild(pane);
+  app.insertBefore(pane, stage);
   document.body.classList.add('md-ready');
-  window.addEventListener('resize', ()=>{ if(mdMode){ placeMdPane(); mdCalibrate(); mdSyncGutterRowHeights(); } });
+  window.addEventListener('resize', ()=>{ if(mdMode){ mdCalibrate(); mdSyncGutterRowHeights(); } });
   applyMdPaneI18n(pane);
   pane.querySelector('.md-close').addEventListener('click',()=>toggleMdMode(false));
   pane.querySelector('.md-prev-btn').addEventListener('click', mdTogglePreview);
@@ -2958,13 +2805,8 @@ function ensureMdPane(){
   ed.addEventListener('keyup', e=>{ mdUpdateActive(); if(e.key && e.key.indexOf('Arrow')===0) syncNodeFromCaret(); });
   const rz=pane.querySelector('.md-resize');
   rz.addEventListener('mousedown',e=>{ document.body.classList.add('md-resizing');
-    e.preventDefault(); const x0=e.clientX, w0=pane.getBoundingClientRect().width, z=_uiZ();
-    // w0 and (ev.clientX-x0) are both raw/visual px (getBoundingClientRect() and mouse
-    // coordinates agree with each other, but scale with the UI-level display size) — the
-    // CSS var they feed is read as logical px, so the whole sum needs the same /z
-    // correction _stageSize()/_stagePoint() already apply, or the pane resizes at the
-    // wrong rate relative to the mouse at any non-100% Display Size.
-    const mv=ev=>{ const w=Math.max(240, Math.min(window.innerWidth*0.72, (w0+(ev.clientX-x0))/z)); app.style.setProperty('--md-w', w+'px'); placeMdPane(); };
+    e.preventDefault(); const x0=e.clientX, w0=pane.getBoundingClientRect().width;
+    const mv=ev=>{ const w=Math.max(240, Math.min(window.innerWidth*0.72, w0+(ev.clientX-x0))); app.style.setProperty('--md-w', w+'px'); };
     const up=()=>{ window.removeEventListener('mousemove',mv); window.removeEventListener('mouseup',up); document.body.classList.remove('md-resizing'); try{ animateViewTo(computeFitView(), 220); }catch(_){} placeMdPane(); mdSyncGutterRowHeights(); };
     window.addEventListener('mousemove',mv); window.addEventListener('mouseup',up);
   });
@@ -3397,7 +3239,8 @@ function mdHighlight(text, view){
     // Real block-level rows (not just newline-joined spans) so the active-line highlight
     // is a plain CSS class on the actual row — always pixel-perfect, in or out of view,
     // with no separate position math to keep in sync while clicking/scrolling.
-    parts.push('<div class="hl-line" data-l="'+i+'">'+(html||'')+chip+'</div>');
+    parts.push((html||'')+chip);
+    if(i<lines.length-1) parts.push('\n');
   }
   return parts.join('');
 }
@@ -3423,19 +3266,7 @@ function mdSyncScroll(){
 function mdUpdateActive(){
   const ed=document.getElementById('mdEditor'); if(!ed) return;
   const {line, col}=mdLineColFromPos(ed.value, ed.selectionStart, _mdPosCache);
-  if(line!==_mdActiveLine){
-    _mdActiveLine=line;
-    const gut=document.querySelector('#mdPane .md-gutter');
-    if(gut){
-      gut.querySelectorAll('.gl.active').forEach(e=>e.classList.remove('active'));
-      const g=gut.querySelector('.gl[data-l="'+line+'"]'); if(g) g.classList.add('active');
-    }
-    const hl=document.querySelector('#mdPane .md-hl');
-    if(hl){
-      hl.querySelectorAll('.hl-line.active').forEach(e=>e.classList.remove('active'));
-      const hlRow=hl.querySelector('.hl-line[data-l="'+line+'"]'); if(hlRow) hlRow.classList.add('active');
-    }
-  }
+  _mdActiveLine=line;
   const pos=document.querySelector('#mdPane .md-pos'); if(pos) pos.textContent='Ln '+(line+1)+', Col '+(col+1);
   mdSyncScroll();
 }
@@ -3587,10 +3418,8 @@ function applyMdToMap(){
 function toggleMdMode(on){
   const want=(on===undefined)?!mdMode:!!on; if(want===mdMode) return;
   ensureMdPane();
-  const _slot=document.getElementById('mdSlot'); if(_slot) void _slot.offsetWidth;   // reflow so the first open animates from width 0
+  const _pane=document.getElementById('mdPane'); if(_pane) void _pane.offsetWidth;
   mdMode=want; document.body.classList.toggle('md-mode', mdMode);
-  placeMdPane();
-  mdTrackSlotUntilSettled();
   const btn=document.getElementById('mdToggle'); if(btn) btn.classList.toggle('on', mdMode);
   if(mdMode){
     syncTextFromMap();
@@ -3971,14 +3800,10 @@ function clientBoxFromGbr(r){
   if(!r) return null;
   const w=r.width!=null?r.width:(r.right-r.left);
   const h=r.height!=null?r.height:(r.bottom-r.top);
-  if(typeof _gbrIsVisual==='function' && !_gbrIsVisual()){
-    const z=(typeof _uiZ==='function' && _uiZ()) || 1;
-    return {x:r.left*z, y:r.top*z, w:w*z, h:h*z};
-  }
   return {x:r.left, y:r.top, w:w, h:h};
 }
-// Box is painted in clientX (visual). clientBoxFromGbr converts a GBR that
-// ignored CSS zoom into that same visual space.
+// Box is painted in clientX. After dropping whole-app zoom/transform, GBR is
+// already in that space.
 function nodesInMarqueeEls(nodeEls, clientRect){
   const hit=[];
   if(!nodeEls || !clientRect || !(clientRect.w>0) || !(clientRect.h>0)) return hit;
@@ -5675,11 +5500,10 @@ function openEditorTextEl(){
   if(!el) return null;
   return (el.querySelector && (el.querySelector('.node-text') || el.querySelector('.node-block'))) || el;
 }
-// WKWebView maps mouse-to-caret through #viewport's CSS transform with a lag.
-// Lift the editor onto #stage (same UI zoom, no canvas scale) so selection
-// tracks the pointer. Position is view.x/y + offset*k — the same matrix the
-// viewport uses to paint the node. Never getBoundingClientRect: in WK that
-// number is not the space position:absolute-on-stage (or position:fixed) uses.
+// WKWebView maps mouse-to-caret through a CSS transform with a lag.
+// Lift the editor onto #stage (outside #viewport) and size it by font/padding
+// * view.k — never transform:scale the editor itself. Position is
+// view.x/y + offset*k, the same matrix the viewport uses to paint the node.
 let _liveEditing=false;
 let _editFloat=null;
 let _editTyped=false;
@@ -5693,12 +5517,7 @@ function editFloatStagePos(viewObj, el){
   return {left:(v.x||0)+(el && el.offsetLeft || 0)*k, top:(v.y||0)+(el && el.offsetTop || 0)*k};
 }
 function editFloatStyleScale(){
-  const k=(typeof view!=='undefined' && view && view.k)||1;
-  // Body-fixed float is outside .app's UI-scale transform, so bake _uiZ in.
-  if(typeof document!=='undefined' && _editFloat && _editFloat.parentNode===document.body){
-    return k*((typeof _uiZ==='function')?_uiZ():1);
-  }
-  return k;
+  return (typeof view!=='undefined' && view && view.k)||1;
 }
 function editFloatViewportPos(el, scale){
   if(!el || typeof el.getBoundingClientRect!=='function') return {left:0, top:0};
@@ -5712,6 +5531,7 @@ function styleEditFloat(el){
   const cs=getComputedStyle(el);
   const float=_editFloat;
   const lh=cs.lineHeight;
+  float.style.transform='none';
   float.style.background=cs.backgroundColor;
   float.style.color=cs.color;
   float.style.fontFamily=cs.fontFamily;
@@ -5732,13 +5552,6 @@ function styleEditFloat(el){
 }
 function placeEditFloat(el){
   if(!_editFloat || !el) return;
-  if(typeof document!=='undefined' && _editFloat.parentNode===document.body){
-    const z=(typeof _gbrIsVisual==='function' && _gbrIsVisual()) ? 1 : ((typeof _cssZoom==='function' && _cssZoom()) || 1);
-    const pos=editFloatViewportPos(el, z);
-    _editFloat.style.left=pos.left+'px';
-    _editFloat.style.top=pos.top+'px';
-    return;
-  }
   const pos=editFloatStagePos(typeof view!=='undefined' ? view : {x:0,y:0,k:1}, el);
   _editFloat.style.left=pos.left+'px';
   _editFloat.style.top=pos.top+'px';
@@ -5765,7 +5578,6 @@ function discardEditOverlay(){
     });
   }
   if(typeof closeFormulaAutocomplete==='function') closeFormulaAutocomplete();
-  if(typeof document!=='undefined' && document.body && document.body.classList) document.body.classList.remove('rms-node-edit');
   _liveEditing=false;
 }
 // Close an in-progress node edit without writing the draft. Used when ⌘Z
@@ -5817,11 +5629,9 @@ function mountEditFloat(el, textEl){
   body.innerHTML=textEl.innerHTML;
   if(chrome.childNodes.length) float.appendChild(chrome);
   float.appendChild(body);
-  // Park on <body>, outside .app { transform:scale }. WK maps mouse-to-caret
-  // through a CSS transform with a lag — that is the click-and-drag selection
-  // hitch on a node. position:fixed + GBR matches the on-screen card.
-  (document.body||stage).appendChild(float);
-  if(document.body && document.body.classList) document.body.classList.add('rms-node-edit');
+  // Park on #stage, outside #viewport's camera transform. Font size carries
+  // view.k so the clone matches the card without a CSS transform on the editor.
+  (stage||document.body).appendChild(float);
   _editFloat=float;
   el.classList.add('edit-placeholder');
   styleEditFloat(el);
@@ -6726,7 +6536,6 @@ function applySubtreeDelta(start, dx, dy){
 // Used by render() to attach mousedown to the resize grip
 function startResize(id, ev){
   const n=map.nodes[id];
-  _rzCache=null;   // re-measure fresh — a stale factor here would throw off every dx/dy for the whole gesture
   const pt=_evtXY(ev);
   resizing={id, sx:pt.x, sy:pt.y, sw:n.width||n.w||120, sh:n.height||n.h||40};
 }
@@ -11096,7 +10905,6 @@ window.addEventListener('rms-lang', ()=>{ if(typeof refreshLocaleChrome==='funct
 // Before printing, fit the whole map into view so nothing is clipped on paper.
 let _rzReframeT=null;
 window.addEventListener('resize', ()=>{
-  _rzCache=null;   // browser zoom / OS display scaling may have changed — re-measure on next _uiZ() call
   clearTimeout(_rzReframeT);
   _rzReframeT=setTimeout(()=>{
     if(!map){ _markStage(); return; }
@@ -11243,8 +11051,6 @@ let _sideExpandedW = 268;   // cached logical width of the expanded sidebar
 function persistSidebar(collapsed){
   document.documentElement.classList.toggle('side-collapsed', collapsed);
   try{ localStorage.setItem('mindspark:sidebar', collapsed?'1':'0'); }catch(e){}
-  if(typeof mdTrackSlotUntilSettled==='function') mdTrackSlotUntilSettled();
-  else if(typeof placeMdPane==='function') placeMdPane();
 }
 function applySidebarCollapsed(collapsed){
   const side=$('#side'); if(!side) return;
@@ -11321,57 +11127,26 @@ function getUiScale(){
   if(v && v>=0.5 && v<=2) return v;                                   // explicit choice, pinned
   return autoScaleForViewport(window.innerWidth, window.innerHeight);  // auto: tracks the current viewport
 }
-function uiScaleBootCss(z, wk){
+function uiScaleBootCss(z, _wk){
   if(!(z && Math.abs(z-1)>0.001)) return '';
-  // WK: CSS zoom, never transform:scale. Transform makes native text selection
-  // trail the mouse — WebKit maps caret through the transform on a delay.
-  // GBR then ignores zoom (bug 77998); canvas hit-testing converts via _uiZ.
-  if(wk) return '.app{width:'+(100/z)+'%;height:'+(100/z)+'%;zoom:'+z+'}';
-  return '.app{transform-origin:0 0;transform:scale('+z+');width:'+(100/z)+'%;height:'+(100/z)+'%}';
+  return ':root{--ui-zoom:'+z+'}';
 }
 function applyUiScale(v){
   const z = (v && v>=0.5 && v<=2) ? v : 1;
-  const wk=typeof document!=='undefined' && document.documentElement
-    && document.documentElement.classList
-    && document.documentElement.classList.contains('rms-wk');
   document.documentElement.style.zoom = '';
   document.documentElement.style.setProperty('--ui-zoom', String(z));
   const app=document.querySelector('.app');
   if(app){
-    if(wk){
-      app.style.transformOrigin = '';
-      app.style.transform = '';
-      if(z!==1){
-        app.style.zoom = String(z);
-        app.style.width = (100/z)+'%';
-        app.style.height = (100/z)+'%';
-      } else {
-        app.style.zoom = '';
-        app.style.width = '';
-        app.style.height = '';
-      }
-    } else {
-      app.style.zoom = '';
-      if(z!==1){
-        app.style.transformOrigin = '0 0';
-        app.style.transform = 'scale('+z+')';
-        app.style.width = (100/z)+'%';
-        app.style.height = (100/z)+'%';
-      } else {
-        app.style.transformOrigin = '';
-        app.style.transform = '';
-        app.style.width = '';
-        app.style.height = '';
-      }
-    }
+    app.style.zoom = '';
+    app.style.transformOrigin = '';
+    app.style.transform = '';
+    app.style.width = '';
+    app.style.height = '';
   }
   const boot=document.getElementById('ui-zoom-boot');
-  if(boot) boot.textContent = uiScaleBootCss(z, wk);
-  _rzCache=null;   // the browser-zoom probe measurement is now stale — a changed scale invalidates it, same as a window resize would
-  _ptrMul=null;
-  // The stage's effective CSS-pixel size just changed with the zoom (more/fewer
-  // layout pixels now fit in the same physical viewport) — keep whatever map
-  // point was centred still centred, exactly like a window resize does.
+  if(boot) boot.textContent = uiScaleBootCss(z);
+  // Sidebar width follows --ui-zoom, so the stage got a new CSS-pixel size —
+  // keep the centred map point centred, same as a window resize.
   if(typeof stage!=='undefined' && stage) _recenterForStageChange();
   if(typeof placeMdPane==='function') placeMdPane();
   if(typeof updateMinimap==='function' && map) updateMinimap();
@@ -11890,17 +11665,11 @@ $('#themeBtn').onclick=(e)=>{
       else setUiScale(parseInt(opt.dataset.scale,10)/100);
       themePanel.querySelectorAll('.scale-opt').forEach(o=>o.classList.remove('active'));
       opt.classList.add('active');
-      // The zoom just changed, so the panel's already-computed fixed position (from
-      // before the change) no longer lines up with the theme button — reposition
-      // against its current (post-zoom) geometry rather than leaving it stranded.
-      // Also re-run it a couple of frames later, invalidating the zoom-probe cache
-      // again first: a getBoundingClientRect() read right after the style change is
-      // *supposed* to force a synchronous, up-to-date reflow, but some zoom values
-      // have shown a stale first read in practice, so this is a deliberate belt-and-
-      // suspenders re-measurement rather than trusting that alone.
+      // Display-size density just changed, so the panel's previous fixed
+      // position may no longer sit on the theme button. Reposition now and
+      // once more after layout settles.
       const reposition=()=>{
         if(!document.body.contains(themePanel)) return;
-        _rzCache=null;
         positionPopup(themePanel, $('#themeBtn'), {align:'right'});
       };
       reposition();

@@ -156,25 +156,27 @@ describe('click-and-drag selection hot path', () => {
     );
   });
 
-  test('WK node editor parks on body, outside the UI-scale transform', () => {
-    assert.match(src, /\(document\.body\|\|stage\)\.appendChild\(float\)/);
-    assert.match(css, /\.edit-float\{[^}]*position:\s*fixed/);
+  test('WK node editor sits on #stage, outside #viewport canvas transform', () => {
+    assert.match(src, /\(stage\|\|document\.body\)\.appendChild\(float\)/);
+    assert.match(css, /\.edit-float\{[^}]*position:\s*absolute/);
+    assert.match(css, /\.edit-float\{[^}]*transform:\s*none/);
+    assert.match(src, /float\.style\.transform='none'/);
     assert.match(css, /#mdPane\.md-selecting #mdEditor\{color:var\(--ink\)/);
     assert.match(css, /#mdPane\.md-selecting \.md-hl\{display:\s*none/);
     assert.doesNotMatch(src, /class="md-gutter"/);
   });
 
-  test('Markdown editor is body-fixed and follows the grid slot box', () => {
-    const { mdPaneViewportBox } = loadFns(['mdPaneViewportBox']);
-    assert.equal(mdPaneViewportBox({ left: 10, top: 0, width: 0, height: 800 }), null);
-    assert.deepEqual(
-      mdPaneViewportBox({ left: 120.5, top: 0, width: 480, height: 900 }),
-      { left: 120.5, top: 0, width: 480, height: 900 }
-    );
-    assert.match(src, /document\.body\.appendChild\(pane\)/);
-    assert.match(src, /slot\.id='mdSlot'/);
+  test('display-size tokens are not a pointer scale', () => {
+    assert.match(src, /function _uiZ\(\)\{\s*return 1;/);
+    assert.doesNotMatch(src, /function _calibratePointer/);
+    assert.doesNotMatch(src, /function _cssZoom/);
+  });
+
+  test('Markdown editor is a grid pane, not a body-fixed portal', () => {
+    assert.match(src, /app\.insertBefore\(pane, stage\)/);
+    assert.doesNotMatch(src, /slot\.id='mdSlot'/);
     assert.match(src, /if\(pane\.classList\.contains\('md-selecting'\)\) return;/);
-    assert.match(css, /#mdPane\{[^}]*position:\s*fixed/);
+    assert.match(css, /#mdPane\{[^}]*position:\s*relative/);
   });
 });
 
