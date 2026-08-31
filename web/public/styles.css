@@ -171,15 +171,23 @@
      the right of the topbar. Size the shell to the parent box instead. */
   .app{display:grid;grid-template-columns:268px 1fr;grid-template-rows:minmax(0,1fr);width:100%;height:100%;transform-origin:0 0}
   /* Markdown mode: split pane (editor | live map) */
-  body.md-ready .app{grid-template-columns:268px auto minmax(0,1fr)}   /* md pane takes the middle track once it exists */
+  body.md-ready .app{grid-template-columns:268px auto minmax(0,1fr)}   /* md slot keeps the middle track; the real pane is body-fixed */
   @media (min-width:721px){
     html.side-collapsed .app{grid-template-columns:0px 1fr}
     html.side-collapsed body.md-ready .app{grid-template-columns:0px auto minmax(0,1fr)}
   }
-  #mdPane{width:0;overflow:hidden;position:relative;display:flex;flex-direction:column;min-width:0;min-height:0;background:var(--paper);border-right:1px solid var(--line);transition:width .22s cubic-bezier(.4,0,.2,1)}
-  body.md-mode #mdPane{width:var(--md-w,40vw)}
-  body.md-resizing #mdPane{transition:none}                            /* no easing while dragging the divider */
-  @media (prefers-reduced-motion: reduce){ #mdPane{transition:none} }
+  #mdSlot{width:0;overflow:hidden;min-width:0;min-height:0;pointer-events:none;transition:width .22s cubic-bezier(.4,0,.2,1)}
+  body.md-mode #mdSlot{width:var(--md-w,40vw)}
+  body.md-resizing #mdSlot{transition:none}
+  @media (prefers-reduced-motion: reduce){ #mdSlot{transition:none} }
+  /* The editor itself sits on <body> (position:fixed) so WK text selection is
+     not mapped through .app's transform:scale. JS copies the slot's GBR. */
+  #mdPane{width:0;height:0;overflow:hidden;position:fixed;z-index:36;left:0;top:0;display:flex;flex-direction:column;min-width:0;min-height:0;background:var(--paper);border-right:1px solid var(--line);transition:none}
+  body.md-resizing #mdPane{transition:none}
+  html.rms-wk body.rms-node-edit .app{pointer-events:none}
+  html.rms-wk body.rms-node-edit .nodebar,
+  html.rms-wk body.rms-node-edit .picker,
+  html.rms-wk body.rms-node-edit .formula-ac{pointer-events:auto}
   #mdPane .md-head{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--line);font-size:12px;font-weight:600;color:var(--ink-soft)}
   #mdPane .md-pos{margin-left:auto;font-size:11px;font-weight:400;color:var(--ink-soft);font-variant-numeric:tabular-nums}
   /* markdown editor formatting toolbar */

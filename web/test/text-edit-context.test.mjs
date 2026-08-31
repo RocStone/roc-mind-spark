@@ -161,6 +161,19 @@ describe('click-and-drag selection hot path', () => {
     assert.match(css, /\.edit-float\{[^}]*position:\s*fixed/);
     assert.match(css, /#mdPane\.md-selecting #mdEditor\{color:var\(--ink\)/);
   });
+
+  test('Markdown editor is body-fixed and follows the grid slot box', () => {
+    const { mdPaneViewportBox } = loadFns(['mdPaneViewportBox']);
+    assert.equal(mdPaneViewportBox({ left: 10, top: 0, width: 0, height: 800 }), null);
+    assert.deepEqual(
+      mdPaneViewportBox({ left: 120.5, top: 0, width: 480, height: 900 }),
+      { left: 120.5, top: 0, width: 480, height: 900 }
+    );
+    assert.match(src, /document\.body\.appendChild\(pane\)/);
+    assert.match(src, /slot\.id='mdSlot'/);
+    assert.match(src, /if\(pane\.classList\.contains\('md-selecting'\)\) return;/);
+    assert.match(css, /#mdPane\{[^}]*position:\s*fixed/);
+  });
 });
 
 describe('text edit context menu', () => {

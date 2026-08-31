@@ -2781,6 +2781,36 @@ let _mdPosCache={pos:-1, line:0}, _mdSelRAF=0;
 function mdInvalidatePosCache(){
   _mdPosCache={pos:-1, line:0};
 }
+function mdPaneViewportBox(slotRect){
+  if(!slotRect || !(slotRect.width>1) || !(slotRect.height>1)) return null;
+  return {left:slotRect.left, top:slotRect.top, width:slotRect.width, height:slotRect.height};
+}
+function placeMdPane(){
+  const pane=typeof document!=='undefined' && document.getElementById && document.getElementById('mdPane');
+  const slot=typeof document!=='undefined' && document.getElementById && document.getElementById('mdSlot');
+  if(!pane) return;
+  if(!mdMode || !slot){
+    pane.style.left='';
+    pane.style.top='';
+    pane.style.width='';
+    pane.style.height='';
+    return;
+  }
+  const box=mdPaneViewportBox(slot.getBoundingClientRect());
+  if(!box) return;
+  pane.style.left=box.left+'px';
+  pane.style.top=box.top+'px';
+  pane.style.width=box.width+'px';
+  pane.style.height=box.height+'px';
+}
+function mdTrackSlotUntilSettled(){
+  let n=0;
+  const tick=()=>{
+    placeMdPane();
+    if(++n<24) requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+}
 function mdLineColFromPos(text, pos, cache){
   const s=String(text==null?'':text);
   let p=pos|0;
@@ -2840,9 +2870,17 @@ function ensureMdPane(){
     +'<div class="md-toolbar"><button data-fmt="bold" title="Bold"><b>B</b></button><button data-fmt="italic" title="Italic"><i>I</i></button><button data-fmt="strike" title="Strikethrough"><s>S</s></button><button data-fmt="code" title="Inline code">&lt;/&gt;</button><span class="md-sep"></span><button data-fmt="h1" title="Heading 1">H1</button><button data-fmt="h2" title="Heading 2">H2</button><button data-fmt="h3" title="Heading 3">H3</button><span class="md-sep"></span><button data-fmt="quote" title="Blockquote">\u275D</button><button data-fmt="ul" title="Bullet list">\u2022</button><button data-fmt="ol" title="Numbered list">1.</button><button data-fmt="hr" title="Divider">\u2014</button><span class="md-sep"></span><button data-fmt="link" title="Link">\uD83D\uDD17</button><button data-fmt="image" title="Image">\uD83D\uDDBC</button><button data-fmt="codeblock" title="Code block">\u2317</button><button data-fmt="table" title="Table">\u25A6</button></div><div class="md-body"><div class="md-gutter" aria-hidden="true"><div class="md-gutter-inner"></div></div><div class="md-code"><pre class="md-hl" aria-hidden="true"><div class="md-hl-inner"></div></pre>'
     +'<textarea id="mdEditor" spellcheck="false" wrap="off" placeholder="# Central idea&#10;- a branch&#10;  - a leaf"></textarea><div class="md-prev" aria-hidden="true"></div></div></div>'
     +'<div class="md-resize" title="Drag to resize"></div>';
-  app.insertBefore(pane, stage);
+  const slot=document.createElement('div');
+  slot.id='mdSlot';
+  slot.setAttribute('aria-hidden','true');
+  app.insertBefore(slot, stage);
+  // Park the real editor on <body>, outside .app { transform:scale }. WK maps
+  // mouse-to-caret through that transform — that is the remaining Markdown
+  // click-and-drag hitch. The slot keeps the grid column; placeMdPane copies
+  // the slot's on-screen box onto the untransformed pane.
+  document.body.appendChild(pane);
   document.body.classList.add('md-ready');
-  window.addEventListener('resize', ()=>{ if(mdMode){ mdCalibrate(); mdSyncGutterRowHeights(); } });
+  window.addEventListener('resize', ()=>{ if(mdMode){ placeMdPane(); mdCalibrate(); mdSyncGutterRowHeights(); } });
   applyMdPaneI18n(pane);
   pane.querySelector('.md-close').addEventListener('click',()=>toggleMdMode(false));
   pane.querySelector('.md-prev-btn').addEventListener('click', mdTogglePreview);
@@ -2874,6 +2912,7 @@ function ensureMdPane(){
   window.addEventListener('blur', endMdSelect);
   document.addEventListener('selectionchange', ()=>{
     if(!mdMode) return;
+    if(pane.classList.contains('md-selecting')) return;
     if(document.activeElement!==document.getElementById('mdEditor')) return;
     if(_mdSelRAF) return;
     _mdSelRAF=requestAnimationFrame(()=>{ _mdSelRAF=0; mdUpdateActive(); });
@@ -2894,8 +2933,8 @@ function ensureMdPane(){
     // CSS var they feed is read as logical px, so the whole sum needs the same /z
     // correction _stageSize()/_stagePoint() already apply, or the pane resizes at the
     // wrong rate relative to the mouse at any non-100% Display Size.
-    const mv=ev=>{ const w=Math.max(240, Math.min(window.innerWidth*0.72, (w0+(ev.clientX-x0))/z)); app.style.setProperty('--md-w', w+'px'); };
-    const up=()=>{ window.removeEventListener('mousemove',mv); window.removeEventListener('mouseup',up); document.body.classList.remove('md-resizing'); try{ animateViewTo(computeFitView(), 220); }catch(_){} mdSyncGutterRowHeights(); };
+    const mv=ev=>{ const w=Math.max(240, Math.min(window.innerWidth*0.72, (w0+(ev.clientX-x0))/z)); app.style.setProperty('--md-w', w+'px'); placeMdPane(); };
+    const up=()=>{ window.removeEventListener('mousemove',mv); window.removeEventListener('mouseup',up); document.body.classList.remove('md-resizing'); try{ animateViewTo(computeFitView(), 220); }catch(_){} placeMdPane(); mdSyncGutterRowHeights(); };
     window.addEventListener('mousemove',mv); window.addEventListener('mouseup',up);
   });
 }
@@ -3514,8 +3553,10 @@ function applyMdToMap(){
 function toggleMdMode(on){
   const want=(on===undefined)?!mdMode:!!on; if(want===mdMode) return;
   ensureMdPane();
-  const _pane=document.getElementById('mdPane'); if(_pane) void _pane.offsetWidth;   // reflow so the first open animates from width 0
+  const _slot=document.getElementById('mdSlot'); if(_slot) void _slot.offsetWidth;   // reflow so the first open animates from width 0
   mdMode=want; document.body.classList.toggle('md-mode', mdMode);
+  placeMdPane();
+  mdTrackSlotUntilSettled();
   const btn=document.getElementById('mdToggle'); if(btn) btn.classList.toggle('on', mdMode);
   if(mdMode){
     syncTextFromMap();
@@ -3536,6 +3577,7 @@ function toggleMdMode(on){
   else if(!(typeof READONLY!=='undefined' && READONLY)) pushHistory();   // one undo entry for the md session
   setTimeout(()=>{
     try{ animateViewTo(computeFitView(), 260); }catch(e){}
+    try{ placeMdPane(); }catch(e){}
     try{ if(mdMode) mdCalibrate(); }catch(e){}
     // The pane's own width transition (220ms, pure CSS) is still running when
     // syncTextFromMap() -> mdRefreshDecorations() measured gutter row heights just
@@ -5684,6 +5726,7 @@ function discardEditOverlay(){
     });
   }
   if(typeof closeFormulaAutocomplete==='function') closeFormulaAutocomplete();
+  if(typeof document!=='undefined' && document.body && document.body.classList) document.body.classList.remove('rms-node-edit');
   _liveEditing=false;
 }
 // Close an in-progress node edit without writing the draft. Used when ⌘Z
@@ -5739,6 +5782,7 @@ function mountEditFloat(el, textEl){
   // through a CSS transform with a lag — that is the click-and-drag selection
   // hitch on a node. position:fixed + GBR matches the on-screen card.
   (document.body||stage).appendChild(float);
+  if(document.body && document.body.classList) document.body.classList.add('rms-node-edit');
   _editFloat=float;
   el.classList.add('edit-placeholder');
   styleEditFloat(el);
@@ -11159,6 +11203,8 @@ let _sideExpandedW = 268;   // cached logical width of the expanded sidebar
 function persistSidebar(collapsed){
   document.documentElement.classList.toggle('side-collapsed', collapsed);
   try{ localStorage.setItem('mindspark:sidebar', collapsed?'1':'0'); }catch(e){}
+  if(typeof mdTrackSlotUntilSettled==='function') mdTrackSlotUntilSettled();
+  else if(typeof placeMdPane==='function') placeMdPane();
 }
 function applySidebarCollapsed(collapsed){
   const side=$('#side'); if(!side) return;
@@ -11267,6 +11313,7 @@ function applyUiScale(v){
   // layout pixels now fit in the same physical viewport) — keep whatever map
   // point was centred still centred, exactly like a window resize does.
   if(typeof stage!=='undefined' && stage) _recenterForStageChange();
+  if(typeof placeMdPane==='function') placeMdPane();
   if(typeof updateMinimap==='function' && map) updateMinimap();
 }
 function setUiScale(v){
