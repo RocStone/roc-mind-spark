@@ -208,6 +208,10 @@
   #mdPane .md-fold-chip{display:inline-block;margin-left:6px;padding:0 7px;border-radius:8px;background:color-mix(in srgb, var(--ink-soft) 16%, transparent);color:var(--ink-soft);font-size:11px;font-style:normal}
   #mdPane .md-hl{z-index:1}
   #mdEditor{z-index:2}
+  #mdSelLayer{position:absolute;inset:0;overflow:hidden;pointer-events:none;z-index:3}
+  #mdSelLayer i{position:absolute;background:rgba(224,97,58,.32)}
+  #mdEditor.md-drag-sel{caret-color:transparent}
+  #mdEditor.md-drag-sel::selection{background:transparent}
   /* rendered preview */
   #mdPane .md-prev-btn{margin-left:2px;border:1px solid var(--line);background:transparent;color:var(--ink-soft);cursor:pointer;font-size:11px;font-weight:600;padding:2px 9px;border-radius:6px}
   #mdPane .md-prev-btn.on{background:var(--accent);color:#fff;border-color:var(--accent)}
@@ -227,7 +231,7 @@
   #mdPane.md-preview .md-pdf-btn{display:inline-flex;margin-left:auto}
   #mdPane .md-prev{position:absolute;inset:0;display:none;overflow:auto;padding:16px 22px;background:var(--paper);color:var(--ink);z-index:4;line-height:1.6;text-align:left}
   #mdPane.md-preview .md-prev{display:block}
-  #mdPane.md-preview .md-hl,#mdPane.md-preview #mdEditor,#mdPane.md-preview .md-gutter{display:none}
+  #mdPane.md-preview .md-hl,#mdPane.md-preview #mdEditor,#mdPane.md-preview .md-gutter,#mdPane.md-preview #mdSelLayer{display:none}
   #mdPane .md-prev h1,#mdPane .md-prev h2,#mdPane .md-prev h3{margin:.6em 0 .3em;line-height:1.25}
   #mdPane .md-prev h1{font-size:1.6em;border-bottom:1px solid var(--line);padding-bottom:.2em}
   #mdPane .md-prev h2{font-size:1.3em;border-bottom:1px solid var(--line);padding-bottom:.2em}

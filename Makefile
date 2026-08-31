@@ -24,6 +24,7 @@ test:
 
 md-select-eval:
 	swift scripts/md-select-eval.swift "$(CURDIR)/scripts/md-select-eval.html"
+	swift scripts/md-select-eval.swift --overlay "$(CURDIR)/scripts/md-select-eval.html"
 
 clean:
 	rm -rf macos/.build dist

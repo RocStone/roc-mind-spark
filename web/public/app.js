@@ -2716,6 +2716,7 @@ function mdPlain(el){
 function mdGetSel(el){
   el=el||document.getElementById('mdEditor');
   if(!el) return {s:0,e:0};
+  if(_mdDrag) return {s:Math.min(_mdDrag.a,_mdDrag.b), e:Math.max(_mdDrag.a,_mdDrag.b)};
   if(el.tagName==='TEXTAREA' || el.tagName==='INPUT') return {s:el.selectionStart|0, e:el.selectionEnd|0};
   const sel=typeof window!=='undefined' && window.getSelection && window.getSelection();
   if(!sel || !sel.rangeCount) return {s:0,e:0};
@@ -2816,6 +2817,111 @@ function mdBindEditor(el){
   el.setSelectionRange=function(a,b){ mdSetSel(el, a, b==null?a:b); };
   return el;
 }
+function mdColAtWidth(line, x, widthOf){
+  if(!(x>0)) return 0;
+  const s=String(line==null?'':line);
+  let lo=0, hi=s.length;
+  while(lo<hi){
+    const mid=(lo+hi+1)>>1;
+    if(widthOf(s.slice(0,mid))<=x) lo=mid; else hi=mid-1;
+  }
+  return lo;
+}
+function mdIndexAtLineCol(lines, line, col){
+  const rows=lines||[];
+  if(!rows.length) return 0;
+  if(line<0) return 0;
+  if(line>=rows.length){
+    let n=0;
+    for(let i=0;i<rows.length;i++) n+=rows[i].length+1;
+    return Math.max(0, n-1);
+  }
+  let i=0;
+  for(let k=0;k<line;k++) i+=rows[k].length+1;
+  const row=rows[line];
+  return i+Math.max(0, Math.min(col, row.length));
+}
+let _mdMeas=null, _mdDrag=null;
+function mdTextWidth(font, str){
+  if(!_mdMeas){
+    const c=document.createElement('canvas');
+    _mdMeas=c.getContext('2d');
+  }
+  if(_mdMeas._font!==font){ _mdMeas.font=font; _mdMeas._font=font; }
+  return _mdMeas.measureText(str).width;
+}
+function mdOffsetFromPoint(el, cx, cy){
+  if(typeof mdWrap!=='undefined' && mdWrap && document.caretRangeFromPoint){
+    const rg=document.caretRangeFromPoint(cx, cy);
+    if(rg && (el===rg.startContainer || el.contains(rg.startContainer))){
+      let s=-1, acc=0;
+      const walk=n=>{
+        if(s>=0) return;
+        if(n.nodeType===3){
+          if(n===rg.startContainer){ s=acc+rg.startOffset; return; }
+          acc+=n.nodeValue.length;
+          return;
+        }
+        if(n.nodeType!==1) return;
+        if(n.getAttribute && n.getAttribute('contenteditable')==='false') return;
+        for(let c=n.firstChild;c;c=c.nextSibling) walk(c);
+      };
+      walk(el);
+      if(s>=0) return s;
+    }
+  }
+  const text=mdPlain(el);
+  const lines=text.split('\n');
+  const r=el.getBoundingClientRect();
+  const cs=getComputedStyle(el);
+  const padL=parseFloat(cs.paddingLeft)||0;
+  const padT=parseFloat(cs.paddingTop)||0;
+  const lh=parseFloat(cs.lineHeight)||20;
+  const x=cx-r.left+el.scrollLeft-padL;
+  const y=cy-r.top+el.scrollTop-padT;
+  let line=Math.floor(y/lh);
+  if(line<0) line=0;
+  if(line>=lines.length) return text.length;
+  const font=cs.font;
+  const col=mdColAtWidth(lines[line], x, s=>mdTextWidth(font, s));
+  return mdIndexAtLineCol(lines, line, col);
+}
+function mdSelLayer(){
+  return document.getElementById('mdSelLayer');
+}
+function mdPaintDragSel(el, a, b){
+  const layer=mdSelLayer(); if(!layer || !el) return;
+  const s=Math.min(a,b), e=Math.max(a,b);
+  if(e<=s){ layer.innerHTML=''; return; }
+  const text=mdPlain(el);
+  const lines=text.split('\n');
+  const cs=getComputedStyle(el);
+  const padL=parseFloat(cs.paddingLeft)||0;
+  const padT=parseFloat(cs.paddingTop)||0;
+  const lh=parseFloat(cs.lineHeight)||20;
+  const font=cs.font;
+  const start=mdLineColFromPos(text, s, null);
+  const end=mdLineColFromPos(text, e, null);
+  const parts=[];
+  for(let line=start.line; line<=end.line; line++){
+    const row=lines[line]||'';
+    const c0=line===start.line?start.col:0;
+    const c1=line===end.line?end.col:row.length;
+    const x0=padL+mdTextWidth(font, row.slice(0,c0))-el.scrollLeft;
+    const x1=padL+mdTextWidth(font, row.slice(0,c1))-el.scrollLeft;
+    const top=padT+line*lh-el.scrollTop;
+    const w=Math.max(3, x1-x0);
+    if(top+lh<0 || top>el.clientHeight) continue;
+    parts.push('<i style="left:'+x0+'px;top:'+top+'px;width:'+w+'px;height:'+lh+'px"></i>');
+  }
+  layer.innerHTML=parts.join('');
+}
+function mdClearDragSel(){
+  _mdDrag=null;
+  const layer=mdSelLayer(); if(layer) layer.innerHTML='';
+  const ed=document.getElementById('mdEditor');
+  if(ed && ed.classList) ed.classList.remove('md-drag-sel');
+}
 function mdLineColFromPos(text, pos, cache){
   const s=String(text==null?'':text);
   let p=pos|0;
@@ -2872,7 +2978,7 @@ function ensureMdPane(){
   const app=document.querySelector('.app'), stage=document.querySelector('.stage'); if(!app||!stage) return;
   const pane=document.createElement('div'); pane.id='mdPane';
   pane.innerHTML='<div class="md-head"><span class="md-ttl">Markdown</span><span class="md-pos"></span><button class="md-pdf-btn" title="Download the rendered preview as a PDF">Download PDF</button><button class="md-wrap-btn" title="Toggle word wrap">Wrap</button><button class="md-prev-btn" title="Toggle rendered preview">Preview</button><button class="md-close" title="Exit Markdown mode (Esc)">\u2715</button></div>'
-    +'<div class="md-toolbar"><button data-fmt="bold" title="Bold"><b>B</b></button><button data-fmt="italic" title="Italic"><i>I</i></button><button data-fmt="strike" title="Strikethrough"><s>S</s></button><button data-fmt="code" title="Inline code">&lt;/&gt;</button><span class="md-sep"></span><button data-fmt="h1" title="Heading 1">H1</button><button data-fmt="h2" title="Heading 2">H2</button><button data-fmt="h3" title="Heading 3">H3</button><span class="md-sep"></span><button data-fmt="quote" title="Blockquote">\u275D</button><button data-fmt="ul" title="Bullet list">\u2022</button><button data-fmt="ol" title="Numbered list">1.</button><button data-fmt="hr" title="Divider">\u2014</button><span class="md-sep"></span><button data-fmt="link" title="Link">\uD83D\uDD17</button><button data-fmt="image" title="Image">\uD83D\uDDBC</button><button data-fmt="codeblock" title="Code block">\u2317</button><button data-fmt="table" title="Table">\u25A6</button></div><div class="md-body"><div class="md-code"><pre id="mdEditor" class="md-editor" contenteditable="true" spellcheck="false" role="textbox" aria-multiline="true" data-placeholder="# Central idea&#10;- a branch&#10;  - a leaf"></pre><div class="md-prev" aria-hidden="true"></div></div></div>'
+    +'<div class="md-toolbar"><button data-fmt="bold" title="Bold"><b>B</b></button><button data-fmt="italic" title="Italic"><i>I</i></button><button data-fmt="strike" title="Strikethrough"><s>S</s></button><button data-fmt="code" title="Inline code">&lt;/&gt;</button><span class="md-sep"></span><button data-fmt="h1" title="Heading 1">H1</button><button data-fmt="h2" title="Heading 2">H2</button><button data-fmt="h3" title="Heading 3">H3</button><span class="md-sep"></span><button data-fmt="quote" title="Blockquote">\u275D</button><button data-fmt="ul" title="Bullet list">\u2022</button><button data-fmt="ol" title="Numbered list">1.</button><button data-fmt="hr" title="Divider">\u2014</button><span class="md-sep"></span><button data-fmt="link" title="Link">\uD83D\uDD17</button><button data-fmt="image" title="Image">\uD83D\uDDBC</button><button data-fmt="codeblock" title="Code block">\u2317</button><button data-fmt="table" title="Table">\u25A6</button></div><div class="md-body"><div class="md-code"><pre id="mdEditor" class="md-editor" contenteditable="true" spellcheck="false" role="textbox" aria-multiline="true" data-placeholder="# Central idea&#10;- a branch&#10;  - a leaf"></pre><div id="mdSelLayer" class="md-sel-layer" aria-hidden="true"></div><div class="md-prev" aria-hidden="true"></div></div></div>'
     +'<div class="md-resize" title="Drag to resize"></div>';
   app.insertBefore(pane, stage);
   document.body.classList.add('md-ready');
@@ -2909,16 +3015,40 @@ function ensureMdPane(){
     }
   });
   const syncNodeFromCaret=()=>{ if(_mdSelSync) return; const vline=mdLineColFromPos(ed.value, ed.selectionStart, _mdPosCache).line; const line=_mdView?_mdView.visLineToFull[vline]:vline; let id=null; for(let l=line;l>=0;l--){ if(_mdLines[l]){ id=_mdLines[l]; break; } } if(id && map.nodes[id]){ _mdSelSync=true; select(id); _mdSelSync=false; } };
-  // Native selection on the highlighted text. Do not rebuild HTML while dragging.
   ed.addEventListener('click', ()=>{ mdUpdateActive(); syncNodeFromCaret(); });
-  ed.addEventListener('mousedown', e=>{ if(e.button===0) _mdPointerSel=true; });
-  const endMdSelect=()=>{
-    if(!_mdPointerSel) return;
-    _mdPointerSel=false;
-    mdUpdateActive();
-  };
-  window.addEventListener('mouseup', endMdSelect);
-  window.addEventListener('blur', endMdSelect);
+  ed.addEventListener('mousedown', e=>{
+    if(e.button!==0 || e.detail>1) return;
+    e.preventDefault();
+    try{ ed.focus(); }catch(_){}
+    _mdPointerSel=true;
+    const start=e.shiftKey ? mdGetSel(ed).s : mdOffsetFromPoint(ed, e.clientX, e.clientY);
+    _mdDrag={a:start, b:start};
+    ed.classList.add('md-drag-sel');
+    mdPaintDragSel(ed, start, start);
+    const move=ev=>{
+      if(!_mdDrag) return;
+      const box=ed.getBoundingClientRect();
+      if(ev.clientY<box.top+16) ed.scrollTop-=24;
+      else if(ev.clientY>box.bottom-16) ed.scrollTop+=24;
+      if(ev.clientX<box.left+16) ed.scrollLeft-=24;
+      else if(ev.clientX>box.right-16) ed.scrollLeft+=24;
+      _mdDrag.b=mdOffsetFromPoint(ed, ev.clientX, ev.clientY);
+      mdPaintDragSel(ed, _mdDrag.a, _mdDrag.b);
+    };
+    const up=()=>{
+      window.removeEventListener('mousemove', move, true);
+      window.removeEventListener('mouseup', up, true);
+      if(!_mdDrag) return;
+      const a=_mdDrag.a, b=_mdDrag.b;
+      mdClearDragSel();
+      _mdPointerSel=false;
+      mdSetSel(ed, a, b);
+      mdUpdateActive();
+    };
+    window.addEventListener('mousemove', move, true);
+    window.addEventListener('mouseup', up, true);
+  });
+  window.addEventListener('blur', ()=>{ if(_mdDrag) mdClearDragSel(); _mdPointerSel=false; });
   document.addEventListener('selectionchange', ()=>{
     if(!mdMode || _mdPointerSel || _mdComposing) return;
     if(document.activeElement!==document.getElementById('mdEditor')) return;

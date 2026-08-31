@@ -2,28 +2,30 @@
 <meta charset="utf-8">
 <title>md-select-eval</title>
 <style>
-  html,body{margin:0;background:#f4efe6;font:13px/20px ui-monospace,Menlo,monospace;color:#23201b}
-  #host{position:relative;width:560px;height:360px;margin:16px;background:#fff;overflow:hidden;border:1px solid #ddd}
-  .hl,.ta,canvas#cv{position:absolute;inset:0;margin:0;padding:12px 14px;border:0;font:13px/20px ui-monospace,Menlo,monospace;white-space:pre;box-sizing:border-box}
-  .hl{overflow:hidden;pointer-events:none;color:#23201b;z-index:1}
-  .ta-ghost{background:transparent;color:transparent;-webkit-text-fill-color:transparent;caret-color:#23201b;z-index:2;resize:none;outline:none}
-  .ta-solid{background:#fff;color:#23201b;caret-color:#23201b;z-index:2;resize:none;outline:none}
-  .ta-ghost::selection,.ta-solid::selection{background:rgba(224,97,58,.32);color:transparent;-webkit-text-fill-color:transparent}
-  .ce{position:absolute;inset:0;margin:0;padding:12px 14px;overflow:auto;white-space:pre;font:13px/20px ui-monospace,Menlo,monospace;outline:none;z-index:2}
+  html,body{margin:0;height:100%;background:#f4efe6;font:13px/20px ui-monospace,Menlo,monospace;color:#23201b}
+  #app{display:grid;grid-template-columns:280px 1fr;height:100%}
+  #stagefake{position:relative;overflow:hidden;background:#f7f3ea}
+  .n{position:absolute;padding:8px 12px;background:#fff;border:1px solid #ddd;border-radius:8px;font:13px/1.3 sans-serif;white-space:nowrap}
+  #host{position:relative;min-width:0;height:100%;background:#fff;overflow:hidden;border-right:1px solid #e5e0d6}
+  .ce{position:absolute;inset:0;margin:0;padding:12px 14px;overflow:auto;white-space:pre;font:13px/20px ui-monospace,Menlo,monospace;outline:none}
   .ce::selection{background:rgba(224,97,58,.32)}
-  canvas#cv{z-index:1;pointer-events:none}
+  .ta{position:absolute;inset:0;margin:0;padding:12px 14px;border:0;resize:none;outline:none;font:13px/20px ui-monospace,Menlo,monospace;white-space:pre;background:#fff;color:#23201b}
+  .hl{position:absolute;inset:0;margin:0;padding:12px 14px;overflow:hidden;pointer-events:none;white-space:pre;font:13px/20px ui-monospace,Menlo,monospace}
+  .ta-ghost{background:transparent;color:transparent;caret-color:#23201b;z-index:2}
   .hl-head{color:#e0613a;font-weight:700}
   .hl-bullet{color:#e0613a;font-weight:700}
   .hl-strong{font-weight:700}
-  .hl-em{font-style:italic}
-  .hl-code-inline{color:#b8451f}
 </style>
-<div id="host"></div>
+<div id="app">
+  <div id="host"></div>
+  <div id="stagefake"></div>
+</div>
 <script>
-const LINES = 280;
+const LINES = 400;
+const NODES = 180;
 const TEXT = Array.from({length:LINES}, (_,i)=>{
   if(i%17===0) return '# heading '+i;
-  if(i%5===0) return '- **bold** topic '+i+' / 划选这段文字 `code` '+i;
+  if(i%5===0) return '- **bold** topic '+i+' / 划选这段文字 '+i;
   return '- topic '+i+' / 这是一段用来划选的文字 '+i;
 }).join('\n');
 
@@ -34,106 +36,116 @@ function hlHtml(text){
     if(/^# /.test(raw)) return '<span class="hl-head">'+s+'</span>';
     s=s.replace(/^(\- )/, '<span class="hl-bullet">$1</span>');
     s=s.replace(/\*\*[^*]+\*\*/g, m=>'<span class="hl-strong">'+m+'</span>');
-    s=s.replace(/`[^`]+`/g, m=>'<span class="hl-code-inline">'+m+'</span>');
     return s;
   }).join('\n');
 }
 
+function fillStage(){
+  const st=document.getElementById('stagefake');
+  st.innerHTML='';
+  for(let i=0;i<NODES;i++){
+    const d=document.createElement('div');
+    d.className='n';
+    d.textContent='node '+i+' / 主题文字';
+    d.style.left=(20+(i%8)*90)+'px';
+    d.style.top=(20+Math.floor(i/8)*38)+'px';
+    st.appendChild(d);
+  }
+}
+
 const CASES = {
-  'bare-textarea': () => '<textarea class="ta ta-solid" id="ed"></textarea>',
-  'ghost-span-overlay': () => '<pre class="hl" id="ov">'+hlHtml(TEXT)+'</pre><textarea class="ta ta-ghost" id="ed"></textarea>',
-  'ghost-plain-overlay': () => '<pre class="hl" id="ov"></pre><textarea class="ta ta-ghost" id="ed"></textarea>',
-  'ce-plain': () => '<div class="ce" id="ed" contenteditable="true" spellcheck="false"></div>',
   'ce-spans': () => '<div class="ce" id="ed" contenteditable="true" spellcheck="false"></div>',
-  'ghost-canvas': () => '<canvas id="cv"></canvas><textarea class="ta ta-ghost" id="ed"></textarea>',
+  'ce-plain': () => '<div class="ce" id="ed" contenteditable="true" spellcheck="false"></div>',
+  'bare-textarea': () => '<textarea class="ta" id="ed"></textarea>',
+  'ghost-span-overlay': () => '<pre class="hl" id="ov"></pre><textarea class="ta ta-ghost" id="ed"></textarea>',
 };
 
-let moves=[], sels=[], lastMove=0;
+let lastMouse={t:0,x:0,y:0}, frames=[], moves=0, selChanges=0;
+let rafOn=false, dragging=false;
+
 function edEl(){ return document.getElementById('ed'); }
 function isTa(el){ return el && el.tagName==='TEXTAREA'; }
 
-function selRange(el){
-  if(!el) return {a:-1,b:-1};
-  if(isTa(el)) return {a:el.selectionStart|0, b:el.selectionEnd|0};
+function selEndRect(el){
+  if(!el) return null;
+  if(isTa(el)){
+    // Textarea has no Range API. Mirror is too heavy; skip pixel metric.
+    return null;
+  }
   const s=getSelection();
-  if(!s || !s.rangeCount) return {a:-1,b:-1};
-  const r=s.getRangeAt(0);
-  const pre=r.cloneRange();
-  pre.selectNodeContents(el);
-  pre.setEnd(r.startContainer, r.startOffset);
-  const a=pre.toString().length;
-  return {a, b:a+s.toString().length};
+  if(!s || !s.rangeCount) return null;
+  const rects=s.getRangeAt(0).getClientRects();
+  if(!rects.length) return null;
+  const r=rects[rects.length-1];
+  return {x:r.right, y:r.bottom, w:r.width, h:r.height};
 }
 
 function onMove(e){
-  lastMove=performance.now();
-  moves.push({t:lastMove, x:e.clientX, y:e.clientY});
+  lastMouse={t:performance.now(), x:e.clientX, y:e.clientY};
+  moves++;
+  if(e.buttons===1) dragging=true;
 }
-function onSel(){
-  const t=performance.now();
-  const r=selRange(edEl());
-  sels.push({t, a:r.a, b:r.b, sinceMove:+(t-lastMove).toFixed(2)});
-}
-
-function paintCanvas(){
-  const cv=document.getElementById('cv'); if(!cv) return;
-  const host=document.getElementById('host');
-  const dpr=window.devicePixelRatio||1;
-  cv.width=Math.floor(host.clientWidth*dpr);
-  cv.height=Math.floor(host.clientHeight*dpr);
-  cv.style.width=host.clientWidth+'px';
-  cv.style.height=host.clientHeight+'px';
-  const ctx=cv.getContext('2d');
-  ctx.setTransform(dpr,0,0,dpr,0,0);
-  ctx.font='13px ui-monospace, Menlo, monospace';
-  ctx.textBaseline='top';
-  const pad=12, lh=20;
-  TEXT.split('\n').forEach((line,i)=>{
-    ctx.fillStyle = /^# /.test(line) ? '#e0613a' : '#23201b';
-    ctx.fillText(line, 14, pad+i*lh);
+function onSel(){ selChanges++; }
+function tick(){
+  if(!rafOn) return;
+  requestAnimationFrame(tick);
+  if(!dragging) return;
+  const r=selEndRect(edEl());
+  const dt=performance.now()-lastMouse.t;
+  frames.push({
+    t:performance.now(),
+    mouseAgeMs:+dt.toFixed(2),
+    mouseX:lastMouse.x,
+    mouseY:lastMouse.y,
+    selX:r?+r.x.toFixed(1):null,
+    dx:r!=null?+(r.x-lastMouse.x).toFixed(1):null,
+    dy:r!=null?+(r.y-lastMouse.y).toFixed(1):null
   });
 }
 
 function setup(name){
-  moves=[]; sels=[]; lastMove=0;
+  lastMouse={t:0,x:0,y:0}; frames=[]; moves=0; selChanges=0; dragging=false;
+  fillStage();
   const host=document.getElementById('host');
-  host.innerHTML = (CASES[name]||CASES['bare-textarea'])();
+  host.innerHTML=(CASES[name]||CASES['ce-spans'])();
   const el=edEl();
   if(isTa(el)) el.value=TEXT;
   else if(name==='ce-spans') el.innerHTML=hlHtml(TEXT);
-  else if(el) el.textContent=TEXT;
+  else el.textContent=TEXT;
   const ov=document.getElementById('ov');
-  if(ov && name==='ghost-plain-overlay') ov.textContent=TEXT;
-  if(name==='ghost-canvas') paintCanvas();
-  el.addEventListener('mousemove', onMove);
+  if(ov) ov.innerHTML=hlHtml(TEXT);
+  el.addEventListener('mousemove', onMove, {passive:true});
   document.addEventListener('selectionchange', onSel);
+  el.addEventListener('mousedown', ()=>{ dragging=true; });
+  window.addEventListener('mouseup', ()=>{ dragging=false; });
   el.focus();
+  rafOn=true;
+  requestAnimationFrame(tick);
   const r=el.getBoundingClientRect();
-  return {left:r.left, top:r.top, width:r.width, height:r.height, name};
+  return {left:r.left, top:r.top, width:r.width, height:r.height, name, lines:LINES, nodes:NODES};
+}
+
+function pct(arr, p){
+  if(!arr.length) return null;
+  const a=arr.slice().sort((x,y)=>x-y);
+  return a[Math.min(a.length-1, Math.floor(p/100*(a.length-1)))];
 }
 
 function summarize(){
-  const dts=sels.map(s=>s.sinceMove).filter(x=>x>=0 && x<500);
-  dts.sort((a,b)=>a-b);
-  const pct=p=> dts.length ? dts[Math.min(dts.length-1, Math.floor(p/100*(dts.length-1)))] : null;
-  const changed=sels.filter((s,i)=> i===0 || s.a!==sels[i-1].a || s.b!==sels[i-1].b);
+  rafOn=false;
+  const dxs=frames.map(f=>f.dx).filter(v=>v!=null).map(v=>Math.abs(v));
+  const ages=frames.map(f=>f.mouseAgeMs);
   return {
-    moves: moves.length,
-    sels: sels.length,
-    selChanges: changed.length,
-    medianLagMs: pct(50),
-    p90LagMs: pct(90),
-    maxLagMs: dts.length ? dts[dts.length-1] : null,
-    firstSel: sels[0]||null,
-    lastSel: sels[sels.length-1]||null,
+    moves, selChanges, frames: frames.length,
+    medianAbsDx: pct(dxs,50),
+    p90AbsDx: pct(dxs,90),
+    maxAbsDx: dxs.length?Math.max.apply(null,dxs):null,
+    medianMouseAgeMs: pct(ages,50),
+    p90MouseAgeMs: pct(ages,90),
+    last: frames[frames.length-1]||null
   };
 }
 
-window.__EVAL = {
-  names: Object.keys(CASES),
-  setup,
-  summarize,
-  TEXT_LEN: TEXT.length,
-};
+window.__EVAL = { names:Object.keys(CASES), setup, summarize, TEXT_LEN:TEXT.length };
 window.__EVAL_READY = true;
 </script>

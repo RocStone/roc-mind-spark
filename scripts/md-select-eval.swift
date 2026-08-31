@@ -6,25 +6,40 @@ import WebKit
 /// WKWebView must be created AFTER applicationDidFinishLaunching or WebContent XPC deadlocks.
 final class Eval: NSObject, WKNavigationDelegate {
     let url: URL
+    let overlay: Bool
     var window: NSWindow!
     var webView: WKWebView!
     var loaded = false
     var loadError: String?
 
-    init(url: URL) {
+    init(url: URL, overlay: Bool) {
         self.url = url
+        self.overlay = overlay
         super.init()
     }
 
     func attach() {
-        let rect = NSRect(x: 80, y: 80, width: 640, height: 440)
-        window = NSWindow(
-            contentRect: rect,
-            styleMask: [.titled, .closable],
-            backing: .buffered,
-            defer: false
-        )
-        window.title = "md-select-eval"
+        let rect = NSRect(x: 80, y: 80, width: 900, height: 560)
+        if overlay {
+            let panel = NSPanel(
+                contentRect: rect,
+                styleMask: [.nonactivatingPanel, .titled, .closable],
+                backing: .buffered,
+                defer: false
+            )
+            panel.isFloatingPanel = true
+            panel.becomesKeyOnlyIfNeeded = false
+            panel.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.modalPanelWindow)) - 1)
+            window = panel
+        } else {
+            window = NSWindow(
+                contentRect: rect,
+                styleMask: [.titled, .closable],
+                backing: .buffered,
+                defer: false
+            )
+        }
+        window.title = overlay ? "md-select-eval overlay" : "md-select-eval"
         let config = WKWebViewConfiguration()
         config.websiteDataStore = .nonPersistent()
         webView = WKWebView(frame: NSRect(origin: .zero, size: rect.size), configuration: config)
@@ -32,6 +47,8 @@ final class Eval: NSObject, WKNavigationDelegate {
         window.contentView = webView
         window.makeKeyAndOrderFront(nil)
         window.orderFrontRegardless()
+        window.makeKey()
+        window.makeFirstResponder(webView)
         if url.isFileURL {
             webView.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
         } else {
@@ -130,21 +147,21 @@ final class Eval: NSObject, WKNavigationDelegate {
     func drag(left: Double, top: Double, width: Double, height: Double, done: @escaping () -> Void) {
         let x0 = left + 24
         let y0 = top + 28
-        let x1 = left + min(width - 20, 420)
-        let y1 = top + min(height - 20, 220)
-        let steps = 28
+        let x1 = left + min(width - 24, 360)
+        let y1 = top + min(height - 24, 280)
+        let steps = 40
         post(.leftMouseDown, at: windowPoint(clientX: x0, clientY: y0))
         var i = 0
         func step() {
             i += 1
             if i > steps {
                 self.post(.leftMouseUp, at: self.windowPoint(clientX: x1, clientY: y1))
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { done() }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { done() }
                 return
             }
             let t = Double(i) / Double(steps)
             self.post(.leftMouseDragged, at: self.windowPoint(clientX: x0 + (x1 - x0) * t, clientY: y0 + (y1 - y0) * t))
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.012) { step() }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.004) { step() }
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) { step() }
     }
@@ -207,7 +224,11 @@ final class Eval: NSObject, WKNavigationDelegate {
                         names = arr
                     }
                     self.run(names: names, acc: []) { rows in
-                        let payload: [String: Any] = ["cases": rows]
+                        let payload: [String: Any] = [
+                            "env": self.overlay ? "overlay-panel" : "regular-window",
+                            "metric": "rAF selection-end rect vs last mouse, plus selectionchange count",
+                            "cases": rows
+                        ]
                         if let data = try? JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted]),
                            let text = String(data: data, encoding: .utf8) {
                             print(text)
@@ -232,13 +253,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
-let path = CommandLine.arguments.count > 1
-    ? CommandLine.arguments[1]
-    : FileManager.default.currentDirectoryPath + "/scripts/md-select-eval.html"
+var overlay = false
+var path = FileManager.default.currentDirectoryPath + "/scripts/md-select-eval.html"
+for arg in CommandLine.arguments.dropFirst() {
+    if arg == "--overlay" { overlay = true }
+    else { path = arg }
+}
 let url = URL(fileURLWithPath: path)
 let app = NSApplication.shared
-app.setActivationPolicy(.regular)
-let eval = Eval(url: url)
+app.setActivationPolicy(overlay ? .accessory : .regular)
+let eval = Eval(url: url, overlay: overlay)
 let delegate = AppDelegate(eval: eval)
 app.delegate = delegate
 DispatchQueue.main.asyncAfter(deadline: .now() + 30) {
