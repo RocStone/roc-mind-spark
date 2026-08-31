@@ -520,7 +520,13 @@ function _cssZoom(){
   return (z && z>0) ? z : 1;
 }
 function _uiZResolve({stageRectWidth, stageOffsetWidth, probeWidth, cssZoom}){
-  if(stageOffsetWidth>1 && stageRectWidth>1) return stageRectWidth/stageOffsetWidth;
+  if(stageOffsetWidth>1 && stageRectWidth>1){
+    const r=stageRectWidth/stageOffsetWidth;
+    // WK CSS zoom: GBR ignores zoom (bug 77998), so the ratio is ~1 even when
+    // the page is scaled. Prefer the intended --ui-zoom in that case.
+    if(Math.abs(r-1)<0.02 && cssZoom && Math.abs(cssZoom-1)>0.02) return cssZoom;
+    return r;
+  }
   if(probeWidth>0){
     const m=probeWidth/100;
     // Off-screen probes in WKWebView often ignore CSS zoom and report 100.
@@ -572,9 +578,23 @@ function _choosePointerScale(cx, cy, rect, z, cssZoom){
   }
   return best;
 }
+function _gbrScale(){
+  try{
+    if(typeof stage!=='undefined' && stage && stage.offsetWidth>1){
+      const rw=stage.getBoundingClientRect().width;
+      if(rw>1) return rw/stage.offsetWidth;
+    }
+  }catch(e){}
+  return 1;
+}
+function _gbrIsVisual(){
+  return Math.abs(_gbrScale()-1)>0.04;
+}
 function _calibratePointer(e){
   if(_ptrMul!=null || !e) return;
-  // Overlay uses transform:scale, not CSS zoom. clientX == GBR space.
+  // clientX is always visual. Under transform:scale, GBR is visual too, so
+  // the multiplier is 1. Under WK CSS zoom, GBR is layout; canvas math uses
+  // visual deltas divided by _uiZ(), so keep the pointer in visual space.
   if(typeof document!=='undefined' && document.documentElement
       && document.documentElement.classList && document.documentElement.classList.contains('rms-wk')){
     _ptrMul=1;
@@ -603,8 +623,16 @@ function _evtXY(e){
 if(typeof document!=='undefined' && document.addEventListener){
   document.addEventListener('pointerdown', function(e){ _ptrMul=null; _calibratePointer(e); }, true);
 }
-function _stageSize(){ const r=stage.getBoundingClientRect(); const z=_uiZ(); return {w:r.width/z, h:r.height/z}; }
-function _stagePoint(cx,cy){ const r=stage.getBoundingClientRect(); const z=_uiZ(); return {x:(cx-r.left)/z, y:(cy-r.top)/z}; }
+function _stageSize(){
+  if(stage && stage.offsetWidth>1) return {w:stage.offsetWidth, h:stage.offsetHeight};
+  const r=stage.getBoundingClientRect(); const z=_uiZ(); return {w:r.width/z, h:r.height/z};
+}
+function _stagePoint(cx,cy){
+  const r=stage.getBoundingClientRect();
+  const z=_uiZ();
+  if(_gbrIsVisual()) return {x:(cx-r.left)/z, y:(cy-r.top)/z};
+  return {x:cx/z-r.left, y:cy/z-r.top};
+}
 // Per-map camera (zoom + pan), saved in localStorage so each map reopens exactly
 // where the user left it. Kept out of the map object so it never bumps the map's
 // "updated" time or reshuffles the sidebar.
@@ -2783,9 +2811,10 @@ let _mdPosCache={pos:-1, line:0}, _mdSelRAF=0;
 function mdInvalidatePosCache(){
   _mdPosCache={pos:-1, line:0};
 }
-function mdPaneViewportBox(slotRect){
+function mdPaneViewportBox(slotRect, scale){
   if(!slotRect || !(slotRect.width>1) || !(slotRect.height>1)) return null;
-  return {left:slotRect.left, top:slotRect.top, width:slotRect.width, height:slotRect.height};
+  const z=(scale!=null && scale>0)?scale:1;
+  return {left:slotRect.left*z, top:slotRect.top*z, width:slotRect.width*z, height:slotRect.height*z};
 }
 function placeMdPane(){
   const pane=typeof document!=='undefined' && document.getElementById && document.getElementById('mdPane');
@@ -2798,7 +2827,8 @@ function placeMdPane(){
     pane.style.height='';
     return;
   }
-  const box=mdPaneViewportBox(slot.getBoundingClientRect());
+  const z=(typeof _gbrIsVisual==='function' && _gbrIsVisual()) ? 1 : ((typeof _cssZoom==='function' && _cssZoom()) || 1);
+  const box=mdPaneViewportBox(slot.getBoundingClientRect(), z);
   if(!box) return;
   pane.style.left=box.left+'px';
   pane.style.top=box.top+'px';
@@ -3941,11 +3971,14 @@ function clientBoxFromGbr(r){
   if(!r) return null;
   const w=r.width!=null?r.width:(r.right-r.left);
   const h=r.height!=null?r.height:(r.bottom-r.top);
+  if(typeof _gbrIsVisual==='function' && !_gbrIsVisual()){
+    const z=(typeof _uiZ==='function' && _uiZ()) || 1;
+    return {x:r.left*z, y:r.top*z, w:w*z, h:h*z};
+  }
   return {x:r.left, y:r.top, w:w, h:h};
 }
-// Box is painted in clientX (body). Nodes are hit with getBoundingClientRect
-// in that same viewport space — which only holds if UI scale is transform:scale,
-// not CSS zoom (WebKit bug 77998: GBR ignores CSS zoom).
+// Box is painted in clientX (visual). clientBoxFromGbr converts a GBR that
+// ignored CSS zoom into that same visual space.
 function nodesInMarqueeEls(nodeEls, clientRect){
   const hit=[];
   if(!nodeEls || !clientRect || !(clientRect.w>0) || !(clientRect.h>0)) return hit;
@@ -5667,10 +5700,11 @@ function editFloatStyleScale(){
   }
   return k;
 }
-function editFloatViewportPos(el){
+function editFloatViewportPos(el, scale){
   if(!el || typeof el.getBoundingClientRect!=='function') return {left:0, top:0};
   const r=el.getBoundingClientRect();
-  return {left:r.left, top:r.top};
+  const z=(scale!=null && scale>0)?scale:1;
+  return {left:r.left*z, top:r.top*z};
 }
 function styleEditFloat(el){
   if(!_editFloat || !el || typeof getComputedStyle!=='function') return;
@@ -5699,7 +5733,8 @@ function styleEditFloat(el){
 function placeEditFloat(el){
   if(!_editFloat || !el) return;
   if(typeof document!=='undefined' && _editFloat.parentNode===document.body){
-    const pos=editFloatViewportPos(el);
+    const z=(typeof _gbrIsVisual==='function' && _gbrIsVisual()) ? 1 : ((typeof _cssZoom==='function' && _cssZoom()) || 1);
+    const pos=editFloatViewportPos(el, z);
     _editFloat.style.left=pos.left+'px';
     _editFloat.style.top=pos.top+'px';
     return;
@@ -11286,32 +11321,52 @@ function getUiScale(){
   if(v && v>=0.5 && v<=2) return v;                                   // explicit choice, pinned
   return autoScaleForViewport(window.innerWidth, window.innerHeight);  // auto: tracks the current viewport
 }
+function uiScaleBootCss(z, wk){
+  if(!(z && Math.abs(z-1)>0.001)) return '';
+  // WK: CSS zoom, never transform:scale. Transform makes native text selection
+  // trail the mouse — WebKit maps caret through the transform on a delay.
+  // GBR then ignores zoom (bug 77998); canvas hit-testing converts via _uiZ.
+  if(wk) return '.app{width:'+(100/z)+'%;height:'+(100/z)+'%;zoom:'+z+'}';
+  return '.app{transform-origin:0 0;transform:scale('+z+');width:'+(100/z)+'%;height:'+(100/z)+'%}';
+}
 function applyUiScale(v){
-  // UI scale MUST be transform:scale, not CSS zoom. WebKit's getBoundingClientRect
-  // ignores CSS zoom (bug 77998), so clientX and node rects live in different
-  // spaces — the marquee then either misses the mouse or hits the wrong nodes.
   const z = (v && v>=0.5 && v<=2) ? v : 1;
+  const wk=typeof document!=='undefined' && document.documentElement
+    && document.documentElement.classList
+    && document.documentElement.classList.contains('rms-wk');
   document.documentElement.style.zoom = '';
   document.documentElement.style.setProperty('--ui-zoom', String(z));
   const app=document.querySelector('.app');
   if(app){
-    app.style.zoom = '';
-    if(z!==1){
-      app.style.transformOrigin = '0 0';
-      app.style.transform = 'scale('+z+')';
-      app.style.width = (100/z)+'%';
-      app.style.height = (100/z)+'%';
-    } else {
+    if(wk){
       app.style.transformOrigin = '';
       app.style.transform = '';
-      app.style.width = '';
-      app.style.height = '';
+      if(z!==1){
+        app.style.zoom = String(z);
+        app.style.width = (100/z)+'%';
+        app.style.height = (100/z)+'%';
+      } else {
+        app.style.zoom = '';
+        app.style.width = '';
+        app.style.height = '';
+      }
+    } else {
+      app.style.zoom = '';
+      if(z!==1){
+        app.style.transformOrigin = '0 0';
+        app.style.transform = 'scale('+z+')';
+        app.style.width = (100/z)+'%';
+        app.style.height = (100/z)+'%';
+      } else {
+        app.style.transformOrigin = '';
+        app.style.transform = '';
+        app.style.width = '';
+        app.style.height = '';
+      }
     }
   }
   const boot=document.getElementById('ui-zoom-boot');
-  if(boot) boot.textContent = z!==1
-    ? ('.app{transform-origin:0 0;transform:scale('+z+');width:'+(100/z)+'%;height:'+(100/z)+'%}')
-    : '';
+  if(boot) boot.textContent = uiScaleBootCss(z, wk);
   _rzCache=null;   // the browser-zoom probe measurement is now stale — a changed scale invalidates it, same as a window resize would
   _ptrMul=null;
   // The stage's effective CSS-pixel size just changed with the zoom (more/fewer

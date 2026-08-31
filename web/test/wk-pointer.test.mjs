@@ -35,6 +35,12 @@ describe('_uiZResolve', () => {
       stageRectWidth: 0, stageOffsetWidth: 0, probeWidth: 90, cssZoom: 0.9,
     }), 0.9);
   });
+
+  test('WK CSS zoom: GBR/offset ~1 still returns the intended scale', () => {
+    assert.equal(_uiZResolve({
+      stageRectWidth: 1240, stageOffsetWidth: 1240, probeWidth: 0, cssZoom: 0.9,
+    }), 0.9);
+  });
 });
 
 describe('_choosePointerScale', () => {
@@ -65,5 +71,24 @@ describe('_evtXY with a locked multiplier', () => {
 describe('_cssZoom', () => {
   test('reads --ui-zoom from the document element', () => {
     assert.equal(_cssZoom(), 0.9);
+  });
+});
+
+describe('uiScaleBootCss', () => {
+  const { uiScaleBootCss } = loadFns(['uiScaleBootCss']);
+
+  test('WK uses zoom, not transform:scale', () => {
+    const css = uiScaleBootCss(0.9, true);
+    assert.match(css, /zoom:\s*0\.9/);
+    assert.doesNotMatch(css, /transform:\s*scale/);
+  });
+
+  test('non-WK keeps transform:scale', () => {
+    const css = uiScaleBootCss(0.9, false);
+    assert.match(css, /transform:\s*scale\(0\.9\)/);
+  });
+
+  test('identity scale emits nothing', () => {
+    assert.equal(uiScaleBootCss(1, true), '');
   });
 });

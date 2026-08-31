@@ -6,6 +6,7 @@ Versions follow the macOS bundle `CFBundleShortVersionString` and the matching G
 
 - Click-and-drag text selection in a node no longer tracks through the UI-scale transform.
 - The Markdown editor sits outside that transform. Line numbers are gone. While dragging a selection it shows native text and hides only the highlight overlay, so the textarea width does not jump.
+- WK overlay UI scale uses CSS zoom instead of transform:scale, so native text selection can track the mouse. Canvas hit-testing still converts through the measured scale.
 - Right-click in a text field offers Cut / Copy / Paste / Undo / Redo / Select All. Cmd+C / Cmd+V in the Markdown editor copy and paste the selection.
 
 ## [1.0.0] - 2026-08-27
