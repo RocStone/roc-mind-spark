@@ -182,7 +182,7 @@
   @media (prefers-reduced-motion: reduce){ #mdSlot{transition:none} }
   /* The editor itself sits on <body> (position:fixed) so WK text selection is
      not mapped through .app's transform:scale. JS copies the slot's GBR. */
-  #mdPane{width:0;height:0;overflow:hidden;position:fixed;z-index:36;left:0;top:0;display:flex;flex-direction:column;min-width:0;min-height:0;background:var(--paper);border-right:1px solid var(--line);transition:none}
+  #mdPane{width:0;height:0;overflow:hidden;position:fixed;z-index:36;left:0;top:0;display:flex;flex-direction:column;min-width:0;min-height:0;background:var(--paper);border-right:1px solid var(--line);transition:none;transform:none}
   body.md-resizing #mdPane{transition:none}
   html.rms-wk body.rms-node-edit .app{pointer-events:none}
   html.rms-wk body.rms-node-edit .nodebar,
@@ -200,13 +200,6 @@
   #mdPane .md-close{border:none;background:transparent;cursor:pointer;font-size:15px;line-height:1;color:var(--ink-soft);padding:2px 7px;border-radius:6px}
   #mdPane .md-close:hover{background:var(--paper-2,rgba(0,0,0,.05))}
   #mdPane .md-body{display:flex;flex:1;min-height:0;overflow:hidden}
-  #mdPane .md-gutter{flex:0 0 auto;box-sizing:border-box;padding:12px 6px 12px 8px;text-align:right;overflow:hidden;user-select:none;background:var(--paper);border-right:1px solid var(--line);color:var(--ink-soft);font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;line-height:20px}
-  #mdPane .md-gutter .gl{height:20px;display:flex;align-items:center;justify-content:flex-end;gap:1px}
-  #mdPane .md-gutter .gl.active{color:var(--accent);font-weight:700}
-  #mdPane .md-gutter .gl-fold{flex:0 0 12px;width:12px;height:16px;display:inline-flex;align-items:center;justify-content:center;font-size:9px;line-height:1;border-radius:3px;cursor:pointer;color:var(--ink-soft);opacity:.7}
-  #mdPane .md-gutter .gl-fold:empty{cursor:default}
-  #mdPane .md-gutter .gl-fold:not(:empty):hover{background:color-mix(in srgb, var(--ink-soft) 20%, transparent);opacity:1}
-  #mdPane .md-gutter .gl-num{min-width:1.6em}
   #mdPane .md-code{position:relative;flex:1;min-width:0;overflow:hidden}
   #mdPane .md-hl,#mdEditor{position:absolute;inset:0;margin:0;box-sizing:border-box;padding:12px 14px;border:0;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;line-height:20px;white-space:pre;tab-size:2}
   #mdPane .md-hl{overflow:hidden;pointer-events:none;color:var(--ink)}
@@ -261,14 +254,13 @@
   /* horizontal-rule divider node */
   .node.hr-node{min-width:54px;box-shadow:none}
   .node.hr-node .node-hr{display:block;width:54px;height:0;border-top:2px solid var(--ink-soft,#98a2b3);opacity:.6}
-  #mdEditor{overflow:auto;resize:none;outline:none;background:transparent;color:transparent;caret-color:var(--ink)}
-  #mdEditor::selection{background:color-mix(in srgb, var(--accent) 28%, transparent)}
+  #mdEditor{overflow:auto;resize:none;outline:none;background:transparent;color:transparent;caret-color:var(--ink);transform:none}
+  #mdEditor::selection{background:rgba(224,97,58,.28)}
   /* While click-and-drag selecting, show native textarea ink and take the
      per-line highlight overlay out of the render tree. visibility:hidden still
      leaves a compositor layer of every .hl-line; display:none does not. */
   #mdPane.md-selecting #mdEditor{color:var(--ink);background:var(--paper)}
-  #mdPane.md-selecting .md-hl,
-  #mdPane.md-selecting .md-gutter{display:none !important}
+  #mdPane.md-selecting .md-hl{display:none !important}
   /* markdown syntax colors — driven by theme variables, so they follow the theme */
   #mdPane .hl-head{color:var(--accent);font-weight:700}
   #mdPane .hl-comment{color:var(--ink-soft);opacity:.6;font-style:italic}

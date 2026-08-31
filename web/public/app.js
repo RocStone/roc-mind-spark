@@ -2869,7 +2869,7 @@ function ensureMdPane(){
   const app=document.querySelector('.app'), stage=document.querySelector('.stage'); if(!app||!stage) return;
   const pane=document.createElement('div'); pane.id='mdPane';
   pane.innerHTML='<div class="md-head"><span class="md-ttl">Markdown</span><span class="md-pos"></span><button class="md-pdf-btn" title="Download the rendered preview as a PDF">Download PDF</button><button class="md-wrap-btn" title="Toggle word wrap">Wrap</button><button class="md-prev-btn" title="Toggle rendered preview">Preview</button><button class="md-close" title="Exit Markdown mode (Esc)">\u2715</button></div>'
-    +'<div class="md-toolbar"><button data-fmt="bold" title="Bold"><b>B</b></button><button data-fmt="italic" title="Italic"><i>I</i></button><button data-fmt="strike" title="Strikethrough"><s>S</s></button><button data-fmt="code" title="Inline code">&lt;/&gt;</button><span class="md-sep"></span><button data-fmt="h1" title="Heading 1">H1</button><button data-fmt="h2" title="Heading 2">H2</button><button data-fmt="h3" title="Heading 3">H3</button><span class="md-sep"></span><button data-fmt="quote" title="Blockquote">\u275D</button><button data-fmt="ul" title="Bullet list">\u2022</button><button data-fmt="ol" title="Numbered list">1.</button><button data-fmt="hr" title="Divider">\u2014</button><span class="md-sep"></span><button data-fmt="link" title="Link">\uD83D\uDD17</button><button data-fmt="image" title="Image">\uD83D\uDDBC</button><button data-fmt="codeblock" title="Code block">\u2317</button><button data-fmt="table" title="Table">\u25A6</button></div><div class="md-body"><div class="md-gutter" aria-hidden="true"><div class="md-gutter-inner"></div></div><div class="md-code"><pre class="md-hl" aria-hidden="true"><div class="md-hl-inner"></div></pre>'
+    +'<div class="md-toolbar"><button data-fmt="bold" title="Bold"><b>B</b></button><button data-fmt="italic" title="Italic"><i>I</i></button><button data-fmt="strike" title="Strikethrough"><s>S</s></button><button data-fmt="code" title="Inline code">&lt;/&gt;</button><span class="md-sep"></span><button data-fmt="h1" title="Heading 1">H1</button><button data-fmt="h2" title="Heading 2">H2</button><button data-fmt="h3" title="Heading 3">H3</button><span class="md-sep"></span><button data-fmt="quote" title="Blockquote">\u275D</button><button data-fmt="ul" title="Bullet list">\u2022</button><button data-fmt="ol" title="Numbered list">1.</button><button data-fmt="hr" title="Divider">\u2014</button><span class="md-sep"></span><button data-fmt="link" title="Link">\uD83D\uDD17</button><button data-fmt="image" title="Image">\uD83D\uDDBC</button><button data-fmt="codeblock" title="Code block">\u2317</button><button data-fmt="table" title="Table">\u25A6</button></div><div class="md-body"><div class="md-code"><pre class="md-hl" aria-hidden="true"><div class="md-hl-inner"></div></pre>'
     +'<textarea id="mdEditor" spellcheck="false" wrap="off" placeholder="# Central idea&#10;- a branch&#10;  - a leaf"></textarea><div class="md-prev" aria-hidden="true"></div></div></div>'
     +'<div class="md-resize" title="Drag to resize"></div>';
   const slot=document.createElement('div');
@@ -2926,13 +2926,6 @@ function ensureMdPane(){
     _mdSelRAF=requestAnimationFrame(()=>{ _mdSelRAF=0; mdUpdateActive(); });
   });
   ed.addEventListener('keyup', e=>{ mdUpdateActive(); if(e.key && e.key.indexOf('Arrow')===0) syncNodeFromCaret(); });
-  // Fold toggles live in the gutter (one per foldable line) — the only place that can
-  // receive clicks, since the overlay sits *underneath* the invisible-but-interactive
-  // textarea and would never see a pointer event even with pointer-events:auto on a child.
-  pane.querySelector('.md-gutter').addEventListener('mousedown', e=>{
-    const b=e.target.closest('.gl-fold[data-full]'); if(!b) return;
-    e.preventDefault(); mdToggleFold(+b.dataset.full);
-  });
   const rz=pane.querySelector('.md-resize');
   rz.addEventListener('mousedown',e=>{ document.body.classList.add('md-resizing');
     e.preventDefault(); const x0=e.clientX, w0=pane.getBoundingClientRect().width, z=_uiZ();
@@ -3419,7 +3412,8 @@ function mdUpdateActive(){
 function mdRefreshDecorations(){
   mdInvalidatePosCache();
   const ed=document.getElementById('mdEditor'); if(!ed) return;
-  const hl=document.querySelector('#mdPane .md-hl-inner'), gut=document.querySelector('#mdPane .md-gutter-inner'); if(!hl||!gut) return;
+  const hl=document.querySelector('#mdPane .md-hl-inner'); if(!hl) return;
+  const gut=document.querySelector('#mdPane .md-gutter-inner');
   const view=mdBuildView(); _mdView=view;
   // ed.value is expected to already match this view — mdCommitVisibleEdit's job on every
   // edit — but mdHighlight(ed.value, view) below counts rows from ed.value.split('\n')
@@ -3432,7 +3426,7 @@ function mdRefreshDecorations(){
   const expectedVis = mdVisibleText(view);
   if(ed.value !== expectedVis){ ed.value = expectedVis; _mdPrevVisible = expectedVis; }
   hl.innerHTML=mdHighlight(ed.value, view);
-  gut.innerHTML=mdRenderGutter(view);
+  if(gut) gut.innerHTML=mdRenderGutter(view);
   mdSyncGutterRowHeights(hl, gut);
   mdCalibrate();
   mdUpdateActive(); mdSyncScroll();

@@ -160,7 +160,8 @@ describe('click-and-drag selection hot path', () => {
     assert.match(src, /\(document\.body\|\|stage\)\.appendChild\(float\)/);
     assert.match(css, /\.edit-float\{[^}]*position:\s*fixed/);
     assert.match(css, /#mdPane\.md-selecting #mdEditor\{color:var\(--ink\)/);
-    assert.match(css, /#mdPane\.md-selecting \.md-hl,\s*#mdPane\.md-selecting \.md-gutter\{display:\s*none/);
+    assert.match(css, /#mdPane\.md-selecting \.md-hl\{display:\s*none/);
+    assert.doesNotMatch(src, /class="md-gutter"/);
   });
 
   test('Markdown editor is body-fixed and follows the grid slot box', () => {
