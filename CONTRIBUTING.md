@@ -52,6 +52,7 @@ Add coverage next to the behavior you change. Loopback bind, exact CORS origin, 
 ## Pull requests
 
 - Keep the diff on the bug or feature. No drive-by UI rewrites.
+- If you add a user-facing capability, add it to [docs/FEATURES.md](docs/FEATURES.md) and [docs/FEATURES.zh.md](docs/FEATURES.zh.md). Bug fixes go in [CHANGELOG.md](CHANGELOG.md), not the feature list.
 - Do not rewrite git history, author emails, or LICENSE copyright lines.
 - Do not add GitHub Actions that publish Releases, Pages, or container images.
 - Mention if you touched listening, process identity, packaging, or privacy-sensitive logs.

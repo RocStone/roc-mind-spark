@@ -16,6 +16,8 @@ macOS **原生浮层**思维导图。任意 App、任意桌面、任意全屏 Sp
 - 应用内 English / 中文，作用在界面，不翻译你在节点里写的字
 - 地图自动保存到本机 SQLite
 
+完整产品目录在 [docs/FEATURES.zh.md](docs/FEATURES.zh.md)。英文：[docs/FEATURES.md](docs/FEATURES.md)。那是「现在能做什么」，不是变更日志。
+
 ## 30 秒上手
 
 下载版和源码版都要求这台 Mac 已经安装 **Node.js 22.13.0 或更高版本**，App 不内置 Node。先检查：
@@ -175,6 +177,8 @@ Roc Mind Spark 是本机浮层。它 **不是**“完全离线”，也 **不会
 | `scripts/` | 打包和安装 `.app` |
 | `web/test/` | 画布单测 |
 | `web/worker/` | 测试会用到的 inherited/internal 代码，**不是**受支持的部署面 |
+| `docs/FEATURES.md` | 产品功能清单（英文） |
+| `docs/FEATURES.zh.md` | 产品功能清单（中文） |
 | `docs/RELEASING.md` | 维护者发布清单 |
 
 ## 贡献

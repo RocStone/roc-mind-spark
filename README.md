@@ -16,6 +16,8 @@ The canvas is [MindSpark](https://github.com/prasadpatil25/MindSpark) by Prasad 
 - In-app English / 中文 for the interface (not for the text you type in nodes)
 - Autosave maps to a local SQLite file
 
+The full product catalog is [docs/FEATURES.md](docs/FEATURES.md). Chinese: [docs/FEATURES.zh.md](docs/FEATURES.zh.md). That list is what the app can do, not a changelog.
+
 ## 30-second start
 
 Both the download and source build need **Node.js 22.13.0 or later** on the Mac. The app does not bundle Node. Check first:
@@ -175,6 +177,8 @@ First launch enables **Launch at login**. Turn it off in Settings. Details: [PRI
 | `scripts/` | Package and install the `.app` |
 | `web/test/` | Canvas unit tests |
 | `web/worker/` | Inherited internal modules used by tests — **not** a supported deploy |
+| `docs/FEATURES.md` | Product feature list (English) |
+| `docs/FEATURES.zh.md` | Product feature list (中文) |
 | `docs/RELEASING.md` | Maintainer release checklist |
 
 ## Contributing
