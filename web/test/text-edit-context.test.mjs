@@ -189,6 +189,9 @@ describe('click-and-drag selection hot path', () => {
     assert.match(src, /\(stage\|\|document\.body\)\.appendChild\(float\)/);
     assert.match(css, /\.edit-float\{[^}]*position:\s*absolute/);
     assert.match(css, /\.edit-float\{[^}]*transform:\s*none/);
+    assert.match(css, /\.edit-float-text\{[^}]*overflow-wrap:\s*break-word/);
+    assert.match(css, /\.notes-popup\{[^}]*display:\s*flex/);
+    assert.match(css, /\.notes-popup \.np-editor\{[^}]*overflow-y:\s*auto/);
     assert.match(src, /float\.style\.transform='none'/);
     assert.doesNotMatch(src, /class="md-gutter"/);
   });

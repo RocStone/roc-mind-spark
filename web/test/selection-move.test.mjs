@@ -16,6 +16,8 @@ const {
   siblingIdsOf,
   computeSelectionMove,
   isBoxSelectModifier,
+  selectionNodeMdText,
+  buildSelectionMarkdown,
 } = loadFns([
   'rectsIntersect',
   'mapRectFromCorners',
@@ -30,6 +32,8 @@ const {
   'siblingIdsOf',
   'computeSelectionMove',
   'isBoxSelectModifier',
+  'selectionNodeMdText',
+  'buildSelectionMarkdown',
 ]);
 
 function sample(){
@@ -247,5 +251,25 @@ describe('isBoxSelectModifier', () => {
     assert.equal(isBoxSelectModifier({metaKey:false, ctrlKey:true, altKey:false}), true);
     assert.equal(isBoxSelectModifier({metaKey:true, ctrlKey:false, altKey:true}), false);
     assert.equal(isBoxSelectModifier({metaKey:false, ctrlKey:false, altKey:false}), false);
+  });
+});
+
+describe('buildSelectionMarkdown', () => {
+  test('keeps parent/child indent and drops unselected descendants', () => {
+    const map = sample();
+    const md = buildSelectionMarkdown(['a','a1','c'], map.nodes, map.rootId);
+    assert.equal(md, '- A\n  - A1\n- C');
+  });
+
+  test('siblings without a selected parent stay top-level', () => {
+    const map = sample();
+    const md = buildSelectionMarkdown(['a1','b1'], map.nodes, map.rootId);
+    assert.equal(md, '- A1\n- B1');
+  });
+
+  test('strips tags from node text', () => {
+    assert.equal(selectionNodeMdText({ text: '<b>Hello</b>' }), 'Hello');
+    assert.equal(selectionNodeMdText({ hr: true }), '---');
+    assert.equal(selectionNodeMdText({ text: '' }), 'Untitled');
   });
 });

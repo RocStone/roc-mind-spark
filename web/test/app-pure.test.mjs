@@ -5,10 +5,10 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { loadFns, extractConst } from './helpers/load-app-fns.mjs';
+import { loadFns, extractConst, extractFunction } from './helpers/load-app-fns.mjs';
 
-const { prettyUrl, pickContrast, escapeHtml, shade, edgePath, shouldShowNodeTokenBadge, canvasGestureBlocksTextSelection, resolveHistoryChordTarget, isNodeDoubleClick, shouldStartNodeDrag, shouldIgnoreTransientToolbarClick, shouldCloseNotesOnPointerLeave, notesPopupPosition } =
-  loadFns(['prettyUrl', 'pickContrast', 'escapeHtml', 'shade', 'edgePath', 'shouldShowNodeTokenBadge', 'canvasGestureBlocksTextSelection', 'resolveHistoryChordTarget', 'isNodeDoubleClick', 'shouldStartNodeDrag', 'shouldIgnoreTransientToolbarClick', 'shouldCloseNotesOnPointerLeave', 'notesPopupPosition']);
+const { prettyUrl, pickContrast, escapeHtml, shade, edgePath, shouldShowNodeTokenBadge, canvasGestureBlocksTextSelection, resolveHistoryChordTarget, isNodeDoubleClick, shouldStartNodeDrag, shouldIgnoreTransientToolbarClick, shouldCloseNotesOnPointerLeave, notesPopupPosition, notesEditorMaxHeight, clampNotesPopupPos, notesPopupDragShouldStart, mdPaneTargetWidthPx } =
+  loadFns(['prettyUrl', 'pickContrast', 'escapeHtml', 'shade', 'edgePath', 'shouldShowNodeTokenBadge', 'canvasGestureBlocksTextSelection', 'resolveHistoryChordTarget', 'isNodeDoubleClick', 'shouldStartNodeDrag', 'shouldIgnoreTransientToolbarClick', 'shouldCloseNotesOnPointerLeave', 'notesPopupPosition', 'notesEditorMaxHeight', 'clampNotesPopupPos', 'notesPopupDragShouldStart', 'mdPaneTargetWidthPx']);
 const URL_RE = extractConst('URL_RE');
 
 describe('prettyUrl — shortens link labels for display', () => {
@@ -190,7 +190,76 @@ describe('resolveHistoryChordTarget', () => {
 
   test('editor undo only after the user has typed in this session', () => {
     assert.equal(resolveHistoryChordTarget({editing: true, typed: true}), 'editor');
-    assert.equal(resolveHistoryChordTarget({notesOpen: true, typed: false}), 'editor');
+  });
+
+  test('an open note does not steal map undo; only a focused note does', () => {
+    assert.equal(resolveHistoryChordTarget({notesOpen: true, typed: false}), 'map');
+    assert.equal(resolveHistoryChordTarget({notesFocused: true}), 'editor');
+  });
+
+  test('a focused node edit wins over a note sitting in the background', () => {
+    assert.equal(resolveHistoryChordTarget({notesFocused: true, editing: true, typed: true}), 'editor');
+    assert.equal(resolveHistoryChordTarget({notesOpen: true, editing: true, typed: false}), 'map');
+  });
+});
+
+describe('notesEditorMaxHeight', () => {
+  test('grows down to the viewport bottom then stops', () => {
+    assert.equal(notesEditorMaxHeight(8, 800, 94, 8), 800 - 8 - 8 - 94);
+  });
+
+  test('clamps to a usable minimum near the bottom', () => {
+    assert.equal(notesEditorMaxHeight(700, 800, 94, 8), 80);
+  });
+});
+
+describe('clampNotesPopupPos / notesPopupDragShouldStart', () => {
+  test('keeps the card inside the viewport', () => {
+    const p = clampNotesPopupPos(-40, -20, 340, 220, 1200, 800, 8);
+    assert.equal(p.left, 8);
+    assert.equal(p.top, 8);
+  });
+
+  test('drag starts on the toolbar or card chrome, not the editor', () => {
+    const popup = { id: 'popup' };
+    const editor = { closest(sel){ return sel==='.np-editor' ? this : null; } };
+    const toolbar = { closest(sel){ return sel==='.np-toolbar' ? this : null; } };
+    const btn = { closest(sel){ return sel==='.np-toolbar button' ? this : (sel==='.np-toolbar' ? this : null); } };
+    assert.equal(notesPopupDragShouldStart(popup, popup), true);
+    assert.equal(notesPopupDragShouldStart(toolbar, popup), true);
+    assert.equal(notesPopupDragShouldStart(editor, popup), false);
+    assert.equal(notesPopupDragShouldStart(btn, popup), false);
+    assert.equal(notesPopupDragShouldStart(null, popup), false);
+  });
+});
+
+describe('md pane open does not fit-to-view', () => {
+  test('toggleMdMode keeps zoom and only reframes pan', () => {
+    const body = extractFunction('toggleMdMode');
+    assert.doesNotMatch(body, /computeFitView/);
+    assert.match(body, /reframeKeepZoomForMd/);
+  });
+
+  test('mdPaneTargetWidthPx reads px, vw, then 40vw', () => {
+    const prevWin = global.window;
+    const prevDoc = global.document;
+    global.window = { innerWidth: 1000 };
+    global.document = {
+      querySelector: () => ({ }),
+      getElementById: () => null,
+    };
+    const prevCS = global.getComputedStyle;
+    global.getComputedStyle = () => ({ getPropertyValue: () => '320px' });
+    try{
+      assert.equal(mdPaneTargetWidthPx(), 320);
+      global.getComputedStyle = () => ({ getPropertyValue: () => '40vw' });
+      assert.equal(mdPaneTargetWidthPx(), 400);
+    } finally {
+      global.window = prevWin;
+      global.document = prevDoc;
+      if(prevCS) global.getComputedStyle = prevCS;
+      else delete global.getComputedStyle;
+    }
   });
 });
 

@@ -222,3 +222,32 @@ describe('edit float keeps task / marker chrome visible', () => {
     assert.equal(map.nodes.n1.task, 'todo');
   });
 });
+
+describe('edit float wrap matches the card', () => {
+  const { nodeEditMaxWidthPx, editFloatWidthStyle } = loadFns(['nodeEditMaxWidthPx', 'editFloatWidthStyle']);
+
+  test('manual node width wins over CSS max-width', () => {
+    assert.equal(nodeEditMaxWidthPx({ }, { width: 480 }), 480);
+  });
+
+  test('falls back to computed max-width, then 240', () => {
+    const prev = global.getComputedStyle;
+    global.getComputedStyle = () => ({ maxWidth: '240px' });
+    try{
+      assert.equal(nodeEditMaxWidthPx({}, null), 240);
+    } finally {
+      if(prev) global.getComputedStyle = prev;
+      else delete global.getComputedStyle;
+    }
+    assert.equal(nodeEditMaxWidthPx(null, null), 240);
+  });
+
+  test('a card already at max-width locks the float width', () => {
+    const locked = editFloatWidthStyle(240, 240, 1);
+    assert.equal(locked.width, '240px');
+    assert.equal(locked.maxWidth, '240px');
+    const short = editFloatWidthStyle(80, 240, 2);
+    assert.equal(short.width, 'max-content');
+    assert.equal(short.maxWidth, '480px');
+  });
+});

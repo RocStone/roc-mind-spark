@@ -2669,7 +2669,8 @@ function relayoutDuringEdit(id){
   const n=map.nodes[id]; if(!n) return;
   const k=view.k||1;
   if(_editFloat){
-    n.w=_editFloat.offsetWidth/k;
+    const maxPx=typeof nodeEditMaxWidthPx==='function' ? nodeEditMaxWidthPx(el, n) : (n.width||240);
+    n.w=Math.min(_editFloat.offsetWidth/k, maxPx);
     n.h=_editFloat.offsetHeight/k;
   } else {
     const sz=k*_uiZ();
@@ -3060,7 +3061,14 @@ function ensureMdPane(){
   rz.addEventListener('mousedown',e=>{ document.body.classList.add('md-resizing');
     e.preventDefault(); const x0=e.clientX, w0=pane.getBoundingClientRect().width;
     const mv=ev=>{ const w=Math.max(240, Math.min(window.innerWidth*0.72, w0+(ev.clientX-x0))); app.style.setProperty('--md-w', w+'px'); };
-    const up=()=>{ window.removeEventListener('mousemove',mv); window.removeEventListener('mouseup',up); document.body.classList.remove('md-resizing'); try{ animateViewTo(computeFitView(), 220); }catch(_){} placeMdPane(); mdSyncGutterRowHeights(); };
+    const {w:SW0,h:SH0}=_stageSize();
+    const cx0=(SW0/2-view.x)/view.k, cy0=(SH0/2-view.y)/view.k;
+    const up=()=>{ window.removeEventListener('mousemove',mv); window.removeEventListener('mouseup',up); document.body.classList.remove('md-resizing');
+      try{
+        const {w:W1,h:H1}=_stageSize();
+        if(isFinite(cx0)&&isFinite(cy0)&&W1>1&&H1>1) _reframeSmooth(cx0, cy0, W1, H1);
+      }catch(_){}
+      placeMdPane(); mdSyncGutterRowHeights(); };
     window.addEventListener('mousemove',mv); window.addEventListener('mouseup',up);
   });
 }
@@ -3665,12 +3673,43 @@ function applyMdToMap(){
   autoLayout(); pushHistory();   // undoable + persists (guarded so it won't clobber the editor)
   _mdSyncing=false;
 }
+function mdPaneTargetWidthPx(){
+  const app=(typeof document!=='undefined' && document.querySelector) ? document.querySelector('.app') : null;
+  const raw=(app && typeof getComputedStyle==='function' && getComputedStyle(app).getPropertyValue('--md-w').trim()) || '';
+  if(raw.endsWith('vw') && typeof window!=='undefined') return (parseFloat(raw)/100)*window.innerWidth;
+  const n=parseFloat(raw);
+  if(isFinite(n) && n>0) return n;
+  const pane=(typeof document!=='undefined' && document.getElementById) ? document.getElementById('mdPane') : null;
+  if(pane && typeof mdMode!=='undefined' && mdMode){
+    const w=pane.getBoundingClientRect().width;
+    if(w>1) return w;
+  }
+  if(typeof window!=='undefined' && window.innerWidth) return window.innerWidth*0.4;
+  return 0;
+}
+function reframeKeepZoomForMd(opening, stageBox, mdW){
+  if(typeof map==='undefined' || !map) return;
+  if(typeof window!=='undefined' && window.matchMedia && window.matchMedia('(max-width: 720px)').matches) return;
+  const W0=stageBox && stageBox.w, H0=stageBox && stageBox.h;
+  if(!(W0>1 && H0>1)) return;
+  const cx=(W0/2-view.x)/view.k, cy=(H0/2-view.y)/view.k;
+  if(!isFinite(cx)||!isFinite(cy)) return;
+  const paneW=Number(mdW)||0;
+  if(!(paneW>0)) return;
+  const W1=opening ? Math.max(120, W0-paneW) : (W0+paneW);
+  _reframeSmooth(cx, cy, W1, H0);
+}
 function toggleMdMode(on){
   const want=(on===undefined)?!mdMode:!!on; if(want===mdMode) return;
   ensureMdPane();
   const _pane=document.getElementById('mdPane'); if(_pane) void _pane.offsetWidth;
+  const opening=want;
+  const stageBox=_stageSize();
+  const livePane=_pane && _pane.getBoundingClientRect().width;
+  const mdW=(livePane>1)?livePane:mdPaneTargetWidthPx();
   mdMode=want; document.body.classList.toggle('md-mode', mdMode);
   const btn=document.getElementById('mdToggle'); if(btn) btn.classList.toggle('on', mdMode);
+  try{ reframeKeepZoomForMd(opening, stageBox, mdW); }catch(e){}
   if(mdMode){
     syncTextFromMap();
     const ed=document.getElementById('mdEditor');
@@ -3689,7 +3728,6 @@ function toggleMdMode(on){
   }
   else if(!(typeof READONLY!=='undefined' && READONLY)) pushHistory();   // one undo entry for the md session
   setTimeout(()=>{
-    try{ animateViewTo(computeFitView(), 260); }catch(e){}
     try{ placeMdPane(); }catch(e){}
     try{ if(mdMode) mdCalibrate(); }catch(e){}
     // The pane's own width transition (220ms, pure CSS) is still running when
@@ -3699,7 +3737,7 @@ function toggleMdMode(on){
     // re-measures once the transition actually finishes, so re-sync once more now
     // that the pane has reached its real width.
     try{ if(mdMode) mdSyncGutterRowHeights(); }catch(e){}
-  }, 260);   // smoothly re-fit once the pane finished sliding, instead of snapping
+  }, 260);
 }
 function pushHistory(){
   // Snapshot the live WK editor, not the hidden placeholder card. Otherwise
@@ -3730,10 +3768,17 @@ function redo(){ if(hpos<history.length-1){hpos++;restore(history[hpos]);updateU
 // Native performKeyEquivalent and the page keydown both see ⌘Z. One chord
 // must move history once. Fresh edit sessions have a WK undo stack that is
 // not the user's typing — execCommand('undo') there looks like paste/revert.
+function notesEditorIsFocused(){
+  if(typeof document==='undefined' || !document.activeElement) return false;
+  const ae=document.activeElement;
+  if(ae.closest && ae.closest('.notes-popup')) return true;
+  const notes=typeof openNotesEditorEl==='function' && openNotesEditorEl();
+  return !!(notes && (ae===notes || (notes.contains && notes.contains(ae))));
+}
 function resolveHistoryChordTarget(state){
   if(!state) return 'map';
-  if(state.notesOpen) return 'editor';
   if(state.editing && state.typed) return 'editor';
+  if(state.notesFocused) return 'editor';
   return 'map';
 }
 function performHistoryChord(which){
@@ -3744,12 +3789,12 @@ function performHistoryChord(which){
      && !(typeof openClipboardTarget==='function' && openClipboardTarget())){
     return !!(typeof execCmd==='function' && execCmd(which==='redo'?'redo':'undo'));
   }
-  const notes=typeof openNotesEditorEl==='function' && openNotesEditorEl();
+  const notesFocused=typeof notesEditorIsFocused==='function' && notesEditorIsFocused();
   const editing=!!(typeof document!=='undefined' && document.querySelector && document.querySelector('.node.editing'))
     || (typeof _editFloat!=='undefined' && !!_editFloat);
   const target=resolveHistoryChordTarget({
-    notesOpen:!!notes,
-    editing: editing && !notes,
+    notesFocused:!!notesFocused,
+    editing:!!editing,
     typed: typeof _editTyped!=='undefined' && !!_editTyped
   });
   if(target==='editor'){
@@ -3925,6 +3970,7 @@ function showBulkBar(prompt){
       <button data-a="highlight" title="${rmsTr('actHighlight','Highlight')}">▦</button>
       <button data-a="color" title="${rmsTr('actBg','Node background')}">🎨</button>
       <div class="bulk-sep"></div>
+      <button data-a="copymd" title="${rmsTr('actCopyAsMd','Copy as Markdown')}">MD</button>
       <button data-a="reparent" title="${rmsTr('actReparent','Move under a new parent')}">⤷</button>
       <button data-a="delete" class="bulk-danger" title="${rmsTr('scDeleteNode','Delete node')}">🗑</button>
       <button class="bulk-cancel" data-a="cancel" title="${rmsTr('actClearSel','Clear selection')}">✕</button>`;
@@ -3935,6 +3981,7 @@ function showBulkBar(prompt){
     ev.stopPropagation();
     const a = b.dataset.a;
     if(a==='delete') bulkDelete();
+    else if(a==='copymd') copySelectionAsMarkdown();
     else if(a==='color') showBulkColorPicker(b, 'bg');
     else if(a==='reparent') startBulkReparent();
     else if(a==='cancel') clearMultiSelect();
@@ -4029,6 +4076,27 @@ function bulkDelete(){
 function startBulkReparent(){
   reparentMode = true;
   showBulkBar('Click a target node to move ' + multiSel.size + ' nodes under it…');
+}
+function selectionMarkdownPayload(){
+  if(typeof multiSel==='undefined' || !multiSel || multiSel.size<2) return '';
+  if(typeof map==='undefined' || !map || !map.nodes) return '';
+  return buildSelectionMarkdown([...multiSel], map.nodes, map.rootId);
+}
+function copySelectionAsMarkdown(){
+  const md=selectionMarkdownPayload();
+  if(!md) return false;
+  if(typeof writeClipboardText==='function' && writeClipboardText(md)){
+    toast(rmsTr('copiedAsMd','Copied as Markdown'));
+    return true;
+  }
+  if(typeof navigator!=='undefined' && navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(md).then(
+      ()=>toast(rmsTr('copiedAsMd','Copied as Markdown')),
+      ()=>toast('Copy failed')
+    );
+    return true;
+  }
+  return false;
 }
 function bulkReparent(targetId){
   const roots = selectionMoveRoots([...multiSel], map.nodes, map.rootId);
@@ -4208,6 +4276,42 @@ function computeSelectionMove(mapObj, dragIds, targetId, mode){
 }
 function isBoxSelectModifier(e){
   return !!(e && (e.metaKey || e.ctrlKey) && !e.altKey);
+}
+function selectionNodeMdText(n){
+  if(!n) return 'Untitled';
+  if(n.hr) return '---';
+  const raw=String(n.text==null?'':n.text);
+  const plain=raw.replace(/<[^>]+>/g,'').replace(/&nbsp;/g,' ').replace(/\u00A0/g,' ').replace(/\n+/g,' ').trim();
+  return plain || 'Untitled';
+}
+function buildSelectionMarkdown(ids, nodes, rootId){
+  const set=new Set(ids||[]);
+  if(!set.size || !nodes) return '';
+  const ordered=typeof orderIdsByNodeKeys==='function' ? orderIdsByNodeKeys([...set], nodes) : [...set];
+  const roots=[];
+  if(rootId && set.has(rootId)) roots.push(rootId);
+  const moveRoots=typeof selectionMoveRoots==='function' ? selectionMoveRoots(ordered, nodes, rootId) : ordered;
+  moveRoots.forEach(id=>{ if(!roots.includes(id)) roots.push(id); });
+  const lines=[];
+  const seen=new Set();
+  const kidsOf=id=>{
+    const out=[];
+    for(const k in nodes){
+      if(nodes[k] && nodes[k].parent===id && set.has(k)) out.push(k);
+    }
+    return out;
+  };
+  const walk=(id, depth)=>{
+    if(!nodes[id] || seen.has(id) || !set.has(id)) return;
+    seen.add(id);
+    const pad='  '.repeat(depth);
+    const n=nodes[id];
+    if(n.hr) lines.push(pad+'---');
+    else lines.push(pad+'- '+selectionNodeMdText(n));
+    kidsOf(id).forEach(c=>walk(c, depth+1));
+  };
+  roots.forEach(id=>walk(id, 0));
+  return lines.join('\n');
 }
 
 /* ============================================================
@@ -5734,6 +5838,8 @@ function shouldTakeNodeClipboard(){
   if(typeof openOverlayTextField==='function' && openOverlayTextField()) return false;
   if(openClipboardTarget()) return true;
   if(typeof document !== 'undefined' && isAppTextField(document.activeElement)) return false;
+  if(typeof multiSel!=='undefined' && multiSel && multiSel.size>=2
+     && typeof map!=='undefined' && map && map.nodes) return true;
   if(typeof sel === 'undefined' || !sel) return false;
   if(typeof map === 'undefined' || !map || !map.nodes || !map.nodes[sel]) return false;
   return true;
@@ -5776,12 +5882,33 @@ function editFloatViewportPos(el, scale){
   const z=(scale!=null && scale>0)?scale:1;
   return {left:r.left*z, top:r.top*z};
 }
+function nodeEditMaxWidthPx(el, n){
+  if(n && isFinite(n.width) && n.width>0) return n.width;
+  if(el && typeof getComputedStyle==='function'){
+    const cs=getComputedStyle(el);
+    const m=parseFloat(cs.maxWidth);
+    if(isFinite(m) && m>0) return m;
+  }
+  return 240;
+}
+function editFloatWidthStyle(usedPx, maxPx, k){
+  const scale=(k!=null && k>0)?k:1;
+  const cap=(Number(maxPx)||240)*scale;
+  const used=Number(usedPx)||0;
+  const maxMap=Number(maxPx)||240;
+  if(used>=maxMap-0.5){
+    return {width:cap+'px', maxWidth:cap+'px'};
+  }
+  return {width:'max-content', maxWidth:cap+'px'};
+}
 function styleEditFloat(el){
   if(!_editFloat || !el || typeof getComputedStyle!=='function') return;
   const k=editFloatStyleScale();
   const cs=getComputedStyle(el);
   const float=_editFloat;
   const lh=cs.lineHeight;
+  const n=(typeof map!=='undefined' && map && map.nodes && el.dataset)
+    ? map.nodes[el.dataset.id] : null;
   float.style.transform='none';
   float.style.background=cs.backgroundColor;
   float.style.color=cs.color;
@@ -5797,9 +5924,15 @@ function styleEditFloat(el){
   float.style.paddingLeft=_csPx(cs,'paddingLeft',k)+'px';
   float.style.borderRadius=cs.borderRadius;
   float.style.border=cs.border;
-  const maxW=parseFloat(cs.maxWidth);
-  if(isFinite(maxW) && maxW>0) float.style.maxWidth=(maxW*k)+'px';
-  float.style.width='max-content';
+  float.style.whiteSpace=cs.whiteSpace || 'pre-wrap';
+  float.style.wordBreak=cs.wordBreak || 'break-word';
+  float.style.overflowWrap=cs.overflowWrap || cs.wordWrap || 'break-word';
+  float.style.minWidth='0';
+  float.style.boxSizing='border-box';
+  const maxPx=nodeEditMaxWidthPx(el, n);
+  const sized=editFloatWidthStyle(el.offsetWidth||0, maxPx, k);
+  float.style.maxWidth=sized.maxWidth;
+  float.style.width=sized.width;
 }
 function placeEditFloat(el){
   if(!_editFloat || !el) return;
@@ -6021,6 +6154,10 @@ function editorClipboardPayload(textEl){
       selectAllPending: peekEditReplaceAll()
     });
   }
+  if(typeof selectionMarkdownPayload==='function'){
+    const md=selectionMarkdownPayload();
+    if(md) return md;
+  }
   if(typeof map !== 'undefined' && map && map.nodes && typeof sel !== 'undefined' && map.nodes[sel]){
     return nodeClipboardPlain(map.nodes[sel]);
   }
@@ -6102,6 +6239,10 @@ function rmsClipboardCopy(){
       allText: target.textContent || '',
       selectAllPending: inNotes ? !selected : peekEditReplaceAll()
     }) || '';
+  }
+  if(typeof selectionMarkdownPayload==='function'){
+    const md=selectionMarkdownPayload();
+    if(md) return md;
   }
   if(!shouldTakeNodeClipboard()) return '';
   return editorClipboardPayload(null) || '';
@@ -8082,6 +8223,51 @@ function notesPopupPosition(anchor, popupSize, viewport, gap){
   if(top < gap) top = gap;
   return {left, top};
 }
+function notesEditorMaxHeight(popupTop, viewportH, chromeH, gap){
+  gap = (gap==null) ? 8 : gap;
+  const top = Number(popupTop)||0;
+  const vh = Number(viewportH)||0;
+  const chrome = Number(chromeH)||0;
+  const minH = 80;
+  if(!(vh>0)) return minH;
+  return Math.max(minH, vh - gap - top - chrome);
+}
+function clampNotesPopupPos(left, top, w, h, vw, vh, gap){
+  gap = (gap==null) ? 8 : gap;
+  const minVisible = 48;
+  let x = Number(left)||0, y = Number(top)||0;
+  const width = Number(w)||0, height = Number(h)||0;
+  if(vw>0) x = Math.min(Math.max(gap, x), Math.max(gap, vw - Math.min(width, vw - gap*2) - gap));
+  if(vh>0) y = Math.min(Math.max(gap, y), Math.max(gap, vh - minVisible - gap));
+  return {left:x, top:y};
+}
+function notesPopupDragShouldStart(target, popup){
+  if(!target || !popup) return false;
+  if(target===popup) return true;
+  if(typeof target.closest!=='function') return false;
+  if(target.closest('.np-editor')) return false;
+  if(target.closest('.np-actions')) return false;
+  if(target.closest('.np-toolbar button')) return false;
+  return !!target.closest('.np-toolbar');
+}
+function notesPopupChromeHeight(popup){
+  if(!popup || !popup.querySelector) return 94;
+  const tape=8;
+  const toolbar=popup.querySelector('.np-toolbar');
+  const actions=popup.querySelector('.np-actions');
+  return tape + (toolbar && toolbar.offsetHeight || 0) + (actions && actions.offsetHeight || 0);
+}
+function applyNotesPopupHeight(popup){
+  if(!popup) return;
+  const top=parseFloat(popup.style.top);
+  const vh=(typeof window!=='undefined' && window.innerHeight) || 0;
+  const chrome=notesPopupChromeHeight(popup);
+  const y=isFinite(top) ? top : ((popup.getBoundingClientRect && popup.getBoundingClientRect().top) || 0);
+  const maxH=notesEditorMaxHeight(y, vh, chrome, 8);
+  popup.style.maxHeight=Math.max(0, vh - y - 8)+'px';
+  const editor=popup.querySelector && popup.querySelector('.np-editor');
+  if(editor) editor.style.maxHeight=maxH+'px';
+}
 function placeNotesPopup(popup, nodeId){
   if(!popup) return;
   const mark = (typeof document!=='undefined' && document.querySelector)
@@ -8100,6 +8286,47 @@ function placeNotesPopup(popup, nodeId){
   );
   popup.style.left = pos.left+'px';
   popup.style.top  = pos.top+'px';
+  applyNotesPopupHeight(popup);
+}
+function bindNotesPopupDrag(popup){
+  if(!popup || popup._npDragBound) return;
+  popup._npDragBound=true;
+  popup.addEventListener('pointerdown', e=>{
+    if(e.button!=null && e.button!==0) return;
+    if(!notesPopupDragShouldStart(e.target, popup)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    _notesSticky=true;
+    clearTimeout(_notesHoverTimer);
+    const startX=e.clientX, startY=e.clientY;
+    const left0=parseFloat(popup.style.left)||0;
+    const top0=parseFloat(popup.style.top)||0;
+    popup.classList.add('np-dragging');
+    const onMove=ev=>{
+      const r=popup.getBoundingClientRect();
+      const pos=clampNotesPopupPos(
+        left0 + ev.clientX - startX,
+        top0 + ev.clientY - startY,
+        r.width, r.height,
+        (typeof window!=='undefined' && window.innerWidth) || 0,
+        (typeof window!=='undefined' && window.innerHeight) || 0,
+        8
+      );
+      popup.style.left=pos.left+'px';
+      popup.style.top=pos.top+'px';
+      applyNotesPopupHeight(popup);
+    };
+    const onUp=()=>{
+      popup.classList.remove('np-dragging');
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+      applyNotesPopupHeight(popup);
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
+  });
 }
 function showNotesEditor(nodeId, opts){
   const sticky=!!(opts && opts.sticky);
@@ -8144,8 +8371,10 @@ function showNotesEditor(nodeId, opts){
   popup.addEventListener('mousedown',e=>{ e.stopPropagation(); pinNotesPopup(popup); });
   popup.addEventListener('mouseenter',()=>clearTimeout(_notesHoverTimer));
   popup.addEventListener('mouseleave',scheduleCloseNotesPreview);
+  bindNotesPopupDrag(popup);
   const editor=popup.querySelector('.np-editor');
   editor.innerHTML = sanitizeNotes(n.notes||'');   // safe: inert-parsed, whitelisted
+  applyNotesPopupHeight(popup);
   if(sticky){
     editor.focus();
     const range=document.createRange(); range.selectNodeContents(editor); range.collapse(false);
@@ -8179,6 +8408,7 @@ function showNotesEditor(nodeId, opts){
   popup.querySelector('.np-clear')?.addEventListener('click',()=>{
     delete map.nodes[nodeId].notes; pushHistory(); render(); close();
   });
+  editor.addEventListener('input',()=>applyNotesPopupHeight(popup));
   editor.addEventListener('keydown',e=>{
     e.stopPropagation();
     if(e.key==='Escape'){ e.preventDefault(); close(); }
