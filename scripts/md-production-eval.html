@@ -1,0 +1,469 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Roc Mind Spark Markdown production evaluation</title>
+  <style>
+/*__PRODUCTION_CSS__*/
+
+/* The evaluation uses the shipped layout and typography. These two overrides make
+   the fixture deterministic while leaving pane/editor geometry to production CSS. */
+#mdPane { transition: none !important; }
+body.md-mode #mdPane { width: 430px !important; }
+html, body { cursor: default !important; }
+</style>
+</head>
+<body class="md-mode">
+  <div class="app" id="app">
+    <aside class="side" id="side" aria-hidden="true"></aside>
+    <div class="stage" id="stage">
+      <div id="viewport"></div>
+    </div>
+  </div>
+
+  <script>
+    // The Node driver replaces the three marked blocks below. The app code is
+    // deliberately inserted from the selected source snapshot so this page
+    // exercises the production ensureMdPane and Markdown editor functions.
+    window.__MD_EVAL_VARIANT = __VARIANT__;
+    window.__MD_EVAL_CASE_NAMES = __CASE_NAMES__;
+
+    // Small shell stubs keep the production Markdown slice independent from
+    // map boot, persistence, and canvas layout. They are only used when the
+    // corresponding control is clicked; the drag path below stays entirely in
+    // the real editor/selection code.
+    function rmsTr(_key, fallback) { return fallback; }
+    function _uiZ() { return 1; }
+    function _stageSize() { return { w: window.innerWidth, h: window.innerHeight }; }
+    function _reframeSmooth() {}
+    function flushMdEdits() {}
+    function toast() {}
+    let view = { x: 0, y: 0, k: 1 };
+    window.__MD_EVAL = { metric: null };
+    window.__MD_EVAL_LOAD_ERRORS = [];
+    window.addEventListener('error', event => {
+      window.__MD_EVAL_LOAD_ERRORS.push(String(event.message || event.error || 'unknown script error'));
+    });
+  </script>
+
+  <script>
+    /*
+     * Install the measurement wrappers before production registers its
+     * listeners. The wrappers never supply selection behaviour: the selected
+     * production implementation owns mousedown/mousemove/mouseup and
+     * paints/commits the real DOM selection. They only measure synchronous
+     * work performed by those production callbacks and rAF updates.
+     */
+    const mdEvalNativeRAF = window.requestAnimationFrame.bind(window);
+    const mdEvalNativeAdd = EventTarget.prototype.addEventListener;
+    const mdEvalNativeRemove = EventTarget.prototype.removeEventListener;
+    const mdEvalWrappedListeners = new WeakMap();
+
+    function mdEvalCaptureFlag(options) {
+      return typeof options === 'boolean' ? options : !!(options && options.capture);
+    }
+
+    function mdEvalTargetListeners(target) {
+      let byListener = mdEvalWrappedListeners.get(target);
+      if (!byListener) {
+        byListener = new Map();
+        mdEvalWrappedListeners.set(target, byListener);
+      }
+      return byListener;
+    }
+
+    function mdEvalWrapListener(target, type, listener, options) {
+      if (typeof listener !== 'function') return listener;
+      if (listener.__mdEvalIgnore) return listener;
+      if (type !== 'mousedown' && type !== 'mousemove' && type !== 'mouseup') return listener;
+      const byListener = mdEvalTargetListeners(target);
+      let byRegistration = byListener.get(listener);
+      if (!byRegistration) {
+        byRegistration = new Map();
+        byListener.set(listener, byRegistration);
+      }
+      const key = type + ':' + mdEvalCaptureFlag(options);
+      if (byRegistration.has(key)) return byRegistration.get(key);
+      const wrapped = function mdEvalMeasuredMouseHandler(event) {
+        const metric = window.__MD_EVAL && window.__MD_EVAL.metric;
+        const measuring = metric && metric.dragging;
+        if (!measuring) return listener.call(this, event);
+        const t0 = performance.now();
+        metric.mouseHandlerCalls++;
+        if (type === 'mousemove') metric.mouseMoves++;
+        try {
+          return listener.call(this, event);
+        } finally {
+          metric.mouseHandlerCpuMs += performance.now() - t0;
+        }
+      };
+      byRegistration.set(key, wrapped);
+      return wrapped;
+    }
+
+    EventTarget.prototype.addEventListener = function(type, listener, options) {
+      const wrapped = mdEvalWrapListener(this, type, listener, options);
+      return mdEvalNativeAdd.call(this, type, wrapped, options);
+    };
+
+    EventTarget.prototype.removeEventListener = function(type, listener, options) {
+      let wrapped = listener;
+      const byListener = mdEvalWrappedListeners.get(this);
+      const byRegistration = byListener && byListener.get(listener);
+      const key = type + ':' + mdEvalCaptureFlag(options);
+      if (byRegistration && byRegistration.has(key)) {
+        wrapped = byRegistration.get(key);
+        byRegistration.delete(key);
+      }
+      return mdEvalNativeRemove.call(this, type, wrapped, options);
+    };
+
+    window.requestAnimationFrame = function mdEvalMeasuredRAF(callback) {
+      return mdEvalNativeRAF(function mdEvalMeasuredFrame(timestamp) {
+        const metric = window.__MD_EVAL && window.__MD_EVAL.metric;
+        const measuring = metric && metric.dragging;
+        if (!measuring) return callback(timestamp);
+        const t0 = performance.now();
+        metric.frames++;
+        try {
+          return callback(timestamp);
+        } finally {
+          metric.frameCpuMs += performance.now() - t0;
+        }
+      });
+    };
+
+  </script>
+
+  <script>
+/*__PRODUCTION_MD_SOURCE__*/
+  </script>
+
+  <script>
+/*__SELECTION_SOURCE__*/
+  </script>
+
+  <script>
+    function mdEvalPlainText(root) {
+      let out = '';
+      const walk = node => {
+        if (!node) return;
+        if (node.nodeType === 3) {
+          out += node.nodeValue || '';
+          return;
+        }
+        if (node.nodeType !== 1) return;
+        if (node !== root && node.getAttribute && node.getAttribute('contenteditable') === 'false') return;
+        for (let child = node.firstChild; child; child = child.nextSibling) walk(child);
+      };
+      walk(root);
+      return out;
+    }
+
+    function mdEvalTextIndex(root) {
+      let length = 0;
+      const starts = new WeakMap();
+      const ends = new WeakMap();
+      const walk = node => {
+        starts.set(node, length);
+        if (node.nodeType === 3) {
+          length += (node.nodeValue || '').length;
+        } else if (node.nodeType === 1 && node.getAttribute('contenteditable') !== 'false') {
+          for (let child = node.firstChild; child; child = child.nextSibling) walk(child);
+        }
+        ends.set(node, length);
+      };
+      walk(root);
+      const offset = (node, at) => {
+        if (!starts.has(node)) return null;
+        if (node.nodeType === 3) return starts.get(node) + Math.max(0, Math.min(at, (node.nodeValue || '').length));
+        const child = node.childNodes[at];
+        return child && starts.has(child) ? starts.get(child) : ends.get(node);
+      };
+      return { length, offset };
+    }
+
+    function mdEvalCaretAtPoint(editor, x, y, index) {
+      if (!document.caretRangeFromPoint) return null;
+      const range = document.caretRangeFromPoint(x, y);
+      if (!range || (!editor.contains(range.startContainer) && range.startContainer !== editor)) return null;
+      return index.offset(range.startContainer, range.startOffset);
+    }
+
+    function mdEvalRect(rect) {
+      if (!rect || !(rect.width >= 0) || !(rect.height >= 0)) return null;
+      return {
+        x: +rect.x.toFixed(3),
+        y: +rect.y.toFixed(3),
+        left: +rect.left.toFixed(3),
+        top: +rect.top.toFixed(3),
+        right: +rect.right.toFixed(3),
+        bottom: +rect.bottom.toFixed(3),
+        width: +rect.width.toFixed(3),
+        height: +rect.height.toFixed(3),
+      };
+    }
+
+    function mdEvalSelection(editor, pointer) {
+      const native = window.getSelection && window.getSelection();
+      const index = mdEvalTextIndex(editor);
+      const result = {
+        anchorOffset: null,
+        focusOffset: null,
+        start: null,
+        end: null,
+        text: '',
+        length: 0,
+        rangeRectCount: 0,
+        focusCaretRect: null,
+        targetOffsetFromBrowser: null,
+      };
+      if (!native || !native.rangeCount) return result;
+      result.anchorOffset = index.offset(native.anchorNode, native.anchorOffset);
+      result.focusOffset = index.offset(native.focusNode, native.focusOffset);
+      if (result.anchorOffset == null || result.focusOffset == null) return result;
+      result.start = Math.min(result.anchorOffset, result.focusOffset);
+      result.end = Math.max(result.anchorOffset, result.focusOffset);
+      const plain = mdEvalPlainText(editor);
+      result.text = plain.slice(result.start, result.end);
+      result.length = result.end - result.start;
+      const range = native.getRangeAt(0);
+      result.rangeRectCount = range.getClientRects().length;
+      try {
+        const caret = document.createRange();
+        caret.setStart(native.focusNode, native.focusOffset);
+        caret.collapse(true);
+        result.focusCaretRect = mdEvalRect(caret.getBoundingClientRect());
+      } catch (_) {
+        result.focusCaretRect = null;
+      }
+      if (pointer) result.targetOffsetFromBrowser = mdEvalCaretAtPoint(editor, pointer.x, pointer.y, index);
+      return result;
+    }
+
+    function mdEvalGeometry(selection, pointer) {
+      const caret = selection.focusCaretRect;
+      if (!caret || !pointer) {
+        return {
+          pointer: pointer || null,
+          caret: caret || null,
+          absDx: null,
+          absDy: null,
+          distancePx: null,
+          exactHit: null,
+          offsetDelta: null,
+          withinLine: null,
+        };
+      }
+      const nearestX = Math.max(caret.left, Math.min(pointer.x, caret.right));
+      const nearestY = Math.max(caret.top, Math.min(pointer.y, caret.bottom));
+      const dx = Math.abs(pointer.x - nearestX);
+      const dy = Math.abs(pointer.y - nearestY);
+      const lineHeight = Math.max(1, caret.height || 20);
+      return {
+        pointer: { x: +pointer.x.toFixed(3), y: +pointer.y.toFixed(3) },
+        caret,
+        absDx: +dx.toFixed(3),
+        absDy: +dy.toFixed(3),
+        distancePx: +Math.hypot(dx, dy).toFixed(3),
+        exactHit: selection.targetOffsetFromBrowser != null && selection.focusOffset === selection.targetOffsetFromBrowser,
+        offsetDelta: selection.targetOffsetFromBrowser == null || selection.focusOffset == null
+          ? null : selection.focusOffset - selection.targetOffsetFromBrowser,
+        withinLine: dy <= lineHeight,
+      };
+    }
+
+    function mdEvalStartMetric(event) {
+      const editor = document.getElementById('mdEditor');
+      if (!editor || event.button !== 0 || !editor.contains(event.target)) return;
+      const metric = window.__MD_EVAL && window.__MD_EVAL.metric;
+      if (!metric) return;
+      metric.dragging = true;
+      metric.startedAt = performance.now();
+      metric.startPointer = { x: event.clientX, y: event.clientY };
+    }
+    mdEvalStartMetric.__mdEvalIgnore = true;
+    document.addEventListener('mousedown', mdEvalStartMetric, true);
+
+    function mdEvalFinishMetric(event) {
+      const metric = window.__MD_EVAL && window.__MD_EVAL.metric;
+      const editor = document.getElementById('mdEditor');
+      if (!metric || !editor || !metric.dragging || event.button !== 0) return;
+      metric.endPointer = { x: event.clientX, y: event.clientY };
+      // Let selectionchange and any final queued frame be observed before the
+      // metric stops counting. Each setup replaces the metric object, so this
+      // timeout cannot bleed into the next case.
+      const captured = metric;
+      setTimeout(() => {
+        captured.selection = mdEvalSelection(editor, captured.endPointer);
+        captured.geometry = mdEvalGeometry(captured.selection, captured.endPointer);
+        captured.endedAt = performance.now();
+        captured.durationMs = captured.endedAt - captured.startedAt;
+        captured.layerChildrenAtRelease = (document.getElementById('mdSelLayer') || { children: [] }).children.length;
+        captured.dragging = false;
+      }, 0);
+    }
+    mdEvalFinishMetric.__mdEvalIgnore = true;
+    window.addEventListener('mouseup', mdEvalFinishMetric);
+
+    document.addEventListener('selectionchange', () => {
+      const metric = window.__MD_EVAL && window.__MD_EVAL.metric;
+      if (metric && metric.dragging) metric.selectionChanges++;
+    });
+
+    function mdEvalMetric(name, lines, wrap) {
+      return {
+        name,
+        lines,
+        wrap,
+        dragging: false,
+        startedAt: null,
+        endedAt: null,
+        durationMs: null,
+        startPointer: null,
+        endPointer: null,
+        mouseHandlerCalls: 0,
+        mouseMoves: 0,
+        mouseHandlerCpuMs: 0,
+        frames: 0,
+        frameCpuMs: 0,
+        selectionChanges: 0,
+        layerChildrenAtRelease: null,
+        selection: null,
+        geometry: null,
+      };
+    }
+
+    function mdEvalCaseSpec(name) {
+      const match = /^(?:mixed-bold-)?(400|4000)-(wrap|nowrap)$/.exec(name);
+      if (!match) throw new Error('Unknown Markdown production evaluation case: ' + name);
+      return { lines: Number(match[1]), wrap: match[2] === 'wrap' };
+    }
+
+    function mdEvalText(lines) {
+      const rows = [];
+      for (let i = 0; i < lines; i++) {
+        if (i === 0) {
+          rows.push('# Markdown production selection benchmark — **English bold** / **中文粗体**');
+        } else {
+          rows.push(
+            '- item ' + i + ' / **English bold ' + i + '** / **中文粗体 ' + i + '** / '
+            + 'mixed content keeps the real browser glyph positions for drag selection'
+          );
+        }
+      }
+      return rows.join('\n');
+    }
+
+    function mdEvalResetProductionState(text) {
+      // The full app normally fills these through syncTextFromMap(). The fixture
+      // supplies the same authoritative text so the production highlighter and,
+      // for the legacy baseline, mdToggleWrap/mdRefreshDecorations see a valid
+      // Markdown view without running unrelated map boot code.
+      if (typeof _mdFullText !== 'undefined') _mdFullText = text;
+      if (typeof _mdFolds !== 'undefined') _mdFolds = new Set();
+      if (typeof mdBuildView === 'function' && typeof _mdView !== 'undefined') _mdView = mdBuildView();
+      if (typeof _mdPrevVisible !== 'undefined') _mdPrevVisible = text;
+    }
+
+    function mdEvalSetup(name) {
+      const spec = mdEvalCaseSpec(name);
+      if (typeof ensureMdPane !== 'function') {
+        throw new Error('production ensureMdPane() was not loaded; load errors: ' + JSON.stringify(window.__MD_EVAL_LOAD_ERRORS));
+      }
+      ensureMdPane();
+      const pane = document.getElementById('mdPane');
+      const editor = document.getElementById('mdEditor');
+      if (!pane || !editor) throw new Error('ensureMdPane() did not create #mdPane/#mdEditor');
+
+      const text = mdEvalText(spec.lines);
+      const metric = mdEvalMetric(name, spec.lines, spec.wrap);
+      window.__MD_EVAL.metric = metric;
+      window.getSelection().removeAllRanges();
+      mdEvalResetProductionState(text);
+      delete editor._mdPaintedHTML;
+      editor.value = text;
+      editor.scrollTop = 0;
+      editor.scrollLeft = 0;
+
+      const currentlyWrapped = typeof mdWrap !== 'undefined' && !!mdWrap;
+      if (currentlyWrapped !== spec.wrap) {
+        // mdToggleWrap is the production entry point. State was prepared above
+        // because the legacy implementation refreshes decorations on toggle.
+        mdToggleWrap();
+      }
+      document.body.classList.add('md-mode');
+      editor.focus();
+      editor.scrollTop = 0;
+      editor.scrollLeft = 0;
+
+      const box = editor.getBoundingClientRect();
+      metric.editorBox = {
+        left: +box.left.toFixed(3), top: +box.top.toFixed(3),
+        width: +box.width.toFixed(3), height: +box.height.toFixed(3),
+      };
+      metric.boldSpans = editor.querySelectorAll('.hl-strong').length;
+      metric.textLength = text.length;
+      metric.nativeSelectionBeforeDrag = mdEvalSelection(editor, null);
+      // md-select-eval.swift receives a DOM-style top coordinate but converts
+      // it through AppKit's bottom-left window coordinates before posting the
+      // NSEvent. Keep its fixed drag path inside the actual editor: start near
+      // the lower edge and travel upward by 280 CSS px. The geometry reported
+      // above remains the real editor box; these two values are only the
+      // runner's coordinate contract.
+      const runnerStartY = Math.max(box.top + 24, box.bottom - 20);
+      const runnerTop = window.innerHeight - runnerStartY - 28;
+      const runnerHeight = 304;
+      metric.runnerTop = runnerTop;
+      metric.runnerHeight = runnerHeight;
+      metric.runnerStartY = runnerStartY;
+      metric.runnerViewportHeight = window.innerHeight;
+      return {
+        name,
+        lines: spec.lines,
+        wrap: spec.wrap,
+        textLength: text.length,
+        left: box.left,
+        top: runnerTop,
+        width: box.width,
+        height: runnerHeight,
+        runnerStartY,
+        runnerViewportHeight: window.innerHeight,
+      };
+    }
+
+    function mdEvalSummarize() {
+      const metric = window.__MD_EVAL.metric;
+      const out = { ...metric };
+      out.mouseProcessingCpuMs = +(metric.mouseHandlerCpuMs + metric.frameCpuMs).toFixed(3);
+      out.eventCpuMs = +metric.mouseHandlerCpuMs.toFixed(3);
+      out.frameCpuMs = +metric.frameCpuMs.toFixed(3);
+      out.durationMs = metric.durationMs == null ? null : +metric.durationMs.toFixed(3);
+      out.listenersReleased = typeof _mdSelection !== 'undefined'
+        ? !_mdSelection.active
+        : (typeof _mdDrag === 'undefined' || !_mdDrag);
+      out.layerChildrenAfterRelease = (document.getElementById('mdSelLayer') || { children: [] }).children.length;
+      out.production = {
+        ensureMdPane: typeof ensureMdPane === 'function',
+        selectionModule: typeof createMarkdownSelection === 'function' ? 'markdown-selection.js' : 'legacy-app.js',
+        nativeContentEditable: document.getElementById('mdEditor')?.contentEditable === 'true',
+        boldSpans: metric.boldSpans,
+      };
+      // `performance.now()` is the only portable page-side clock available in
+      // WKWebView. The value is synchronous JS callback time, which is the
+      // browser-side processing cost observed here; it is not whole-process
+      // CPU accounting from macOS Activity Monitor.
+      out.cpuTimeBasis = 'synchronous production mouse handlers and rAF callbacks measured with performance.now()';
+      return out;
+    }
+
+    window.__EVAL = {
+      names: window.__MD_EVAL_CASE_NAMES,
+      setup: mdEvalSetup,
+      summarize: mdEvalSummarize,
+    };
+    window.__EVAL_READY = true;
+  </script>
+</body>
+</html>
