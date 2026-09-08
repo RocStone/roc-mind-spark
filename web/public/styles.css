@@ -194,20 +194,7 @@
   #mdPane .md-close:hover{background:var(--paper-2,rgba(0,0,0,.05))}
   #mdPane .md-body{display:flex;flex:1;min-height:0;overflow:hidden}
   #mdPane .md-code{position:relative;flex:1;min-width:0;overflow:hidden}
-  #mdPane .md-hl,#mdEditor{position:absolute;inset:0;margin:0;box-sizing:border-box;padding:12px 14px;border:0;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;line-height:20px;white-space:pre;tab-size:2}
-  #mdPane .md-hl{overflow:hidden;pointer-events:none;color:var(--ink);contain:paint;display:none}
-  /* Scroll-sync targets a plain inner wrapper via transform, not the outer .md-hl/.md-gutter
-     (which must stay put so their own overflow:hidden keeps clipping the visible window). */
-  #mdPane .md-hl-inner,#mdPane .md-gutter-inner{will-change:auto}
-  #mdPane.md-scrolling .md-hl-inner,#mdPane.md-scrolling .md-gutter-inner{will-change:transform}
-  #mdPane .md-hl .hl-line{min-height:20px}
-  /* active-line highlight: a real background on the actual row div — it's always exactly
-     where the caret is, in or out of view, with no separate pixel math to keep in sync
-     while clicking or scrolling (that used to drift; this can't). */
-  #mdPane .md-hl .hl-line.active{background:var(--paper-2,rgba(127,127,127,.10))}
-  #mdPane .md-fold-chip{display:inline-block;margin-left:6px;padding:0 7px;border-radius:8px;background:color-mix(in srgb, var(--ink-soft) 16%, transparent);color:var(--ink-soft);font-size:11px;font-style:normal}
-  #mdPane .md-hl{z-index:1}
-  #mdEditor{z-index:2}
+  #mdEditor{position:absolute;inset:0;margin:0;box-sizing:border-box;padding:12px 14px;border:0;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;line-height:20px;white-space:pre;tab-size:2}
   #mdSelLayer{position:absolute;inset:0;overflow:hidden;pointer-events:none;z-index:3}
   #mdSelLayer i{position:absolute;background:rgba(224,97,58,.32)}
   #mdEditor.md-drag-sel{caret-color:transparent}
@@ -218,20 +205,14 @@
   #mdPane .md-wrap-btn{margin-left:2px;border:1px solid var(--line);background:transparent;color:var(--ink-soft);cursor:pointer;font-size:11px;font-weight:600;padding:2px 9px;border-radius:6px}
   #mdPane .md-wrap-btn.on{background:var(--accent);color:#fff;border-color:var(--accent)}
   #mdPane.md-preview .md-wrap-btn{display:none}
-  /* Word wrap: the textarea and highlight overlay share this rule so switching both to
-     pre-wrap at once keeps them pixel-aligned (identical font/width/padding/text, so the
-     browser wraps them the same way). The gutter's rows are normally a fixed 20px each
-     (one line = one row); once wrapped, a line can span several visual rows, so
-     mdSyncGutterRowHeights() overrides each .gl row's height in JS to match its
-     corresponding .hl-line's actual (now possibly taller) rendered height. */
-  #mdPane.md-wrap .md-hl,#mdPane.md-wrap #mdEditor{white-space:pre-wrap;overflow-wrap:anywhere}
+  #mdPane.md-wrap #mdEditor{white-space:pre-wrap;overflow-wrap:anywhere}
   #mdPane .md-pdf-btn{display:none;border:1px solid var(--line);background:transparent;color:var(--ink-soft);cursor:pointer;font-size:11px;font-weight:600;padding:2px 9px;border-radius:6px}
   #mdPane .md-pdf-btn:hover{background:var(--paper-2,rgba(127,127,127,.12));color:var(--ink)}
   #mdPane.md-preview .md-pos{display:none}
   #mdPane.md-preview .md-pdf-btn{display:inline-flex;margin-left:auto}
   #mdPane .md-prev{position:absolute;inset:0;display:none;overflow:auto;padding:16px 22px;background:var(--paper);color:var(--ink);z-index:4;line-height:1.6;text-align:left}
   #mdPane.md-preview .md-prev{display:block}
-  #mdPane.md-preview .md-hl,#mdPane.md-preview #mdEditor,#mdPane.md-preview .md-gutter,#mdPane.md-preview #mdSelLayer{display:none}
+  #mdPane.md-preview #mdEditor,#mdPane.md-preview #mdSelLayer{display:none}
   #mdPane .md-prev h1,#mdPane .md-prev h2,#mdPane .md-prev h3{margin:.6em 0 .3em;line-height:1.25}
   #mdPane .md-prev h1{font-size:1.6em;border-bottom:1px solid var(--line);padding-bottom:.2em}
   #mdPane .md-prev h2{font-size:1.3em;border-bottom:1px solid var(--line);padding-bottom:.2em}

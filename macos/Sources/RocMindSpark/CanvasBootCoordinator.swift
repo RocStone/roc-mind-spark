@@ -41,6 +41,13 @@ struct CanvasBootCoordinator: Equatable {
         }
     }
 
+    /// The page stays alive, but API operations need a new server. A Retry
+    /// must be accepted without discarding the user's in-memory editor state.
+    mutating func markServiceUnavailable() {
+        guard phase == .ready else { return }
+        phase = .failed
+    }
+
     var showsStatus: Bool {
         switch phase {
         case .starting, .failed, .retrying: return true

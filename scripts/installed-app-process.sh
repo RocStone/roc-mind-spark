@@ -4,8 +4,8 @@
 # Ownership is never "a Node whose args contain server.js". This helper
 # only stops PIDs whose txt executable equals DEST's RocMindSpark.
 # After SIGTERM it waits so applicationWillTerminate can stop the app's
-# own Node child. SIGKILL is only for an App PID that is still that
-# exact executable after the wait. Never kill Node.
+# own Node child. A save failure can refuse termination; leave that app and
+# its drafts alive rather than forcing an install. Never kill Node.
 # Bash 3.2 compatible. No mapfile.
 
 txt_output_has_exact_path() {
@@ -59,10 +59,10 @@ list_exact_app_pids() {
   filter_still_exact_app_pids "$dest_bin" $pids
 }
 
-# App-stop wait must exceed HeldProcessStop.gracefulSeconds (5) +
-# killSeconds (1) = 6s. 10s leaves scheduling slack so this script does
-# not SIGKILL the App while it is still force-stopping its held Node.
-APP_STOP_WAIT_SECONDS=10
+# App-stop wait must exceed HeldProcessStop's 6s plus the normal quit save
+# handshake's 5s. Allow scheduling slack, then abort installation if the app
+# is still open (it may have refused to quit to protect unsaved drafts).
+APP_STOP_WAIT_SECONDS=15
 
 # Re-check the exact executable immediately before SIGTERM. This avoids
 # signaling a PID that exited or was reused after the initial candidate list.
@@ -93,8 +93,8 @@ wait_exact_app_exit() {
 }
 
 # SIGTERM exact DEST app PIDs, wait for a graceful exit so
-# applicationWillTerminate can stop the app's Node child, then SIGKILL
-# only leftovers that still match DEST_BIN.
+# applicationWillTerminate can stop the app's Node child. A timeout aborts
+# installation; it must never bypass the application's unsaved-work guard.
 # $1 = absolute path of $DEST/Contents/MacOS/RocMindSpark
 # $2 = optional wait seconds (default APP_STOP_WAIT_SECONDS)
 stop_exact_installed_app() {
@@ -109,12 +109,8 @@ stop_exact_installed_app() {
   if wait_exact_app_exit "$dest_bin" "$timeout_sec"; then
     return 0
   fi
-  remaining="$(list_exact_app_pids "$dest_bin")"
-  for pid in $remaining; do
-    if pid_is_running "$pid" && pid_has_exact_executable "$pid" "$dest_bin"; then
-      kill -9 "$pid" 2>/dev/null || true
-    fi
-  done
+  echo "Roc Mind Spark is still open. Save or cancel pending edits, quit the app, and retry installation." >&2
+  return 1
 }
 
 report_port_listeners() {

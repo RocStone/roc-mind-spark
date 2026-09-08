@@ -43,6 +43,13 @@ final class HeldChildPolicyTests: XCTestCase {
 }
 
 final class TerminationOnceTests: XCTestCase {
+    func testCancelledTerminationCanBeRequestedAgain() {
+        var state = TerminationOnce()
+        XCTAssertTrue(state.request())
+        state.reset()
+        XCTAssertTrue(state.request())
+    }
+
     func testTerminateRequestFiresOnce() {
         var once = TerminationOnce()
         XCTAssertTrue(once.request())

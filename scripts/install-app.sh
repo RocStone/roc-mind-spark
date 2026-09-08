@@ -20,8 +20,8 @@ fi
 # Stop only the already-installed overlay whose text executable is DEST_BIN.
 # SIGTERM is converted inside the app to NSApp.terminate(nil), which runs
 # applicationWillTerminate and waits for the held Node child. Do not kill Node.
-# APP_STOP_WAIT_SECONDS (10) is strictly greater than HeldProcessStop's
-# worst-case 5s graceful + 1s SIGKILL of the held Node.
+# APP_STOP_WAIT_SECONDS (15) covers the 5s save handshake plus the held
+# child's worst-case 5s graceful + 1s SIGKILL. Abort if saving refuses quit.
 stop_exact_installed_app "$DEST_BIN" "$APP_STOP_WAIT_SECONDS"
 
 # Give that child a bounded window to release 3034. Wait/report only.

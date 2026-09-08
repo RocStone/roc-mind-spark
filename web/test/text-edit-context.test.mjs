@@ -9,21 +9,6 @@ const here = dirname(fileURLToPath(import.meta.url));
 const src = readFileSync(join(here, '..', 'public', 'app.js'), 'utf8');
 const css = readFileSync(join(here, '..', 'public', 'styles.css'), 'utf8');
 
-describe('md drag-select geometry', () => {
-  const { mdColAtWidth, mdIndexAtLineCol } = loadFns(['mdColAtWidth', 'mdIndexAtLineCol']);
-  test('col is the last prefix not wider than x', () => {
-    const widthOf = s => s.length * 10;
-    assert.equal(mdColAtWidth('abcd', 0, widthOf), 0);
-    assert.equal(mdColAtWidth('abcd', 10, widthOf), 1);
-    assert.equal(mdColAtWidth('abcd', 25, widthOf), 2);
-    assert.equal(mdColAtWidth('abcd', 40, widthOf), 4);
-  });
-  test('index stacks line lengths plus newlines', () => {
-    assert.equal(mdIndexAtLineCol(['ab', 'cd'], 1, 1), 4);
-    assert.equal(mdIndexAtLineCol(['ab', 'cd'], 0, 2), 2);
-  });
-});
-
 describe('mdHighlight fold marker', () => {
   test('fold count is a data-fold attribute, not extra text', () => {
     const view = {
@@ -196,7 +181,7 @@ describe('click-and-drag selection hot path', () => {
     assert.doesNotMatch(src, /class="md-gutter"/);
   });
 
-  test('Markdown drag-select is native selection on contenteditable colored text', () => {
+  test('Markdown keeps colored contenteditable text and a temporary drag layer', () => {
     assert.match(src, /<pre id="mdEditor"/);
     assert.match(src, /id="mdSelLayer"/);
     assert.match(src, /id="mdEditor"[^>]*contenteditable="true"/);

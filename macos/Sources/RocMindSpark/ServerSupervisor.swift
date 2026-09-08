@@ -7,12 +7,16 @@ import Foundation
 @MainActor
 final class ServerSupervisor {
     private var process: Process?
+    private let childStopQueue = DispatchQueue(label: "com.roc.mindspark.child-stop", qos: .utility)
     /// PID recorded when our Process started. Force-kill uses this, never lsof.
     private var heldChildPID: Int32?
     private var didLaunch = false
     /// Confirms the child we just started is the one answering /healthz.
     /// Not an API credential.
     private var launchToken: String?
+    private var becameHealthy = false
+    var onUnexpectedExit: (@MainActor () -> Void)?
+    var hasHealthyRunningChild: Bool { becameHealthy && process?.isRunning == true }
 
     func ensureRunning() async throws {
         if didLaunch, let process, process.isRunning, await healthMatchesOurChild() {
@@ -22,23 +26,65 @@ final class ServerSupervisor {
             try await stopOurChildAndWaitForPort()
         }
 
-        if let first = CanvasPortPolicy.foreignOccupants(
-            listenPIDs: LoopbackPort.listenPIDs(port: AppConfig.port),
-            ourChildPID: nil
-        ).first {
-            throw ServerError.portInUse(pid: first, command: LoopbackPort.commandPreview(pid: first))
-        }
-
-        try start()
-        let waitUntil = Date().addingTimeInterval(8)
-        while Date() < waitUntil {
-            if let process, !process.isRunning {
-                throw ServerError.didNotBecomeHealthy
+        try await checkPortAvailable()
+        let node = try await Task.detached(priority: .utility) { try Self.findNode() }.value
+        try start(node: node)
+        do {
+            let waitUntil = Date().addingTimeInterval(8)
+            while Date() < waitUntil {
+                if let process, !process.isRunning {
+                    // A different listener may have won the race after preflight.
+                    try await checkPortAvailable()
+                    throw ServerError.didNotBecomeHealthy
+                }
+                if await healthMatchesOurChild() {
+                    becameHealthy = true
+                    return
+                }
+                try await Task.sleep(nanoseconds: 80_000_000)
             }
-            if await healthMatchesOurChild() { return }
-            try await Task.sleep(nanoseconds: 80_000_000)
+            throw ServerError.didNotBecomeHealthy
+        } catch {
+            await stopHeldChildAsync()
+            throw error
         }
-        throw ServerError.didNotBecomeHealthy
+    }
+
+    private func checkPortAvailable() async throws {
+        let listening = await Self.listeningPIDs()
+        if let first = CanvasPortPolicy.foreignOccupants(listenPIDs: listening, ourChildPID: heldChildPID).first {
+            let command = await Task.detached(priority: .utility) { LoopbackPort.commandPreview(pid: first) }.value
+            throw ServerError.portInUse(pid: first, command: command)
+        }
+    }
+
+    private nonisolated static func listeningPIDs() async -> [Int32] {
+        await Task.detached(priority: .utility) { LoopbackPort.listenPIDs(port: AppConfig.port) }.value
+    }
+
+    private func stopHeldChildAsync() async {
+        guard let child = process else { clearChildState(); return }
+        let pid = heldChildPID
+        child.terminationHandler = nil
+        becameHealthy = false
+        // Retain ownership until the child is gone. A quit during this await
+        // must still find the held child, and the serial queue prevents two
+        // callers from concurrently terminating/escalating the same Process.
+        await withCheckedContinuation { continuation in
+            childStopQueue.async {
+                HeldProcessStop.stop(child, recordedPID: pid)
+                continuation.resume()
+            }
+        }
+        if process === child { clearChildState() }
+    }
+
+    private func clearChildState() {
+        process = nil
+        heldChildPID = nil
+        didLaunch = false
+        launchToken = nil
+        becameHealthy = false
     }
 
     func stopIfLaunched() {
@@ -48,12 +94,11 @@ final class ServerSupervisor {
     /// Block until the held child is gone, then drop the reference.
     private func stopHeldChild() {
         if let child = process {
-            HeldProcessStop.stop(child, recordedPID: heldChildPID)
+            child.terminationHandler = nil
+            let pid = heldChildPID
+            childStopQueue.sync { HeldProcessStop.stop(child, recordedPID: pid) }
         }
-        process = nil
-        heldChildPID = nil
-        didLaunch = false
-        launchToken = nil
+        clearChildState()
     }
 
     /// Stop the held Process (same path as `stopIfLaunched`), then wait until
@@ -66,30 +111,31 @@ final class ServerSupervisor {
             return
         }
         let childPID = heldChildPID ?? child.processIdentifier
-        stopHeldChild()
+        await stopHeldChildAsync()
 
         let portDeadline = Date().addingTimeInterval(2)
         while Date() < portDeadline {
-            let listening = LoopbackPort.listenPIDs(port: AppConfig.port)
+            let listening = await Self.listeningPIDs()
             if listening.isEmpty { return }
             let foreign = CanvasPortPolicy.foreignOccupants(listenPIDs: listening, ourChildPID: childPID)
             if let first = foreign.first {
-                throw ServerError.portInUse(pid: first, command: LoopbackPort.commandPreview(pid: first))
+                let command = await Task.detached(priority: .utility) { LoopbackPort.commandPreview(pid: first) }.value
+                throw ServerError.portInUse(pid: first, command: command)
             }
             try await Task.sleep(nanoseconds: 50_000_000)
         }
         let leftover = CanvasPortPolicy.foreignOccupants(
-            listenPIDs: LoopbackPort.listenPIDs(port: AppConfig.port),
+            listenPIDs: await Self.listeningPIDs(),
             ourChildPID: childPID
         )
         if let first = leftover.first {
-            throw ServerError.portInUse(pid: first, command: LoopbackPort.commandPreview(pid: first))
+            let command = await Task.detached(priority: .utility) { LoopbackPort.commandPreview(pid: first) }.value
+            throw ServerError.portInUse(pid: first, command: command)
         }
         throw ServerError.didNotBecomeHealthy
     }
 
-    private func start() throws {
-        let node = try Self.findNode()
+    private func start(node: URL) throws {
         let web = Paths.webRoot
         let server = Paths.serverJSFile
         guard FileManager.default.isReadableFile(atPath: server.path) else {
@@ -115,6 +161,13 @@ final class ServerSupervisor {
         try log.seekToEnd()
         proc.standardOutput = log
         proc.standardError = log
+        proc.terminationHandler = { [weak self] child in
+            Task { @MainActor [weak self] in
+                guard let self, self.process === child, self.becameHealthy else { return }
+                self.becameHealthy = false
+                self.onUnexpectedExit?()
+            }
+        }
         try proc.run()
         process = proc
         heldChildPID = proc.processIdentifier
@@ -145,7 +198,7 @@ final class ServerSupervisor {
         return url
     }
 
-    private static func findNode() throws -> URL {
+    private nonisolated static func findNode() throws -> URL {
         if let fromEnv = ProcessInfo.processInfo.environment["ROC_MINDSPARK_NODE"] {
             let url = URL(fileURLWithPath: fromEnv)
             if FileManager.default.isExecutableFile(atPath: url.path) { return url }
@@ -185,6 +238,7 @@ enum ServerError: LocalizedError {
     case nodeNotFound
     case missingServer(String)
     case didNotBecomeHealthy
+    case stoppedUnexpectedly
     case portInUse(pid: Int32, command: String)
 
     var errorDescription: String? {
@@ -193,6 +247,8 @@ enum ServerError: LocalizedError {
             return L10n.t("error.node")
         case .missingServer(let path):
             return String(format: L10n.t("error.server"), path)
+        case .stoppedUnexpectedly:
+            return L10n.t("error.serverStopped")
         case .didNotBecomeHealthy:
             return String(format: L10n.t("error.timeout"), Paths.serverLogFile.path)
         case .portInUse(let pid, let command):

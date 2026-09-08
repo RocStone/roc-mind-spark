@@ -4,6 +4,13 @@ Versions follow the macOS bundle `CFBundleShortVersionString` and the matching G
 
 ## [Unreleased]
 
+- Added a feature requirement baseline and implementation review with acceptance criteria.
+- Markdown drag selection now uses WebKit glyph geometry, a per-gesture text index, and visible-range painting once per frame. Removed the retired textarea highlight/gutter path.
+- Markdown edits retain node identity, marker/dimension metadata, and valid cross-links. Closing the pane flushes pending text; selection and navigation work in wrapped and read-only text.
+- Saves are serialized per map with immutable snapshots, latest-edit status, retry, and ordered deletion. Map/history reads ignore stale responses; storage failures no longer masquerade as empty data. Undo restores complete content snapshots and persists the restored state.
+- Launcher window queries run off the main thread. Server startup/retry no longer synchronously waits for process probes, and an unexpected child exit offers Retry without discarding the live page.
+- Normal quit waits for pending saves and stays open on failure. Installation aborts if the app refuses to quit, with a 15-second graceful-exit allowance. Keeping the canvas warm no longer prevents idle system sleep.
+
 - Click-and-drag text selection in a node no longer tracks through a CSS transform. The editor sits on `#stage`, sized by font and padding, with `transform: none`.
 - The Markdown editor paints drag-select itself from the pointer, because WK native `::selection` trails the mouse by a hundred-plus pixels even when `selectionchange` is firing.
 - Display size scales chrome density via `--ui-zoom`. Pointer math no longer treats that token as a coordinate scale.

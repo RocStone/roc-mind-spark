@@ -12,6 +12,8 @@ struct TerminationOnce: Equatable {
         requested = true
         return true
     }
+
+    mutating func reset() { requested = false }
 }
 
 /// Ignore default SIGTERM, then deliver it on the main queue as a normal
@@ -35,6 +37,10 @@ final class POSIXTerminationBridge: @unchecked Sendable {
         source.resume()
         self.source = source
     }
+
+    /// The production signal source and AppKit cancellation callback both run
+    /// on the main queue. A failed save must allow a later SIGTERM to retry.
+    func resetAfterCancelledTermination() { once.reset() }
 
     /// Same path the DispatchSource handler uses. Safe to call from tests.
     func handleSignal() {

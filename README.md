@@ -16,7 +16,7 @@ The canvas is [MindSpark](https://github.com/prasadpatil25/MindSpark) by Prasad 
 - In-app English / 中文 for the interface (not for the text you type in nodes)
 - Autosave maps to a local SQLite file
 
-The full product catalog is [docs/FEATURES.md](docs/FEATURES.md). Chinese: [docs/FEATURES.zh.md](docs/FEATURES.zh.md). That list is what the app can do, not a changelog.
+The full product catalog is [docs/FEATURES.md](docs/FEATURES.md). Chinese: [docs/FEATURES.zh.md](docs/FEATURES.zh.md). See also the [requirements and acceptance baseline](docs/REQUIREMENTS.zh.md) and [implementation review](docs/IMPLEMENTATION_REVIEW.zh.md) (Chinese).
 
 ## 30-second start
 

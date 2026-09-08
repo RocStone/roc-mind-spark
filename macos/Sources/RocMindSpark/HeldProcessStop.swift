@@ -7,8 +7,8 @@ import Foundation
 ///
 /// Worst-case block is `gracefulSeconds + killSeconds` (5 + 1 = 6s).
 /// `scripts/installed-app-process.sh` must wait strictly longer than that
-/// before SIGKILL of the App, or the shell can kill the App mid-cleanup
-/// and orphan the Node child.
+/// plus the 5s save handshake before declaring an install blocked. It must
+/// not force-kill an app that refused to quit with unsaved work.
 enum HeldProcessStop {
     static let gracefulSeconds: TimeInterval = 5
     static let killSeconds: TimeInterval = 1

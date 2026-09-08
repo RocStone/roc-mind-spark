@@ -16,7 +16,7 @@ macOS **原生浮层**思维导图。任意 App、任意桌面、任意全屏 Sp
 - 应用内 English / 中文，作用在界面，不翻译你在节点里写的字
 - 地图自动保存到本机 SQLite
 
-完整产品目录在 [docs/FEATURES.zh.md](docs/FEATURES.zh.md)。英文：[docs/FEATURES.md](docs/FEATURES.md)。那是「现在能做什么」，不是变更日志。
+完整产品目录在 [docs/FEATURES.zh.md](docs/FEATURES.zh.md)。英文：[docs/FEATURES.md](docs/FEATURES.md)。另有 [需求与验收基线](docs/REQUIREMENTS.zh.md) 和 [实现评估](docs/IMPLEMENTATION_REVIEW.zh.md)，用于核对功能、实现方式和性能证据。
 
 ## 30 秒上手
 

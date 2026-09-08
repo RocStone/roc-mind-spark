@@ -1,0 +1,1160 @@
+{
+  "schema": "roc-mind-spark/md-production-eval/v1",
+  "generatedAt": "2026-09-08T01:20:14.745Z",
+  "runner": "scripts/md-select-eval.swift",
+  "runnerMode": "overlay-panel",
+  "cases": [
+    "mixed-bold-400-nowrap",
+    "mixed-bold-400-wrap",
+    "mixed-bold-4000-nowrap",
+    "mixed-bold-4000-wrap"
+  ],
+  "interpretation": {
+    "dragDirection": "reverse (bottom-to-top)",
+    "geometry": "release pointer vs native Selection focus caret; legacy mdSetSel() sorts the range before commit, so reverse-drag distance can reflect endpoint direction loss rather than drag-paint latency",
+    "cpu": "synchronous production mouse handlers and rAF callbacks measured with performance.now(); this is browser-side callback time, not whole-process CPU accounting"
+  },
+  "source": {
+    "worktree": {
+      "path": "web/public/app.js",
+      "sha256": "ca3716c2acc68fee4567d98c851960af0baf1120e969a0e35a38795ef20b7ece",
+      "selectionModule": "web/public/markdown-selection.js"
+    },
+    "baseline": {
+      "ref": "84bf2fa",
+      "path": "web/public/app.js",
+      "sha256": "17f9b68027ac5f4b35112616a4ae264ae04ce72efd13a406608d5dd50c84d89c",
+      "selectionModule": "legacy selection in app.js"
+    }
+  },
+  "evaluation": {
+    "cases": [
+      {
+        "startPointer": {
+          "x": 292,
+          "y": 540
+        },
+        "textLength": 48824,
+        "mouseProcessingCpuMs": 16,
+        "mouseHandlerCpuMs": 9,
+        "layerChildrenAtRelease": 0,
+        "endPointer": {
+          "x": 628,
+          "y": 288
+        },
+        "dragDirection": "reverse (bottom-to-top)",
+        "endedAt": 543,
+        "production": {
+          "ensureMdPane": true,
+          "boldSpans": 798,
+          "nativeContentEditable": true,
+          "selectionModule": "markdown-selection.js"
+        },
+        "geometryBasis": "release pointer vs native Selection focus caret; reverse-drag legacy focus sorting can reflect endpoint direction loss rather than drag-paint latency",
+        "mouseMoves": 40,
+        "selectionChanges": 2,
+        "editorBox": {
+          "top": 102,
+          "width": 429,
+          "left": 268,
+          "height": 458
+        },
+        "layerChildrenAfterRelease": 0,
+        "runnerStartY": 540,
+        "dragging": false,
+        "listenersReleased": true,
+        "startedAt": 324,
+        "frameCpuMs": 7,
+        "runnerTop": -8,
+        "cpuTimeBasis": "synchronous production mouse handlers and rAF callbacks measured with performance.now()",
+        "geometry": {
+          "absDy": 0,
+          "distancePx": 1,
+          "exactHit": true,
+          "offsetDelta": 0,
+          "pointer": {
+            "x": 628,
+            "y": 288
+          },
+          "absDx": 1,
+          "withinLine": true,
+          "caret": {
+            "x": 629,
+            "bottom": 292,
+            "height": 16,
+            "y": 276,
+            "width": 0,
+            "left": 629,
+            "top": 276,
+            "right": 629
+          }
+        },
+        "nativeSelectionBeforeDrag": {
+          "end": 0,
+          "length": 0,
+          "start": 0,
+          "focusCaretRect": {
+            "x": 282,
+            "bottom": 132,
+            "height": 16,
+            "y": 116,
+            "width": 0,
+            "left": 282,
+            "top": 116,
+            "right": 282
+          },
+          "targetOffsetFromBrowser": null,
+          "focusOffset": 0,
+          "text": "",
+          "rangeRectCount": 1,
+          "anchorOffset": 0
+        },
+        "name": "mixed-bold-400-nowrap",
+        "boldSpans": 798,
+        "eventCpuMs": 9,
+        "lines": 400,
+        "durationMs": 219,
+        "wrap": false,
+        "runnerViewportHeight": 560,
+        "mouseHandlerCalls": 43,
+        "runnerHeight": 304,
+        "frames": 9,
+        "selection": {
+          "end": 2446,
+          "length": 1514,
+          "start": 932,
+          "focusCaretRect": {
+            "x": 629,
+            "bottom": 292,
+            "height": 16,
+            "y": 276,
+            "width": 0,
+            "left": 629,
+            "top": 276,
+            "right": 629
+          },
+          "targetOffsetFromBrowser": 932,
+          "focusOffset": 932,
+          "text": "* / mixed content keeps the real browser glyph positions for drag selection\n- item 9 / **English bold 9** / **中文粗体 9** / mixed content keeps the real browser glyph positions for drag selection\n- item 10 / **English bold 10** / **中文粗体 10** / mixed content keeps the real browser glyph positions for drag selection\n- item 11 / **English bold 11** / **中文粗体 11** / mixed content keeps the real browser glyph positions for drag selection\n- item 12 / **English bold 12** / **中文粗体 12** / mixed content keeps the real browser glyph positions for drag selection\n- item 13 / **English bold 13** / **中文粗体 13** / mixed content keeps the real browser glyph positions for drag selection\n- item 14 / **English bold 14** / **中文粗体 14** / mixed content keeps the real browser glyph positions for drag selection\n- item 15 / **English bold 15** / **中文粗体 15** / mixed content keeps the real browser glyph positions for drag selection\n- item 16 / **English bold 16** / **中文粗体 16** / mixed content keeps the real browser glyph positions for drag selection\n- item 17 / **English bold 17** / **中文粗体 17** / mixed content keeps the real browser glyph positions for drag selection\n- item 18 / **English bold 18** / **中文粗体 18** / mixed content keeps the real browser glyph positions for drag selection\n- item 19 / **English bold 19** / **中文粗体 19** / mixed content keeps the real browser glyph positions for drag selection\n- item 20 / **English bold 20** / **中文粗体 20** / mixed content keeps the real browser glyph positions for drag selection\n-",
+          "rangeRectCount": 124,
+          "anchorOffset": 2446
+        }
+      },
+      {
+        "geometryBasis": "release pointer vs native Selection focus caret; reverse-drag legacy focus sorting can reflect endpoint direction loss rather than drag-paint latency",
+        "wrap": true,
+        "mouseHandlerCpuMs": 5,
+        "frameCpuMs": 8,
+        "geometry": {
+          "absDy": 0,
+          "distancePx": 1,
+          "exactHit": true,
+          "offsetDelta": 0,
+          "pointer": {
+            "x": 628,
+            "y": 288
+          },
+          "absDx": 1,
+          "withinLine": true,
+          "caret": {
+            "x": 629,
+            "bottom": 292,
+            "height": 16,
+            "y": 276,
+            "width": 0,
+            "left": 629,
+            "top": 276,
+            "right": 629
+          }
+        },
+        "layerChildrenAtRelease": 0,
+        "dragging": false,
+        "endPointer": {
+          "x": 628,
+          "y": 288
+        },
+        "dragDirection": "reverse (bottom-to-top)",
+        "listenersReleased": true,
+        "layerChildrenAfterRelease": 0,
+        "startedAt": 731,
+        "runnerTop": -8,
+        "frames": 14,
+        "textLength": 48824,
+        "name": "mixed-bold-400-wrap",
+        "cpuTimeBasis": "synchronous production mouse handlers and rAF callbacks measured with performance.now()",
+        "lines": 400,
+        "endedAt": 970,
+        "runnerHeight": 304,
+        "boldSpans": 798,
+        "selection": {
+          "end": 820,
+          "length": 473,
+          "start": 347,
+          "focusCaretRect": {
+            "x": 629,
+            "bottom": 292,
+            "height": 16,
+            "y": 276,
+            "width": 0,
+            "left": 629,
+            "top": 276,
+            "right": 629
+          },
+          "targetOffsetFromBrowser": 347,
+          "focusOffset": 347,
+          "text": "* / mixed content keeps the real browser glyph positions for drag selection\n- item 4 / **English bold 4** / **中文粗体 4** / mixed content keeps the real browser glyph positions for drag selection\n- item 5 / **English bold 5** / **中文粗体 5** / mixed content keeps the real browser glyph positions for drag selection\n- item 6 / **English bold 6** / **中文粗体 6** / mixed content keeps the real browser glyph positions for drag selection\n- item 7 / **English bold 7** / **中文粗体 7** / m",
+          "rangeRectCount": 51,
+          "anchorOffset": 820
+        },
+        "production": {
+          "ensureMdPane": true,
+          "boldSpans": 798,
+          "nativeContentEditable": true,
+          "selectionModule": "markdown-selection.js"
+        },
+        "nativeSelectionBeforeDrag": {
+          "end": null,
+          "length": 0,
+          "start": null,
+          "focusCaretRect": null,
+          "targetOffsetFromBrowser": null,
+          "focusOffset": null,
+          "text": "",
+          "rangeRectCount": 0,
+          "anchorOffset": null
+        },
+        "mouseMoves": 39,
+        "mouseProcessingCpuMs": 13,
+        "durationMs": 239,
+        "startPointer": {
+          "x": 292,
+          "y": 540
+        },
+        "editorBox": {
+          "top": 102,
+          "width": 429,
+          "left": 268,
+          "height": 458
+        },
+        "eventCpuMs": 5,
+        "runnerViewportHeight": 560,
+        "mouseHandlerCalls": 42,
+        "runnerStartY": 540,
+        "selectionChanges": 2
+      },
+      {
+        "runnerHeight": 304,
+        "boldSpans": 7998,
+        "lines": 4000,
+        "nativeSelectionBeforeDrag": {
+          "end": 0,
+          "length": 0,
+          "start": 0,
+          "focusCaretRect": {
+            "x": 282,
+            "bottom": 132,
+            "height": 16,
+            "y": 116,
+            "width": 0,
+            "left": 282,
+            "top": 116,
+            "right": 282
+          },
+          "targetOffsetFromBrowser": null,
+          "focusOffset": 0,
+          "text": "",
+          "rangeRectCount": 1,
+          "anchorOffset": 0
+        },
+        "startPointer": {
+          "x": 292,
+          "y": 540
+        },
+        "dragDirection": "reverse (bottom-to-top)",
+        "eventCpuMs": 32,
+        "listenersReleased": true,
+        "startedAt": 1357,
+        "frameCpuMs": 6,
+        "textLength": 500624,
+        "frames": 12,
+        "durationMs": 260,
+        "mouseHandlerCalls": 43,
+        "geometryBasis": "release pointer vs native Selection focus caret; reverse-drag legacy focus sorting can reflect endpoint direction loss rather than drag-paint latency",
+        "mouseHandlerCpuMs": 32,
+        "geometry": {
+          "absDy": 0,
+          "distancePx": 1,
+          "exactHit": true,
+          "offsetDelta": 0,
+          "pointer": {
+            "x": 628,
+            "y": 288
+          },
+          "absDx": 1,
+          "withinLine": true,
+          "caret": {
+            "x": 629,
+            "bottom": 292,
+            "height": 16,
+            "y": 276,
+            "width": 0,
+            "left": 629,
+            "top": 276,
+            "right": 629
+          }
+        },
+        "mouseMoves": 40,
+        "layerChildrenAtRelease": 0,
+        "runnerViewportHeight": 560,
+        "selection": {
+          "end": 2446,
+          "length": 1514,
+          "start": 932,
+          "focusCaretRect": {
+            "x": 629,
+            "bottom": 292,
+            "height": 16,
+            "y": 276,
+            "width": 0,
+            "left": 629,
+            "top": 276,
+            "right": 629
+          },
+          "targetOffsetFromBrowser": 932,
+          "focusOffset": 932,
+          "text": "* / mixed content keeps the real browser glyph positions for drag selection\n- item 9 / **English bold 9** / **中文粗体 9** / mixed content keeps the real browser glyph positions for drag selection\n- item 10 / **English bold 10** / **中文粗体 10** / mixed content keeps the real browser glyph positions for drag selection\n- item 11 / **English bold 11** / **中文粗体 11** / mixed content keeps the real browser glyph positions for drag selection\n- item 12 / **English bold 12** / **中文粗体 12** / mixed content keeps the real browser glyph positions for drag selection\n- item 13 / **English bold 13** / **中文粗体 13** / mixed content keeps the real browser glyph positions for drag selection\n- item 14 / **English bold 14** / **中文粗体 14** / mixed content keeps the real browser glyph positions for drag selection\n- item 15 / **English bold 15** / **中文粗体 15** / mixed content keeps the real browser glyph positions for drag selection\n- item 16 / **English bold 16** / **中文粗体 16** / mixed content keeps the real browser glyph positions for drag selection\n- item 17 / **English bold 17** / **中文粗体 17** / mixed content keeps the real browser glyph positions for drag selection\n- item 18 / **English bold 18** / **中文粗体 18** / mixed content keeps the real browser glyph positions for drag selection\n- item 19 / **English bold 19** / **中文粗体 19** / mixed content keeps the real browser glyph positions for drag selection\n- item 20 / **English bold 20** / **中文粗体 20** / mixed content keeps the real browser glyph positions for drag selection\n-",
+          "rangeRectCount": 124,
+          "anchorOffset": 2446
+        },
+        "wrap": false,
+        "mouseProcessingCpuMs": 38,
+        "name": "mixed-bold-4000-nowrap",
+        "editorBox": {
+          "top": 102,
+          "width": 429,
+          "left": 268,
+          "height": 458
+        },
+        "cpuTimeBasis": "synchronous production mouse handlers and rAF callbacks measured with performance.now()",
+        "selectionChanges": 2,
+        "layerChildrenAfterRelease": 0,
+        "runnerTop": -8,
+        "runnerStartY": 540,
+        "endedAt": 1617,
+        "endPointer": {
+          "x": 628,
+          "y": 288
+        },
+        "dragging": false,
+        "production": {
+          "ensureMdPane": true,
+          "boldSpans": 7998,
+          "nativeContentEditable": true,
+          "selectionModule": "markdown-selection.js"
+        }
+      },
+      {
+        "selection": {
+          "end": 820,
+          "length": 473,
+          "start": 347,
+          "focusCaretRect": {
+            "x": 629,
+            "bottom": 292,
+            "height": 16,
+            "y": 276,
+            "width": 0,
+            "left": 629,
+            "top": 276,
+            "right": 629
+          },
+          "targetOffsetFromBrowser": 347,
+          "focusOffset": 347,
+          "text": "* / mixed content keeps the real browser glyph positions for drag selection\n- item 4 / **English bold 4** / **中文粗体 4** / mixed content keeps the real browser glyph positions for drag selection\n- item 5 / **English bold 5** / **中文粗体 5** / mixed content keeps the real browser glyph positions for drag selection\n- item 6 / **English bold 6** / **中文粗体 6** / mixed content keeps the real browser glyph positions for drag selection\n- item 7 / **English bold 7** / **中文粗体 7** / m",
+          "rangeRectCount": 51,
+          "anchorOffset": 820
+        },
+        "listenersReleased": true,
+        "layerChildrenAfterRelease": 0,
+        "textLength": 500624,
+        "durationMs": 281,
+        "runnerHeight": 304,
+        "production": {
+          "ensureMdPane": true,
+          "boldSpans": 7998,
+          "nativeContentEditable": true,
+          "selectionModule": "markdown-selection.js"
+        },
+        "name": "mixed-bold-4000-wrap",
+        "editorBox": {
+          "top": 102,
+          "width": 429,
+          "left": 268,
+          "height": 458
+        },
+        "geometry": {
+          "absDy": 0,
+          "distancePx": 1,
+          "exactHit": true,
+          "offsetDelta": 0,
+          "pointer": {
+            "x": 628,
+            "y": 288
+          },
+          "absDx": 1,
+          "withinLine": true,
+          "caret": {
+            "x": 629,
+            "bottom": 292,
+            "height": 16,
+            "y": 276,
+            "width": 0,
+            "left": 629,
+            "top": 276,
+            "right": 629
+          }
+        },
+        "endPointer": {
+          "x": 628,
+          "y": 288
+        },
+        "selectionChanges": 2,
+        "boldSpans": 7998,
+        "runnerTop": -8,
+        "mouseMoves": 38,
+        "runnerViewportHeight": 560,
+        "nativeSelectionBeforeDrag": {
+          "end": null,
+          "length": 0,
+          "start": null,
+          "focusCaretRect": null,
+          "targetOffsetFromBrowser": null,
+          "focusOffset": null,
+          "text": "",
+          "rangeRectCount": 0,
+          "anchorOffset": null
+        },
+        "geometryBasis": "release pointer vs native Selection focus caret; reverse-drag legacy focus sorting can reflect endpoint direction loss rather than drag-paint latency",
+        "dragging": false,
+        "eventCpuMs": 36,
+        "startedAt": 1871,
+        "wrap": true,
+        "layerChildrenAtRelease": 0,
+        "frames": 12,
+        "mouseHandlerCpuMs": 36,
+        "frameCpuMs": 9,
+        "mouseHandlerCalls": 41,
+        "endedAt": 2152,
+        "cpuTimeBasis": "synchronous production mouse handlers and rAF callbacks measured with performance.now()",
+        "lines": 4000,
+        "mouseProcessingCpuMs": 45,
+        "dragDirection": "reverse (bottom-to-top)",
+        "startPointer": {
+          "x": 292,
+          "y": 540
+        },
+        "runnerStartY": 540
+      }
+    ],
+    "metric": "rAF selection-end rect vs last mouse, plus selectionchange count",
+    "env": "overlay-panel"
+  },
+  "baseline": {
+    "env": "overlay-panel",
+    "cases": [
+      {
+        "mouseProcessingCpuMs": 35,
+        "mouseMoves": 40,
+        "cpuTimeBasis": "synchronous production mouse handlers and rAF callbacks measured with performance.now()",
+        "production": {
+          "ensureMdPane": true,
+          "boldSpans": 798,
+          "nativeContentEditable": true,
+          "selectionModule": "legacy-app.js"
+        },
+        "runnerStartY": 540,
+        "mouseHandlerCpuMs": 34.999999999999886,
+        "startPointer": {
+          "x": 292,
+          "y": 540
+        },
+        "runnerViewportHeight": 560,
+        "selection": {
+          "end": 2446,
+          "length": 1515,
+          "start": 931,
+          "focusCaretRect": {
+            "x": 290,
+            "bottom": 552,
+            "height": 16,
+            "y": 536,
+            "width": 0,
+            "left": 290,
+            "top": 536,
+            "right": 290
+          },
+          "targetOffsetFromBrowser": 932,
+          "focusOffset": 2446,
+          "text": "** / mixed content keeps the real browser glyph positions for drag selection\n- item 9 / **English bold 9** / **中文粗体 9** / mixed content keeps the real browser glyph positions for drag selection\n- item 10 / **English bold 10** / **中文粗体 10** / mixed content keeps the real browser glyph positions for drag selection\n- item 11 / **English bold 11** / **中文粗体 11** / mixed content keeps the real browser glyph positions for drag selection\n- item 12 / **English bold 12** / **中文粗体 12** / mixed content keeps the real browser glyph positions for drag selection\n- item 13 / **English bold 13** / **中文粗体 13** / mixed content keeps the real browser glyph positions for drag selection\n- item 14 / **English bold 14** / **中文粗体 14** / mixed content keeps the real browser glyph positions for drag selection\n- item 15 / **English bold 15** / **中文粗体 15** / mixed content keeps the real browser glyph positions for drag selection\n- item 16 / **English bold 16** / **中文粗体 16** / mixed content keeps the real browser glyph positions for drag selection\n- item 17 / **English bold 17** / **中文粗体 17** / mixed content keeps the real browser glyph positions for drag selection\n- item 18 / **English bold 18** / **中文粗体 18** / mixed content keeps the real browser glyph positions for drag selection\n- item 19 / **English bold 19** / **中文粗体 19** / mixed content keeps the real browser glyph positions for drag selection\n- item 20 / **English bold 20** / **中文粗体 20** / mixed content keeps the real browser glyph positions for drag selection\n-",
+          "rangeRectCount": 124,
+          "anchorOffset": 931
+        },
+        "frameCpuMs": 0,
+        "runnerTop": -8,
+        "geometry": {
+          "absDy": 248,
+          "distancePx": 419.223,
+          "exactHit": false,
+          "offsetDelta": 1514,
+          "pointer": {
+            "x": 628,
+            "y": 288
+          },
+          "absDx": 338,
+          "withinLine": false,
+          "caret": {
+            "x": 290,
+            "bottom": 552,
+            "height": 16,
+            "y": 536,
+            "width": 0,
+            "left": 290,
+            "top": 536,
+            "right": 290
+          }
+        },
+        "endPointer": {
+          "x": 628,
+          "y": 288
+        },
+        "dragDirection": "reverse (bottom-to-top)",
+        "runnerHeight": 304,
+        "layerChildrenAtRelease": 0,
+        "dragging": false,
+        "wrap": false,
+        "frames": 0,
+        "endedAt": 437,
+        "durationMs": 221,
+        "lines": 400,
+        "geometryBasis": "release pointer vs native Selection focus caret; reverse-drag legacy focus sorting can reflect endpoint direction loss rather than drag-paint latency",
+        "editorBox": {
+          "top": 102,
+          "width": 429,
+          "left": 268,
+          "height": 458
+        },
+        "boldSpans": 798,
+        "eventCpuMs": 35,
+        "selectionChanges": 1,
+        "listenersReleased": true,
+        "layerChildrenAfterRelease": 0,
+        "mouseHandlerCalls": 42,
+        "nativeSelectionBeforeDrag": {
+          "end": 0,
+          "length": 0,
+          "start": 0,
+          "focusCaretRect": {
+            "x": 282,
+            "bottom": 132,
+            "height": 16,
+            "y": 116,
+            "width": 0,
+            "left": 282,
+            "top": 116,
+            "right": 282
+          },
+          "targetOffsetFromBrowser": null,
+          "focusOffset": 0,
+          "text": "",
+          "rangeRectCount": 1,
+          "anchorOffset": 0
+        },
+        "startedAt": 216,
+        "name": "mixed-bold-400-nowrap",
+        "textLength": 48824
+      },
+      {
+        "selection": {
+          "end": 820,
+          "length": 473,
+          "start": 347,
+          "focusCaretRect": {
+            "x": 290,
+            "bottom": 552,
+            "height": 16,
+            "y": 536,
+            "width": 0,
+            "left": 290,
+            "top": 536,
+            "right": 290
+          },
+          "targetOffsetFromBrowser": 347,
+          "focusOffset": 820,
+          "text": "* / mixed content keeps the real browser glyph positions for drag selection\n- item 4 / **English bold 4** / **中文粗体 4** / mixed content keeps the real browser glyph positions for drag selection\n- item 5 / **English bold 5** / **中文粗体 5** / mixed content keeps the real browser glyph positions for drag selection\n- item 6 / **English bold 6** / **中文粗体 6** / mixed content keeps the real browser glyph positions for drag selection\n- item 7 / **English bold 7** / **中文粗体 7** / m",
+          "rangeRectCount": 51,
+          "anchorOffset": 347
+        },
+        "nativeSelectionBeforeDrag": {
+          "end": 0,
+          "length": 0,
+          "start": 0,
+          "focusCaretRect": {
+            "x": 282,
+            "bottom": 132,
+            "height": 16,
+            "y": 116,
+            "width": 0,
+            "left": 282,
+            "top": 116,
+            "right": 282
+          },
+          "targetOffsetFromBrowser": null,
+          "focusOffset": 0,
+          "text": "",
+          "rangeRectCount": 1,
+          "anchorOffset": 0
+        },
+        "frameCpuMs": 0,
+        "endPointer": {
+          "x": 628,
+          "y": 288
+        },
+        "cpuTimeBasis": "synchronous production mouse handlers and rAF callbacks measured with performance.now()",
+        "listenersReleased": true,
+        "geometry": {
+          "absDy": 248,
+          "distancePx": 419.223,
+          "exactHit": false,
+          "offsetDelta": 473,
+          "pointer": {
+            "x": 628,
+            "y": 288
+          },
+          "absDx": 338,
+          "withinLine": false,
+          "caret": {
+            "x": 290,
+            "bottom": 552,
+            "height": 16,
+            "y": 536,
+            "width": 0,
+            "left": 290,
+            "top": 536,
+            "right": 290
+          }
+        },
+        "dragDirection": "reverse (bottom-to-top)",
+        "mouseHandlerCalls": 42,
+        "boldSpans": 798,
+        "mouseHandlerCpuMs": 18,
+        "startedAt": 638,
+        "wrap": true,
+        "mouseProcessingCpuMs": 18,
+        "selectionChanges": 1,
+        "layerChildrenAtRelease": 0,
+        "production": {
+          "ensureMdPane": true,
+          "boldSpans": 798,
+          "nativeContentEditable": true,
+          "selectionModule": "legacy-app.js"
+        },
+        "mouseMoves": 40,
+        "textLength": 48824,
+        "dragging": false,
+        "runnerStartY": 540,
+        "runnerHeight": 304,
+        "endedAt": 858,
+        "durationMs": 220,
+        "eventCpuMs": 18,
+        "runnerViewportHeight": 560,
+        "startPointer": {
+          "x": 292,
+          "y": 540
+        },
+        "layerChildrenAfterRelease": 0,
+        "lines": 400,
+        "runnerTop": -8,
+        "geometryBasis": "release pointer vs native Selection focus caret; reverse-drag legacy focus sorting can reflect endpoint direction loss rather than drag-paint latency",
+        "name": "mixed-bold-400-wrap",
+        "editorBox": {
+          "top": 102,
+          "width": 429,
+          "left": 268,
+          "height": 458
+        },
+        "frames": 0
+      },
+      {
+        "selection": {
+          "end": 2446,
+          "length": 1515,
+          "start": 931,
+          "focusCaretRect": {
+            "x": 290,
+            "bottom": 552,
+            "height": 16,
+            "y": 536,
+            "width": 0,
+            "left": 290,
+            "top": 536,
+            "right": 290
+          },
+          "targetOffsetFromBrowser": 932,
+          "focusOffset": 2446,
+          "text": "** / mixed content keeps the real browser glyph positions for drag selection\n- item 9 / **English bold 9** / **中文粗体 9** / mixed content keeps the real browser glyph positions for drag selection\n- item 10 / **English bold 10** / **中文粗体 10** / mixed content keeps the real browser glyph positions for drag selection\n- item 11 / **English bold 11** / **中文粗体 11** / mixed content keeps the real browser glyph positions for drag selection\n- item 12 / **English bold 12** / **中文粗体 12** / mixed content keeps the real browser glyph positions for drag selection\n- item 13 / **English bold 13** / **中文粗体 13** / mixed content keeps the real browser glyph positions for drag selection\n- item 14 / **English bold 14** / **中文粗体 14** / mixed content keeps the real browser glyph positions for drag selection\n- item 15 / **English bold 15** / **中文粗体 15** / mixed content keeps the real browser glyph positions for drag selection\n- item 16 / **English bold 16** / **中文粗体 16** / mixed content keeps the real browser glyph positions for drag selection\n- item 17 / **English bold 17** / **中文粗体 17** / mixed content keeps the real browser glyph positions for drag selection\n- item 18 / **English bold 18** / **中文粗体 18** / mixed content keeps the real browser glyph positions for drag selection\n- item 19 / **English bold 19** / **中文粗体 19** / mixed content keeps the real browser glyph positions for drag selection\n- item 20 / **English bold 20** / **中文粗体 20** / mixed content keeps the real browser glyph positions for drag selection\n-",
+          "rangeRectCount": 124,
+          "anchorOffset": 931
+        },
+        "listenersReleased": true,
+        "endedAt": 1534,
+        "startedAt": 1288,
+        "editorBox": {
+          "top": 102,
+          "width": 429,
+          "left": 268,
+          "height": 458
+        },
+        "lines": 4000,
+        "mouseProcessingCpuMs": 105,
+        "geometryBasis": "release pointer vs native Selection focus caret; reverse-drag legacy focus sorting can reflect endpoint direction loss rather than drag-paint latency",
+        "cpuTimeBasis": "synchronous production mouse handlers and rAF callbacks measured with performance.now()",
+        "layerChildrenAtRelease": 0,
+        "runnerTop": -8,
+        "durationMs": 246,
+        "mouseMoves": 40,
+        "frameCpuMs": 0,
+        "wrap": false,
+        "geometry": {
+          "absDy": 248,
+          "distancePx": 419.223,
+          "exactHit": false,
+          "offsetDelta": 1514,
+          "pointer": {
+            "x": 628,
+            "y": 288
+          },
+          "absDx": 338,
+          "withinLine": false,
+          "caret": {
+            "x": 290,
+            "bottom": 552,
+            "height": 16,
+            "y": 536,
+            "width": 0,
+            "left": 290,
+            "top": 536,
+            "right": 290
+          }
+        },
+        "nativeSelectionBeforeDrag": {
+          "end": 0,
+          "length": 0,
+          "start": 0,
+          "focusCaretRect": {
+            "x": 282,
+            "bottom": 132,
+            "height": 16,
+            "y": 116,
+            "width": 0,
+            "left": 282,
+            "top": 116,
+            "right": 282
+          },
+          "targetOffsetFromBrowser": null,
+          "focusOffset": 0,
+          "text": "",
+          "rangeRectCount": 1,
+          "anchorOffset": 0
+        },
+        "dragDirection": "reverse (bottom-to-top)",
+        "mouseHandlerCalls": 42,
+        "boldSpans": 7998,
+        "selectionChanges": 1,
+        "eventCpuMs": 105,
+        "runnerViewportHeight": 560,
+        "runnerHeight": 304,
+        "production": {
+          "ensureMdPane": true,
+          "boldSpans": 7998,
+          "nativeContentEditable": true,
+          "selectionModule": "legacy-app.js"
+        },
+        "name": "mixed-bold-4000-nowrap",
+        "layerChildrenAfterRelease": 0,
+        "dragging": false,
+        "textLength": 500624,
+        "runnerStartY": 540,
+        "endPointer": {
+          "x": 628,
+          "y": 288
+        },
+        "frames": 0,
+        "startPointer": {
+          "x": 292,
+          "y": 540
+        },
+        "mouseHandlerCpuMs": 104.99999999999977
+      },
+      {
+        "mouseHandlerCpuMs": 84.99999999999955,
+        "runnerHeight": 304,
+        "runnerViewportHeight": 560,
+        "lines": 4000,
+        "endPointer": {
+          "x": 628,
+          "y": 288
+        },
+        "production": {
+          "ensureMdPane": true,
+          "boldSpans": 7998,
+          "nativeContentEditable": true,
+          "selectionModule": "legacy-app.js"
+        },
+        "wrap": true,
+        "eventCpuMs": 85,
+        "editorBox": {
+          "top": 102,
+          "width": 429,
+          "left": 268,
+          "height": 458
+        },
+        "selection": {
+          "end": 820,
+          "length": 473,
+          "start": 347,
+          "focusCaretRect": {
+            "x": 290,
+            "bottom": 552,
+            "height": 16,
+            "y": 536,
+            "width": 0,
+            "left": 290,
+            "top": 536,
+            "right": 290
+          },
+          "targetOffsetFromBrowser": 347,
+          "focusOffset": 820,
+          "text": "* / mixed content keeps the real browser glyph positions for drag selection\n- item 4 / **English bold 4** / **中文粗体 4** / mixed content keeps the real browser glyph positions for drag selection\n- item 5 / **English bold 5** / **中文粗体 5** / mixed content keeps the real browser glyph positions for drag selection\n- item 6 / **English bold 6** / **中文粗体 6** / mixed content keeps the real browser glyph positions for drag selection\n- item 7 / **English bold 7** / **中文粗体 7** / m",
+          "rangeRectCount": 51,
+          "anchorOffset": 347
+        },
+        "nativeSelectionBeforeDrag": {
+          "end": 0,
+          "length": 0,
+          "start": 0,
+          "focusCaretRect": {
+            "x": 282,
+            "bottom": 132,
+            "height": 16,
+            "y": 116,
+            "width": 0,
+            "left": 282,
+            "top": 116,
+            "right": 282
+          },
+          "targetOffsetFromBrowser": null,
+          "focusOffset": 0,
+          "text": "",
+          "rangeRectCount": 1,
+          "anchorOffset": 0
+        },
+        "mouseMoves": 40,
+        "frameCpuMs": 0,
+        "dragging": false,
+        "mouseHandlerCalls": 42,
+        "geometry": {
+          "absDy": 248,
+          "distancePx": 419.223,
+          "exactHit": false,
+          "offsetDelta": 473,
+          "pointer": {
+            "x": 628,
+            "y": 288
+          },
+          "absDx": 338,
+          "withinLine": false,
+          "caret": {
+            "x": 290,
+            "bottom": 552,
+            "height": 16,
+            "y": 536,
+            "width": 0,
+            "left": 290,
+            "top": 536,
+            "right": 290
+          }
+        },
+        "mouseProcessingCpuMs": 85,
+        "frames": 0,
+        "endedAt": 2078,
+        "durationMs": 238,
+        "textLength": 500624,
+        "selectionChanges": 1,
+        "startPointer": {
+          "x": 292,
+          "y": 540
+        },
+        "runnerStartY": 540,
+        "boldSpans": 7998,
+        "layerChildrenAfterRelease": 0,
+        "runnerTop": -8,
+        "listenersReleased": true,
+        "name": "mixed-bold-4000-wrap",
+        "startedAt": 1840,
+        "layerChildrenAtRelease": 0,
+        "dragDirection": "reverse (bottom-to-top)",
+        "geometryBasis": "release pointer vs native Selection focus caret; reverse-drag legacy focus sorting can reflect endpoint direction loss rather than drag-paint latency",
+        "cpuTimeBasis": "synchronous production mouse handlers and rAF callbacks measured with performance.now()"
+      }
+    ],
+    "metric": "rAF selection-end rect vs last mouse, plus selectionchange count"
+  },
+  "comparison": {
+    "cases": {
+      "mixed-bold-400-nowrap": {
+        "baseline": {
+          "frames": 0,
+          "mouseMoves": 40,
+          "mouseProcessingCpuMs": 35,
+          "durationMs": 221,
+          "selectionChanges": 1,
+          "listenersReleased": true,
+          "selection": {
+            "start": 931,
+            "end": 2446,
+            "length": 1515,
+            "anchorOffset": 931,
+            "focusOffset": 2446,
+            "targetOffsetFromBrowser": 932,
+            "text": "** / mixed content keeps the real browser glyph positions for drag selection\n- item 9 / **English bold 9** / **中文粗体 9** / mixed content keeps the real browser glyph positions for drag selection\n- item 10 / **English bold 10** / **中文粗体 10** / mixed content keeps the real browser glyph positions for drag selection\n- item 11 / **English bold 11** / **中文粗体 11** / mixed content keeps the real browser glyph positions for drag selection\n- item 12 / **English bold 12** / **中文粗体 12** / mixed content keeps the real browser glyph positions for drag selection\n- item 13 / **English bold 13** / **中文粗体 13** / mixed content keeps the real browser glyph positions for drag selection\n- item 14 / **English bold 14** / **中文粗体 14** / mixed content keeps the real browser glyph positions for drag selection\n- item 15 / **English bold 15** / **中文粗体 15** / mixed content keeps the real browser glyph positions for drag selection\n- item 16 / **English bold 16** / **中文粗体 16** / mixed content keeps the real browser glyph positions for drag selection\n- item 17 / **English bold 17** / **中文粗体 17** / mixed content keeps the real browser glyph positions for drag selection\n- item 18 / **English bold 18** / **中文粗体 18** / mixed content keeps the real browser glyph positions for drag selection\n- item 19 / **English bold 19** / **中文粗体 19** / mixed content keeps the real browser glyph positions for drag selection\n- item 20 / **English bold 20** / **中文粗体 20** / mixed content keeps the real browser glyph positions for drag selection\n-"
+          },
+          "geometry": {
+            "exactHit": false,
+            "withinLine": false,
+            "absDx": 338,
+            "absDy": 248,
+            "distancePx": 419.223,
+            "offsetDelta": 1514
+          }
+        },
+        "current": {
+          "frames": 9,
+          "mouseMoves": 40,
+          "mouseProcessingCpuMs": 16,
+          "durationMs": 219,
+          "selectionChanges": 2,
+          "listenersReleased": true,
+          "selection": {
+            "start": 932,
+            "end": 2446,
+            "length": 1514,
+            "anchorOffset": 2446,
+            "focusOffset": 932,
+            "targetOffsetFromBrowser": 932,
+            "text": "* / mixed content keeps the real browser glyph positions for drag selection\n- item 9 / **English bold 9** / **中文粗体 9** / mixed content keeps the real browser glyph positions for drag selection\n- item 10 / **English bold 10** / **中文粗体 10** / mixed content keeps the real browser glyph positions for drag selection\n- item 11 / **English bold 11** / **中文粗体 11** / mixed content keeps the real browser glyph positions for drag selection\n- item 12 / **English bold 12** / **中文粗体 12** / mixed content keeps the real browser glyph positions for drag selection\n- item 13 / **English bold 13** / **中文粗体 13** / mixed content keeps the real browser glyph positions for drag selection\n- item 14 / **English bold 14** / **中文粗体 14** / mixed content keeps the real browser glyph positions for drag selection\n- item 15 / **English bold 15** / **中文粗体 15** / mixed content keeps the real browser glyph positions for drag selection\n- item 16 / **English bold 16** / **中文粗体 16** / mixed content keeps the real browser glyph positions for drag selection\n- item 17 / **English bold 17** / **中文粗体 17** / mixed content keeps the real browser glyph positions for drag selection\n- item 18 / **English bold 18** / **中文粗体 18** / mixed content keeps the real browser glyph positions for drag selection\n- item 19 / **English bold 19** / **中文粗体 19** / mixed content keeps the real browser glyph positions for drag selection\n- item 20 / **English bold 20** / **中文粗体 20** / mixed content keeps the real browser glyph positions for drag selection\n-"
+          },
+          "geometry": {
+            "exactHit": true,
+            "withinLine": true,
+            "absDx": 1,
+            "absDy": 0,
+            "distancePx": 1,
+            "offsetDelta": 0
+          }
+        },
+        "delta": {
+          "frames": 9,
+          "mouseMoves": 0,
+          "mouseProcessingCpuMs": -19,
+          "durationMs": -2,
+          "selectionChanges": 1
+        },
+        "selectionChanged": true,
+        "geometryChanged": true
+      },
+      "mixed-bold-400-wrap": {
+        "baseline": {
+          "frames": 0,
+          "mouseMoves": 40,
+          "mouseProcessingCpuMs": 18,
+          "durationMs": 220,
+          "selectionChanges": 1,
+          "listenersReleased": true,
+          "selection": {
+            "start": 347,
+            "end": 820,
+            "length": 473,
+            "anchorOffset": 347,
+            "focusOffset": 820,
+            "targetOffsetFromBrowser": 347,
+            "text": "* / mixed content keeps the real browser glyph positions for drag selection\n- item 4 / **English bold 4** / **中文粗体 4** / mixed content keeps the real browser glyph positions for drag selection\n- item 5 / **English bold 5** / **中文粗体 5** / mixed content keeps the real browser glyph positions for drag selection\n- item 6 / **English bold 6** / **中文粗体 6** / mixed content keeps the real browser glyph positions for drag selection\n- item 7 / **English bold 7** / **中文粗体 7** / m"
+          },
+          "geometry": {
+            "exactHit": false,
+            "withinLine": false,
+            "absDx": 338,
+            "absDy": 248,
+            "distancePx": 419.223,
+            "offsetDelta": 473
+          }
+        },
+        "current": {
+          "frames": 14,
+          "mouseMoves": 39,
+          "mouseProcessingCpuMs": 13,
+          "durationMs": 239,
+          "selectionChanges": 2,
+          "listenersReleased": true,
+          "selection": {
+            "start": 347,
+            "end": 820,
+            "length": 473,
+            "anchorOffset": 820,
+            "focusOffset": 347,
+            "targetOffsetFromBrowser": 347,
+            "text": "* / mixed content keeps the real browser glyph positions for drag selection\n- item 4 / **English bold 4** / **中文粗体 4** / mixed content keeps the real browser glyph positions for drag selection\n- item 5 / **English bold 5** / **中文粗体 5** / mixed content keeps the real browser glyph positions for drag selection\n- item 6 / **English bold 6** / **中文粗体 6** / mixed content keeps the real browser glyph positions for drag selection\n- item 7 / **English bold 7** / **中文粗体 7** / m"
+          },
+          "geometry": {
+            "exactHit": true,
+            "withinLine": true,
+            "absDx": 1,
+            "absDy": 0,
+            "distancePx": 1,
+            "offsetDelta": 0
+          }
+        },
+        "delta": {
+          "frames": 14,
+          "mouseMoves": -1,
+          "mouseProcessingCpuMs": -5,
+          "durationMs": 19,
+          "selectionChanges": 1
+        },
+        "selectionChanged": false,
+        "geometryChanged": true
+      },
+      "mixed-bold-4000-nowrap": {
+        "baseline": {
+          "frames": 0,
+          "mouseMoves": 40,
+          "mouseProcessingCpuMs": 105,
+          "durationMs": 246,
+          "selectionChanges": 1,
+          "listenersReleased": true,
+          "selection": {
+            "start": 931,
+            "end": 2446,
+            "length": 1515,
+            "anchorOffset": 931,
+            "focusOffset": 2446,
+            "targetOffsetFromBrowser": 932,
+            "text": "** / mixed content keeps the real browser glyph positions for drag selection\n- item 9 / **English bold 9** / **中文粗体 9** / mixed content keeps the real browser glyph positions for drag selection\n- item 10 / **English bold 10** / **中文粗体 10** / mixed content keeps the real browser glyph positions for drag selection\n- item 11 / **English bold 11** / **中文粗体 11** / mixed content keeps the real browser glyph positions for drag selection\n- item 12 / **English bold 12** / **中文粗体 12** / mixed content keeps the real browser glyph positions for drag selection\n- item 13 / **English bold 13** / **中文粗体 13** / mixed content keeps the real browser glyph positions for drag selection\n- item 14 / **English bold 14** / **中文粗体 14** / mixed content keeps the real browser glyph positions for drag selection\n- item 15 / **English bold 15** / **中文粗体 15** / mixed content keeps the real browser glyph positions for drag selection\n- item 16 / **English bold 16** / **中文粗体 16** / mixed content keeps the real browser glyph positions for drag selection\n- item 17 / **English bold 17** / **中文粗体 17** / mixed content keeps the real browser glyph positions for drag selection\n- item 18 / **English bold 18** / **中文粗体 18** / mixed content keeps the real browser glyph positions for drag selection\n- item 19 / **English bold 19** / **中文粗体 19** / mixed content keeps the real browser glyph positions for drag selection\n- item 20 / **English bold 20** / **中文粗体 20** / mixed content keeps the real browser glyph positions for drag selection\n-"
+          },
+          "geometry": {
+            "exactHit": false,
+            "withinLine": false,
+            "absDx": 338,
+            "absDy": 248,
+            "distancePx": 419.223,
+            "offsetDelta": 1514
+          }
+        },
+        "current": {
+          "frames": 12,
+          "mouseMoves": 40,
+          "mouseProcessingCpuMs": 38,
+          "durationMs": 260,
+          "selectionChanges": 2,
+          "listenersReleased": true,
+          "selection": {
+            "start": 932,
+            "end": 2446,
+            "length": 1514,
+            "anchorOffset": 2446,
+            "focusOffset": 932,
+            "targetOffsetFromBrowser": 932,
+            "text": "* / mixed content keeps the real browser glyph positions for drag selection\n- item 9 / **English bold 9** / **中文粗体 9** / mixed content keeps the real browser glyph positions for drag selection\n- item 10 / **English bold 10** / **中文粗体 10** / mixed content keeps the real browser glyph positions for drag selection\n- item 11 / **English bold 11** / **中文粗体 11** / mixed content keeps the real browser glyph positions for drag selection\n- item 12 / **English bold 12** / **中文粗体 12** / mixed content keeps the real browser glyph positions for drag selection\n- item 13 / **English bold 13** / **中文粗体 13** / mixed content keeps the real browser glyph positions for drag selection\n- item 14 / **English bold 14** / **中文粗体 14** / mixed content keeps the real browser glyph positions for drag selection\n- item 15 / **English bold 15** / **中文粗体 15** / mixed content keeps the real browser glyph positions for drag selection\n- item 16 / **English bold 16** / **中文粗体 16** / mixed content keeps the real browser glyph positions for drag selection\n- item 17 / **English bold 17** / **中文粗体 17** / mixed content keeps the real browser glyph positions for drag selection\n- item 18 / **English bold 18** / **中文粗体 18** / mixed content keeps the real browser glyph positions for drag selection\n- item 19 / **English bold 19** / **中文粗体 19** / mixed content keeps the real browser glyph positions for drag selection\n- item 20 / **English bold 20** / **中文粗体 20** / mixed content keeps the real browser glyph positions for drag selection\n-"
+          },
+          "geometry": {
+            "exactHit": true,
+            "withinLine": true,
+            "absDx": 1,
+            "absDy": 0,
+            "distancePx": 1,
+            "offsetDelta": 0
+          }
+        },
+        "delta": {
+          "frames": 12,
+          "mouseMoves": 0,
+          "mouseProcessingCpuMs": -67,
+          "durationMs": 14,
+          "selectionChanges": 1
+        },
+        "selectionChanged": true,
+        "geometryChanged": true
+      },
+      "mixed-bold-4000-wrap": {
+        "baseline": {
+          "frames": 0,
+          "mouseMoves": 40,
+          "mouseProcessingCpuMs": 85,
+          "durationMs": 238,
+          "selectionChanges": 1,
+          "listenersReleased": true,
+          "selection": {
+            "start": 347,
+            "end": 820,
+            "length": 473,
+            "anchorOffset": 347,
+            "focusOffset": 820,
+            "targetOffsetFromBrowser": 347,
+            "text": "* / mixed content keeps the real browser glyph positions for drag selection\n- item 4 / **English bold 4** / **中文粗体 4** / mixed content keeps the real browser glyph positions for drag selection\n- item 5 / **English bold 5** / **中文粗体 5** / mixed content keeps the real browser glyph positions for drag selection\n- item 6 / **English bold 6** / **中文粗体 6** / mixed content keeps the real browser glyph positions for drag selection\n- item 7 / **English bold 7** / **中文粗体 7** / m"
+          },
+          "geometry": {
+            "exactHit": false,
+            "withinLine": false,
+            "absDx": 338,
+            "absDy": 248,
+            "distancePx": 419.223,
+            "offsetDelta": 473
+          }
+        },
+        "current": {
+          "frames": 12,
+          "mouseMoves": 38,
+          "mouseProcessingCpuMs": 45,
+          "durationMs": 281,
+          "selectionChanges": 2,
+          "listenersReleased": true,
+          "selection": {
+            "start": 347,
+            "end": 820,
+            "length": 473,
+            "anchorOffset": 820,
+            "focusOffset": 347,
+            "targetOffsetFromBrowser": 347,
+            "text": "* / mixed content keeps the real browser glyph positions for drag selection\n- item 4 / **English bold 4** / **中文粗体 4** / mixed content keeps the real browser glyph positions for drag selection\n- item 5 / **English bold 5** / **中文粗体 5** / mixed content keeps the real browser glyph positions for drag selection\n- item 6 / **English bold 6** / **中文粗体 6** / mixed content keeps the real browser glyph positions for drag selection\n- item 7 / **English bold 7** / **中文粗体 7** / m"
+          },
+          "geometry": {
+            "exactHit": true,
+            "withinLine": true,
+            "absDx": 1,
+            "absDy": 0,
+            "distancePx": 1,
+            "offsetDelta": 0
+          }
+        },
+        "delta": {
+          "frames": 12,
+          "mouseMoves": -2,
+          "mouseProcessingCpuMs": -40,
+          "durationMs": 43,
+          "selectionChanges": 1
+        },
+        "selectionChanged": false,
+        "geometryChanged": true
+      }
+    }
+  }
+}

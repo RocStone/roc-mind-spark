@@ -18,6 +18,14 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
     private var keepAlive: NSObjectProtocol?
     private var previousApp: NSRunningApplication?
     private var hudWatch: Timer?
+    /// The serial utility queue keeps CGWindowList/NSRunningApplication work
+    /// off the main actor. `LauncherHUDWatchState` holds the slot until the
+    /// result callback returns, including across hide/show.
+    private let hudProbeQueue = DispatchQueue(
+        label: "com.roc.mindspark.launcher-hud-probe",
+        qos: .utility
+    )
+    private var hudWatchState = LauncherHUDWatchState()
     private var duckedUnderHud = false
     private var duckedHudId: UInt32 = 0
     private var ignoreActivateUntil: Date?
@@ -37,6 +45,12 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
     init(server: ServerSupervisor) {
         self.server = server
         super.init()
+        server.onUnexpectedExit = { [weak self] in
+            guard let self else { return }
+            self.boot.markServiceUnavailable()
+            self.lastBootError = ServerError.stoppedUnexpectedly
+            self.applyBootUI()
+        }
         let root = NSView(frame: .zero)
         root.wantsLayer = true
         root.layer?.backgroundColor = NSColor.white.cgColor
@@ -98,7 +112,7 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
     func preload() {
         if keepAlive == nil {
             keepAlive = ProcessInfo.processInfo.beginActivity(
-                options: [.userInitiated, .idleSystemSleepDisabled],
+                options: [.userInitiatedAllowingIdleSystemSleep],
                 reason: "Keep the mind map painted while the overlay is parked"
             )
         }
@@ -119,7 +133,10 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
 
     func hide(restorePrevious: Bool = true) {
         cancelOpenPanel()
-        if isVisible { Paths.opsLog("overlay-hide") }
+        if isVisible {
+            Paths.opsLog("overlay-hide")
+            webView?.evaluateJavaScript("void(window.rmsFlushForHide&&window.rmsFlushForHide())")
+        }
         pendingShow = false
         restoreCoverStack(orderFront: false)
         stopHudWatch()
@@ -141,6 +158,29 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
             }
         } else {
             previousApp = nil
+        }
+    }
+
+    /// Normal application quit waits for the page's model and save queue.
+    /// The page is kept alive if persistence fails, so drafts remain editable.
+    func flushBeforeQuit() async throws {
+        guard let webView, didStartLoad else { return }
+        let result = try await webView.callAsyncJavaScript("""
+            if (!window.rmsFlushPendingEdits) return {ok:true};
+            let timer;
+            try {
+                await Promise.race([
+                    window.rmsFlushPendingEdits(),
+                    new Promise((_,reject) => { timer=setTimeout(() => reject(new Error('Saving timed out')),5000); })
+                ]);
+                return {ok:true};
+            } catch (error) { return {ok:false,message:String(error.message||error)}; }
+            finally { clearTimeout(timer); }
+            """, arguments: [:], in: nil, contentWorld: .page)
+        if let response = result as? [String: Any], response["ok"] as? Bool == false {
+            throw NSError(domain: "RocMindSpark.Save", code: 1, userInfo: [
+                NSLocalizedDescriptionKey: response["message"] as? String ?? L10n.t("error.saveQuit")
+            ])
         }
     }
 
@@ -215,10 +255,13 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
             guard let self else { return }
             do {
                 try await self.server.ensureRunning()
+                guard self.server.hasHealthyRunningChild else { throw ServerError.stoppedUnexpectedly }
                 self.boot.markSucceeded()
                 self.lastBootError = nil
                 self.applyBootUI()
                 self.startLoadIfNeeded()
+                // A service restart keeps the live page and its unsaved drafts.
+                _ = try? await self.webView?.evaluateJavaScript("void(window.rmsRetryPendingSaves&&window.rmsRetryPendingSaves())")
                 if !self.isVisible { self.parkOffscreen() }
             } catch {
                 Paths.log("canvas boot failed: \(error.localizedDescription)")
@@ -480,19 +523,24 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
     /// under the HUD instead of hiding.
     private func startHudWatch() {
         guard hudWatch == nil else { return }
+        hudWatchState.activateDisplay()
         let timer = Timer(timeInterval: 0.15, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                self?.syncLauncherHudStack()
+            MainActor.assumeIsolated {
+                self?.requestLauncherHudSync()
             }
         }
         RunLoop.main.add(timer, forMode: .common)
         hudWatch = timer
-        syncLauncherHudStack()
+        requestLauncherHudSync()
     }
 
     private func stopHudWatch() {
         hudWatch?.invalidate()
         hudWatch = nil
+        // Do not clear an in-flight probe here. A native query cannot be
+        // canceled safely; retaining its slot prevents hide/show from
+        // starting a second query before this one has returned to main.
+        hudWatchState.invalidateDisplay()
     }
 
     private func restoreCoverStack(orderFront: Bool = true) {
@@ -517,16 +565,29 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
         Paths.log("hud-watch reclaim")
     }
 
-    private func syncLauncherHudStack() {
+    private func requestLauncherHudSync() {
+        guard isVisible, let probe = hudWatchState.beginProbeIfIdle() else { return }
+        let bundleId = AppConfig.bundleId
+        hudProbeQueue.async { [weak self] in
+            let snapshot = LauncherHUDSnapshot.capture(overlayBundleId: bundleId)
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                let isCurrentDisplay = self.hudWatchState.finish(probe)
+                guard isCurrentDisplay, self.isVisible else { return }
+                self.syncLauncherHudStack(snapshot)
+            }
+        }
+    }
+
+    private func syncLauncherHudStack(_ snapshot: LauncherHUDSnapshot) {
         guard isVisible else { return }
-        let huds = Self.launcherSnaps().filter(\.isHud)
-        guard let hud = huds.max(by: { $0.layer < $1.layer }) else {
+        guard let hud = snapshot.topHud else {
             restoreCoverStack()
             return
         }
         if duckedUnderHud, duckedHudId == hud.id { return }
         if !duckedUnderHud {
-            Paths.log("hud-watch duck \(Self.describeLauncherSnaps([hud]))")
+            Paths.log("hud-watch duck \(hud.description)")
             ignoreActivateUntil = Date().addingTimeInterval(0.8)
         }
         duckedUnderHud = true
@@ -534,76 +595,15 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
         panel.duck(belowHudLayer: Int(hud.layer), windowNumber: Int(hud.id))
     }
 
-    static func isLauncherHudOwner(name: String, bundleId: String?) -> Bool {
-        if let bundleId {
-            let id = bundleId.lowercased()
-            if id == "com.raycast.macos" { return true }
-            if id.contains("alfred") { return true }
-            if id == "com.apple.spotlight" { return true }
-        }
-        let owner = name.lowercased()
-        if owner.contains("raycast") { return true }
-        if owner.contains("alfred") { return true }
-        if owner == "spotlight" { return true }
-        return false
+    nonisolated static func isLauncherHudOwner(name: String, bundleId: String?) -> Bool {
+        LauncherHUDSnapshot.isLauncherHudOwner(name: name, bundleId: bundleId)
     }
 
     /// Menu extras are tiny. The search HUD is a wide bar / results list.
     /// Zero size means the system redacted bounds (TCC); a window below
     /// status-window level is treated as the HUD in that case.
-    static func isLauncherHudMetrics(width: Double, height: Double, alpha: Double) -> Bool {
-        if alpha < 0.05 { return false }
-        if width <= 0 || height <= 0 { return false }
-        return width >= 280 && height >= 48
-    }
-
-    private static func launcherSnaps() -> [(id: UInt32, isHud: Bool, owner: String, layer: Int32, width: Double, height: Double, pid: pid_t)] {
-        onScreenWindows().compactMap { info in
-            guard isLauncherOwned(info) else { return nil }
-            guard let num = info[kCGWindowNumber as String] as? NSNumber else { return nil }
-            let alpha = (info[kCGWindowAlpha as String] as? NSNumber)?.doubleValue ?? 1
-            let bounds = info[kCGWindowBounds as String] as? [String: Any]
-            let width = (bounds?["Width"] as? NSNumber)?.doubleValue ?? 0
-            let height = (bounds?["Height"] as? NSNumber)?.doubleValue ?? 0
-            let layer = (info[kCGWindowLayer as String] as? NSNumber)?.int32Value ?? 0
-            let owner = (info[kCGWindowOwnerName as String] as? String) ?? ""
-            let pid = pid_t((info[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value ?? 0)
-            let statusLevel = Int32(CGWindowLevelForKey(.statusWindow))
-            var isHud = isLauncherHudMetrics(width: width, height: height, alpha: alpha)
-            // Screen Recording off: bounds are 0. Menu extras still sit at
-            // status-window level; the search HUD is lower (floating / overlay).
-            if !isHud, alpha >= 0.05, width <= 0 || height <= 0, layer < statusLevel {
-                isHud = true
-            }
-            return (
-                id: num.uint32Value,
-                isHud: isHud,
-                owner: owner,
-                layer: layer,
-                width: width,
-                height: height,
-                pid: pid
-            )
-        }
-    }
-
-    private static func describeLauncherSnaps(_ snaps: [(id: UInt32, isHud: Bool, owner: String, layer: Int32, width: Double, height: Double, pid: pid_t)]) -> String {
-        snaps.map { snap in
-            "\(snap.owner)#\(snap.id) \(Int(snap.width))x\(Int(snap.height)) layer=\(snap.layer) hud=\(snap.isHud)"
-        }.joined(separator: "; ")
-    }
-
-    private static func isLauncherOwned(_ info: [String: Any]) -> Bool {
-        let name = (info[kCGWindowOwnerName as String] as? String) ?? ""
-        let pid = (info[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value ?? 0
-        let bundle = pid > 0 ? NSRunningApplication(processIdentifier: pid_t(pid))?.bundleIdentifier : nil
-        if bundle == AppConfig.bundleId { return false }
-        return isLauncherHudOwner(name: name, bundleId: bundle)
-    }
-
-    private static func onScreenWindows() -> [[String: Any]] {
-        let opts = CGWindowListOption(arrayLiteral: .optionOnScreenOnly, .excludeDesktopElements)
-        return (CGWindowListCopyWindowInfo(opts, kCGNullWindowID) as? [[String: Any]]) ?? []
+    nonisolated static func isLauncherHudMetrics(width: Double, height: Double, alpha: Double) -> Bool {
+        LauncherHUDSnapshot.isLauncherHudMetrics(width: width, height: height, alpha: alpha)
     }
 
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {

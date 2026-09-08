@@ -2,7 +2,7 @@
 
 Roc Mind Spark **作为 macOS 浮层**今天能做什么。这是给 GitHub 看的产品目录，不是变更日志。修 bug 写在 [CHANGELOG.md](../CHANGELOG.md)。
 
-[English](FEATURES.md) · [中文](FEATURES.zh.md)
+[English](FEATURES.md) · [中文](FEATURES.zh.md) · [需求与验收基线](REQUIREMENTS.zh.md) · [实现评估](IMPLEMENTATION_REVIEW.zh.md)
 
 **平台：** Apple Silicon 上的 macOS 14+。浮层盖在当前 Space 上。这不是网站，也不是浏览器标签。
 
@@ -19,6 +19,8 @@ Roc Mind Spark **作为 macOS 浮层**今天能做什么。这是给 GitHub 看�
 ## 地图
 
 - 侧栏里可以有多张图。新建空白、复制、置顶、改名、删除。
+- 自动保存按导图排队，失败时显示未保存状态并重试；正常退出等待保存完成。
+- 版本历史支持预览、差异比较和恢复，预览期间只读。
 - 自动保存到本机 SQLite：`~/Library/Application Support/RocMindSpark/`。
 - 拖入或粘贴的图片跟图一起存在本机。
 - 可以从内置模板开图，也可以把当前图存成自己的模板。
@@ -33,7 +35,7 @@ Roc Mind Spark **作为 macOS 浮层**今天能做什么。这是给 GitHub 看�
 - **Space** 折叠 / 展开分支。全部折叠是一层一层收。
 - 地图编辑有撤销 / 重做。节点文字、Markdown、笔记的撤销跟当前焦点走，不会和地图历史混在一起。
 - 节点内格式：粗体、斜体、下划线、删除线、字号、颜色、高亮、对齐。
-- 标记、超链接、待办勾选、引用（你主动查 DOI 时才会请求 Crossref）、Markdown 表格、代码块、分隔线。
+- 标记、超链接、待办勾选、数学公式、节点计算公式（以 `=` 开头，支持运算及子节点汇总）、引用（你主动查 DOI 时才会请求 Crossref）、Markdown 表格、代码块、分隔线。
 - 节点上可以挂图，再点一次打开查看。
 - 角上的手柄可以拉节点宽度，手动宽度会保留。
 
@@ -46,7 +48,8 @@ Roc Mind Spark **作为 macOS 浮层**今天能做什么。这是给 GitHub 看�
 
 ## Markdown
 
-- 侧栏用 Markdown 大纲编辑整张图，和画布双向同步。
+- 侧栏用 Markdown 大纲编辑整张图，和画布双向同步，含语法着色和格式工具栏。
+- 拖选依据实际字符排版，支持中英文、粗体、换行和边缘自动滚动；退出编辑前同步末尾输入。
 - 自动换行、渲染预览、预览可下 PDF。
 - 打开或拖动 Markdown 侧栏时，导图不会自动缩放。画面中心点保持原位。要适应窗口用缩放条上的 Fit。
 
@@ -63,8 +66,8 @@ Roc Mind Spark **作为 macOS 浮层**今天能做什么。这是给 GitHub 看�
 - 按当前主题导出 PNG。
 - 导出 Markdown 文件，或复制成纯文本大纲。
 - Word `.doc`、Mermaid、JSON 备份、从引用节点汇总参考文献。
-- 把一棵子树编成 prompt，用图里的 `{{占位符}}` 填变量。
-- 导入 JSON、OPML 或 Markdown 大纲。
+- 把一棵子树编成 prompt，用图里的 `{{占位符}}` 填变量。可自行配置 LLM API key 发送编译结果，将回复加入导图。
+- 导入 JSON、OPML、Markdown 大纲，以及 GitMind `.gmind`、MindMeister `.mind` 文件。
 
 ## 快捷键和帮助
 

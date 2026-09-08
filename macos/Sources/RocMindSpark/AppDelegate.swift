@@ -6,6 +6,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let store = ShortcutStore.shared
     private var overlay: OverlayController!
     private var statusItem: NSStatusItem?
+    private var waitingForSave = false
+    private var readyToTerminate = false
     /// Retained for the process lifetime. Turns POSIX SIGTERM into a normal
     /// `NSApp.terminate(nil)` on the main queue.
     private var terminationBridge: POSIXTerminationBridge?
@@ -47,6 +49,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.overlay.show()
             }
         }
+    }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard overlay != nil, !readyToTerminate else { return .terminateNow }
+        if waitingForSave { return .terminateCancel }
+        waitingForSave = true
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await self.overlay.flushBeforeQuit()
+                self.readyToTerminate = true
+                sender.terminate(nil)
+            } catch {
+                self.waitingForSave = false
+                self.terminationBridge?.resetAfterCancelledTermination()
+                self.overlay.show()
+                let alert = NSAlert()
+                alert.messageText = L10n.t("error.saveQuit")
+                alert.informativeText = error.localizedDescription
+                alert.alertStyle = .warning
+                alert.runModal()
+            }
+        }
+        // terminateLater enters AppKit's nested wait while a signal handler is
+        // still on the main dispatch queue. MainActor save work cannot resume
+        // there. Cancel this attempt, then terminate again after saving.
+        return .terminateCancel
     }
 
     func applicationWillTerminate(_ notification: Notification) {

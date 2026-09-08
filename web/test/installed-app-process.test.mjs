@@ -65,8 +65,8 @@ n${destBin}/Contents/MacOS/RocMindSpark"
     const supervisor = readFileSync(join(repoRoot, 'macos/Sources/RocMindSpark/ServerSupervisor.swift'), 'utf8');
     const heldStop = readFileSync(join(repoRoot, 'macos/Sources/RocMindSpark/HeldProcessStop.swift'), 'utf8');
     // Shell wait for the exact App PID must exceed HeldProcessStop's
-    // worst-case 5s graceful + 1s child SIGKILL (6s). 10s is the slack.
-    assert.match(helperSrc, /APP_STOP_WAIT_SECONDS=10/);
+    // worst-case 5s save handshake + 5s graceful + 1s child SIGKILL.
+    assert.match(helperSrc, /APP_STOP_WAIT_SECONDS=15/);
     assert.match(helperSrc, /must exceed HeldProcessStop/);
     assert.match(install, /stop_exact_installed_app "\$DEST_BIN" "\$APP_STOP_WAIT_SECONDS"/);
     assert.match(install, /wait_port_idle 3034 5/);
@@ -74,6 +74,7 @@ n${destBin}/Contents/MacOS/RocMindSpark"
     assert.doesNotMatch(install, /while read -r pid; do kill/);
     assert.doesNotMatch(install, /server\.js/);
     assert.doesNotMatch(install, /kill -9/);
+    assert.doesNotMatch(helperSrc, /kill -9/);
     assert.match(helperSrc, /wait_exact_app_exit/);
     assert.match(helperSrc, /pid_has_exact_executable "\$pid" "\$dest_bin"/);
     assert.doesNotMatch(supervisor, /terminatePID/);
@@ -116,6 +117,20 @@ filter_still_exact_app_pids /Applications/Roc\\ Mind\\ Spark.app/Contents/MacOS/
 `;
     const out = execFileSync('bash', ['-c', script], { encoding: 'utf8' }).trim();
     assert.equal(out, '10');
+  });
+
+  test('installation stops if the app refuses to quit, without forcing away drafts', () => {
+    const script = `
+source "${helper}"
+list_exact_app_pids() { echo 4242; }
+terminate_if_still_exact_app() { echo requested-quit; }
+wait_exact_app_exit() { return 1; }
+kill() { echo unexpected-kill; }
+stop_exact_installed_app /fake/RocMindSpark 0
+echo stop_rc=$?
+`;
+    const out=execFileSync('bash',['-c',script],{encoding:'utf8',stdio:['ignore','pipe','pipe']}).trim();
+    assert.equal(out,'requested-quit\nstop_rc=1');
   });
 
   test('wait_exact_app_exit returns 0 when the App PID list becomes empty, without SIGKILL', () => {

@@ -1,4 +1,4 @@
-.PHONY: build app release-archive install run test clean md-select-eval
+.PHONY: build app release-archive install run test clean md-select-eval app-e2e md-production-eval
 
 PREFIX ?= /Applications
 APP_NAME = Roc Mind Spark.app
@@ -25,6 +25,13 @@ test:
 md-select-eval:
 	swift scripts/md-select-eval.swift "$(CURDIR)/scripts/md-select-eval.html"
 	swift scripts/md-select-eval.swift --overlay "$(CURDIR)/scripts/md-select-eval.html"
+
+# These use WKWebView; app-e2e creates and removes an isolated SQLite database.
+app-e2e:
+	node scripts/app-e2e.mjs
+
+md-production-eval:
+	node scripts/md-production-eval.mjs --overlay
 
 clean:
 	rm -rf macos/.build dist

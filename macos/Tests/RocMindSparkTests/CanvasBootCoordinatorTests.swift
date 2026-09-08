@@ -75,6 +75,24 @@ final class CanvasBootCoordinatorTests: XCTestCase {
         XCTAssertEqual(boot.phase, .ready)
     }
 
+    func testServiceExitAllowsRetryAfterReady() {
+        var boot = CanvasBootCoordinator()
+        XCTAssertTrue(boot.requestStart())
+        boot.markSucceeded()
+        boot.markServiceUnavailable()
+        XCTAssertTrue(boot.showsRetry)
+        XCTAssertTrue(boot.requestRetry())
+        boot.markSucceeded()
+        XCTAssertTrue(boot.shouldLoadCanvas)
+    }
+
+    func testServiceExitDoesNotResetInFlightStartup() {
+        var boot = CanvasBootCoordinator()
+        XCTAssertTrue(boot.requestStart())
+        boot.markServiceUnavailable()
+        XCTAssertEqual(boot.phase, .starting)
+    }
+
     func testMarkFailedIgnoredWhenIdleOrReady() {
         var boot = CanvasBootCoordinator()
         boot.markFailed()

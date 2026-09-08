@@ -19,7 +19,7 @@ const PUBLIC = join(here, '..', '..', 'public');
 // order there. A tested function may live in any of them, so search all —
 // otherwise splitting a file would break tests that have nothing to do with
 // the split.
-const CLIENT_FILES = ['templates.js', 'app.js'];
+const CLIENT_FILES = ['templates.js', 'markdown-selection.js', 'app.js'];
 
 let _src = null;
 function source() {

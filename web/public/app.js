@@ -46,18 +46,32 @@ function apiUrl(path){
 }
 
 const ServerStore = {
-  async _j(url,opt){ const r=await fetch(apiUrl(url),opt); if(!r.ok) throw new Error(r.status); return r.status===204?null:r.json(); },
-  async list(){ try{ return await this._j('/api/maps'); }catch(e){ return []; } },
-  async get(id){ try{ return await this._j('/api/maps/'+id); }catch(e){ return null; } },
+  async _j(url,opt){
+    const controller=new AbortController();
+    const timeout=setTimeout(()=>controller.abort(),4000);
+    try{
+      const r=await fetch(apiUrl(url),{...opt,signal:controller.signal});
+      if(!r.ok){ const error=new Error('HTTP '+r.status); error.status=r.status; throw error; }
+      return r.status===204 ? null : await r.json();
+    }finally{ clearTimeout(timeout); }
+  },
+  async list(){ return this._j('/api/maps'); },
+  async get(id){
+    try{ return await this._j('/api/maps/'+encodeURIComponent(id)); }
+    catch(e){ if(e.status===404) return null; throw e; }
+  },
   async save(map){
     map.updated=Date.now();
-    try{ await this._j('/api/maps/'+map.id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(map)}); }
-    catch(e){ await this._j('/api/maps',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(map)}); }
+    // PUT is already an upsert on the local server. Repeating a failed PUT as
+    // POST hides the original failure and can write a second, stale snapshot.
+    await this._j('/api/maps/'+encodeURIComponent(map.id),{
+      method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(map)
+    });
   },
-  async remove(id){ try{ await this._j('/api/maps/'+id,{method:'DELETE'}); }catch(e){ console.warn('map delete failed on the server; it is gone locally but may still exist remotely:', e.message); } },
-  // Version history (SQLite-backed snapshots)
-  async history(id){ try{ return await this._j('/api/maps/'+id+'/versions'); }catch(e){ return []; } },
-  async version(id, ref){ try{ return await this._j('/api/maps/'+id+'/versions/'+ref); }catch(e){ return null; } }
+  async remove(id){ await this._j('/api/maps/'+encodeURIComponent(id),{method:'DELETE'}); },
+  async history(id){ return this._j('/api/maps/'+encodeURIComponent(id)+'/versions'); },
+  async version(id,ref){ return this._j('/api/maps/'+encodeURIComponent(id)+'/versions/'+encodeURIComponent(ref)); }
+
 };
 
 const CloudStore = {
@@ -368,6 +382,11 @@ function execCmd(cmd, value){
 }
 
 async function initStore(){
+  // The installed local product never turns a temporary server outage into a
+  // GitHub login flow. Its native supervisor owns server startup/recovery.
+  if(location.protocol==='file:' || location.port==='3034'){
+    Store=ServerStore; MODE='server'; return {mode:'server',loggedIn:true};
+  }
   const tries=(typeof location!=='undefined' && location.protocol==='file:') ? 50 : 1;
   for(let i=0;i<tries;i++){
     try{
@@ -617,7 +636,7 @@ function applyMapView(saved){
 }
 let sel=null;                 // selected node id
 let history=[],hpos=-1;       // undo stack
-let saveTimer=null, _pendingSaveMap=null;
+
 
 const viewport=$('#viewport'), edges=$('#edges'), stage=$('#stage'), zoomVal=$('#zoomVal');
 if(viewport){
@@ -2686,18 +2705,10 @@ function relayoutDuringEdit(id){
    NODE OPERATIONS
    ============================================================ */
 /* ---- Markdown mode: edit the map as text with a live two-way preview (v1) ---- */
-let mdMode=false, _mdSyncing=false, _mdTimer=0, _mdLines=[], _mdSelSync=false, _mdActiveLine=0, mdPreview=false, mdWrap=false, _mdLH=20, _mdPT=12;
+let mdMode=false, _mdSyncing=false, _mdTimer=0, _mdLines=[], _mdSelSync=false, _mdActiveLine=0, mdPreview=false, mdWrap=false;
 let _mdPosCache={pos:-1, line:0}, _mdSelRAF=0, _mdComposing=false;
 function mdInvalidatePosCache(){
   _mdPosCache={pos:-1, line:0};
-}
-function mdPaneViewportBox(slotRect, scale){
-  if(!slotRect || !(slotRect.width>1) || !(slotRect.height>1)) return null;
-  const z=(scale!=null && scale>0)?scale:1;
-  return {left:slotRect.left*z, top:slotRect.top*z, width:slotRect.width*z, height:slotRect.height*z};
-}
-function placeMdPane(){
-  // Markdown lives in the app grid at 1 CSS px = 1 mouse px. Nothing to pin.
 }
 function mdPlain(el){
   el=el||document.getElementById('mdEditor');
@@ -2708,7 +2719,7 @@ function mdPlain(el){
     if(!n) return;
     if(n.nodeType===3){ t+=n.nodeValue; return; }
     if(n.nodeType!==1) return;
-    if(n.getAttribute && n.getAttribute('contenteditable')==='false') return;
+    if(n!==el && n.getAttribute && n.getAttribute('contenteditable')==='false') return;
     for(let c=n.firstChild;c;c=c.nextSibling) walk(c);
   };
   walk(el);
@@ -2717,47 +2728,21 @@ function mdPlain(el){
 function mdGetSel(el){
   el=el||document.getElementById('mdEditor');
   if(!el) return {s:0,e:0};
-  if(_mdDrag) return {s:Math.min(_mdDrag.a,_mdDrag.b), e:Math.max(_mdDrag.a,_mdDrag.b)};
+  const dragging=_mdSelection && _mdSelection.range();
+  if(dragging) return dragging;
   if(el.tagName==='TEXTAREA' || el.tagName==='INPUT') return {s:el.selectionStart|0, e:el.selectionEnd|0};
   const sel=typeof window!=='undefined' && window.getSelection && window.getSelection();
   if(!sel || !sel.rangeCount) return {s:0,e:0};
   const r=sel.getRangeAt(0);
   if(!el.contains(r.startContainer) && r.startContainer!==el) return {s:0,e:0};
-  let s=-1, e=-1, acc=0;
-  const walk=n=>{
-    if(s>=0 && e>=0) return;
-    if(n.nodeType===3){
-      if(s<0 && n===r.startContainer) s=acc+r.startOffset;
-      if(e<0 && n===r.endContainer) e=acc+r.endOffset;
-      acc+=n.nodeValue.length;
-      return;
-    }
-    if(n.nodeType!==1) return;
-    if(n.getAttribute && n.getAttribute('contenteditable')==='false') return;
-    for(let c=n.firstChild;c;c=c.nextSibling) walk(c);
-  };
-  walk(el);
-  if(s<0) s=0;
-  if(e<0) e=s;
-  return {s, e};
+  const index=mdSelectionIndex(el);
+  const s=index.offset(r.startContainer,r.startOffset);
+  const e=index.offset(r.endContainer,r.endOffset);
+  return {s:s==null ? 0 : s,e:e==null ? (s||0) : e};
 }
-function mdNodeAt(el, index){
-  let acc=0, found=null, foundOff=0;
-  const walk=n=>{
-    if(found) return;
-    if(n.nodeType===3){
-      const next=acc+n.nodeValue.length;
-      if(index<=next){ found=n; foundOff=index-acc; return; }
-      acc=next;
-      return;
-    }
-    if(n.nodeType!==1) return;
-    if(n.getAttribute && n.getAttribute('contenteditable')==='false') return;
-    for(let c=n.firstChild;c;c=c.nextSibling) walk(c);
-  };
-  walk(el);
-  if(found) return {node:found, off:foundOff};
-  return {node:el, off:el.childNodes.length};
+function mdNodeAt(el, position){
+  const point=mdSelectionIndex(el).point(position);
+  return {node:point.node,off:point.offset};
 }
 function mdSetSel(el, s, e){
   el=el||document.getElementById('mdEditor');
@@ -2768,12 +2753,12 @@ function mdSetSel(el, s, e){
     try{ el.selectionStart=s; el.selectionEnd=e; }catch(_){}
     return;
   }
-  const a=mdNodeAt(el, Math.max(0,s));
-  const b=mdNodeAt(el, Math.max(0,e));
+  const index=mdSelectionIndex(el);
+  const a=index.point(s), b=index.point(e);
   try{
     const r=document.createRange();
-    r.setStart(a.node, a.off);
-    r.setEnd(b.node, b.off);
+    r.setStart(a.node, a.offset);
+    r.setEnd(b.node, b.offset);
     const sel=window.getSelection();
     sel.removeAllRanges();
     sel.addRange(r);
@@ -2783,9 +2768,12 @@ function mdPaint(el, text, keepSel){
   el=el||document.getElementById('mdEditor');
   if(!el) return;
   if(keepSel==null) keepSel=true;
+  const html=mdHighlight(text, _mdView);
+  if(el._mdPaintedHTML===html) return;
   const sel=keepSel?mdGetSel(el):{s:0,e:0};
-  const html=(typeof mdHighlight==='function') ? mdHighlight(text, _mdView) : String(text||'');
-  el.innerHTML=html||'';
+  mdClearDragSel();
+  el.innerHTML=html;
+  el._mdPaintedHTML=html;
   if(keepSel) mdSetSel(el, sel.s, sel.e);
 }
 function mdBindEditor(el){
@@ -2818,110 +2806,9 @@ function mdBindEditor(el){
   el.setSelectionRange=function(a,b){ mdSetSel(el, a, b==null?a:b); };
   return el;
 }
-function mdColAtWidth(line, x, widthOf){
-  if(!(x>0)) return 0;
-  const s=String(line==null?'':line);
-  let lo=0, hi=s.length;
-  while(lo<hi){
-    const mid=(lo+hi+1)>>1;
-    if(widthOf(s.slice(0,mid))<=x) lo=mid; else hi=mid-1;
-  }
-  return lo;
-}
-function mdIndexAtLineCol(lines, line, col){
-  const rows=lines||[];
-  if(!rows.length) return 0;
-  if(line<0) return 0;
-  if(line>=rows.length){
-    let n=0;
-    for(let i=0;i<rows.length;i++) n+=rows[i].length+1;
-    return Math.max(0, n-1);
-  }
-  let i=0;
-  for(let k=0;k<line;k++) i+=rows[k].length+1;
-  const row=rows[line];
-  return i+Math.max(0, Math.min(col, row.length));
-}
-let _mdMeas=null, _mdDrag=null;
-function mdTextWidth(font, str){
-  if(!_mdMeas){
-    const c=document.createElement('canvas');
-    _mdMeas=c.getContext('2d');
-  }
-  if(_mdMeas._font!==font){ _mdMeas.font=font; _mdMeas._font=font; }
-  return _mdMeas.measureText(str).width;
-}
-function mdOffsetFromPoint(el, cx, cy){
-  if(typeof mdWrap!=='undefined' && mdWrap && document.caretRangeFromPoint){
-    const rg=document.caretRangeFromPoint(cx, cy);
-    if(rg && (el===rg.startContainer || el.contains(rg.startContainer))){
-      let s=-1, acc=0;
-      const walk=n=>{
-        if(s>=0) return;
-        if(n.nodeType===3){
-          if(n===rg.startContainer){ s=acc+rg.startOffset; return; }
-          acc+=n.nodeValue.length;
-          return;
-        }
-        if(n.nodeType!==1) return;
-        if(n.getAttribute && n.getAttribute('contenteditable')==='false') return;
-        for(let c=n.firstChild;c;c=c.nextSibling) walk(c);
-      };
-      walk(el);
-      if(s>=0) return s;
-    }
-  }
-  const text=mdPlain(el);
-  const lines=text.split('\n');
-  const r=el.getBoundingClientRect();
-  const cs=getComputedStyle(el);
-  const padL=parseFloat(cs.paddingLeft)||0;
-  const padT=parseFloat(cs.paddingTop)||0;
-  const lh=parseFloat(cs.lineHeight)||20;
-  const x=cx-r.left+el.scrollLeft-padL;
-  const y=cy-r.top+el.scrollTop-padT;
-  let line=Math.floor(y/lh);
-  if(line<0) line=0;
-  if(line>=lines.length) return text.length;
-  const font=cs.font;
-  const col=mdColAtWidth(lines[line], x, s=>mdTextWidth(font, s));
-  return mdIndexAtLineCol(lines, line, col);
-}
-function mdSelLayer(){
-  return document.getElementById('mdSelLayer');
-}
-function mdPaintDragSel(el, a, b){
-  const layer=mdSelLayer(); if(!layer || !el) return;
-  const s=Math.min(a,b), e=Math.max(a,b);
-  if(e<=s){ layer.innerHTML=''; return; }
-  const text=mdPlain(el);
-  const lines=text.split('\n');
-  const cs=getComputedStyle(el);
-  const padL=parseFloat(cs.paddingLeft)||0;
-  const padT=parseFloat(cs.paddingTop)||0;
-  const lh=parseFloat(cs.lineHeight)||20;
-  const font=cs.font;
-  const start=mdLineColFromPos(text, s, null);
-  const end=mdLineColFromPos(text, e, null);
-  const parts=[];
-  for(let line=start.line; line<=end.line; line++){
-    const row=lines[line]||'';
-    const c0=line===start.line?start.col:0;
-    const c1=line===end.line?end.col:row.length;
-    const x0=padL+mdTextWidth(font, row.slice(0,c0))-el.scrollLeft;
-    const x1=padL+mdTextWidth(font, row.slice(0,c1))-el.scrollLeft;
-    const top=padT+line*lh-el.scrollTop;
-    const w=Math.max(3, x1-x0);
-    if(top+lh<0 || top>el.clientHeight) continue;
-    parts.push('<i style="left:'+x0+'px;top:'+top+'px;width:'+w+'px;height:'+lh+'px"></i>');
-  }
-  layer.innerHTML=parts.join('');
-}
+let _mdSelection=null;
 function mdClearDragSel(){
-  _mdDrag=null;
-  const layer=mdSelLayer(); if(layer) layer.innerHTML='';
-  const ed=document.getElementById('mdEditor');
-  if(ed && ed.classList) ed.classList.remove('md-drag-sel');
+  if(_mdSelection) _mdSelection.cancel();
 }
 function mdLineColFromPos(text, pos, cache){
   const s=String(text==null?'':text);
@@ -2983,7 +2870,6 @@ function ensureMdPane(){
     +'<div class="md-resize" title="Drag to resize"></div>';
   app.insertBefore(pane, stage);
   document.body.classList.add('md-ready');
-  window.addEventListener('resize', ()=>{ if(mdMode){ mdCalibrate(); mdSyncGutterRowHeights(); } });
   applyMdPaneI18n(pane);
   pane.querySelector('.md-close').addEventListener('click',()=>toggleMdMode(false));
   pane.querySelector('.md-prev-btn').addEventListener('click', mdTogglePreview);
@@ -2991,67 +2877,41 @@ function ensureMdPane(){
   pane.querySelector('.md-pdf-btn').addEventListener('click', mdDownloadPdf);
   pane.querySelector('.md-toolbar').addEventListener('mousedown', e=>{ const b=e.target.closest('button[data-fmt]'); if(b){ e.preventDefault(); mdFormat(b.dataset.fmt); } });
   const ed=mdBindEditor(pane.querySelector('#mdEditor'));
-  let _mdPointerSel=false;
-  ed.addEventListener('compositionstart', ()=>{ _mdComposing=true; });
-  ed.addEventListener('compositionend', ()=>{ _mdComposing=false; mdAfterEdit(); });
-  ed.addEventListener('input', ()=>{ if(!_mdComposing) mdAfterEdit(); });
+  ed.addEventListener('compositionstart', ()=>{ _mdComposing=true; clearTimeout(_mdTimer); _mdTimer=0; });
+  ed.addEventListener('compositionend', ()=>{ _mdComposing=false; markImeCompositionEnd(); delete ed._mdPaintedHTML; mdAfterEdit(); });
+  ed.addEventListener('input', ()=>{ delete ed._mdPaintedHTML; if(!_mdComposing) mdAfterEdit(); });
   ed.addEventListener('paste', e=>{
     e.preventDefault();
+    if(ed.readOnly) return;
     const t=(e.clipboardData && e.clipboardData.getData('text/plain'))||'';
     if(typeof insertFieldText==='function') insertFieldText(ed, t);
     else mdInsertText(t);
   });
   ed.addEventListener('keydown',e=>{
+    if(_mdComposing || e.isComposing || e.keyCode===229) return;
     if(e.key==='Escape'){ e.preventDefault(); toggleMdMode(false); return; }
+    if(ed.readOnly) return;
+    if(isImeConfirmEnter(e)){ e.preventDefault(); return; }
     if((e.ctrlKey||e.metaKey) && !e.altKey){ const k=(e.key||'').toLowerCase();
       if(k==='z' && !e.shiftKey){ e.preventDefault(); performHistoryChord('undo'); return; }
       if(k==='y' || (k==='z' && e.shiftKey)){ e.preventDefault(); performHistoryChord('redo'); return; }
       if(k==='b'){ e.preventDefault(); mdFormat('bold'); return; }
       if(k==='i'){ e.preventDefault(); mdFormat('italic'); return; } }
     if(e.key==='Tab'){ e.preventDefault(); const a=ed.selectionStart,b=ed.selectionEnd; ed.value=ed.value.slice(0,a)+'  '+ed.value.slice(b); ed.selectionStart=ed.selectionEnd=a+2; mdAfterEdit(); }
-    if(e.key==='Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey){
+    if(e.key==='Enter'){
       e.preventDefault();
-      if(!mdHandleEnter(ed)) mdInsertText('\n');
+      if(e.shiftKey || e.ctrlKey || e.metaKey || !mdHandleEnter(ed)) mdInsertText('\n');
       else mdAfterEdit();
     }
   });
   const syncNodeFromCaret=()=>{ if(_mdSelSync) return; const vline=mdLineColFromPos(ed.value, ed.selectionStart, _mdPosCache).line; const line=_mdView?_mdView.visLineToFull[vline]:vline; let id=null; for(let l=line;l>=0;l--){ if(_mdLines[l]){ id=_mdLines[l]; break; } } if(id && map.nodes[id]){ _mdSelSync=true; select(id); _mdSelSync=false; } };
   ed.addEventListener('click', ()=>{ mdUpdateActive(); syncNodeFromCaret(); });
-  ed.addEventListener('mousedown', e=>{
-    if(e.button!==0 || e.detail>1) return;
-    e.preventDefault();
-    try{ ed.focus(); }catch(_){}
-    _mdPointerSel=true;
-    const start=e.shiftKey ? mdGetSel(ed).s : mdOffsetFromPoint(ed, e.clientX, e.clientY);
-    _mdDrag={a:start, b:start};
-    ed.classList.add('md-drag-sel');
-    mdPaintDragSel(ed, start, start);
-    const move=ev=>{
-      if(!_mdDrag) return;
-      const box=ed.getBoundingClientRect();
-      if(ev.clientY<box.top+16) ed.scrollTop-=24;
-      else if(ev.clientY>box.bottom-16) ed.scrollTop+=24;
-      if(ev.clientX<box.left+16) ed.scrollLeft-=24;
-      else if(ev.clientX>box.right-16) ed.scrollLeft+=24;
-      _mdDrag.b=mdOffsetFromPoint(ed, ev.clientX, ev.clientY);
-      mdPaintDragSel(ed, _mdDrag.a, _mdDrag.b);
-    };
-    const up=()=>{
-      window.removeEventListener('mousemove', move, true);
-      window.removeEventListener('mouseup', up, true);
-      if(!_mdDrag) return;
-      const a=_mdDrag.a, b=_mdDrag.b;
-      mdClearDragSel();
-      _mdPointerSel=false;
-      mdSetSel(ed, a, b);
-      mdUpdateActive();
-    };
-    window.addEventListener('mousemove', move, true);
-    window.addEventListener('mouseup', up, true);
-  });
-  window.addEventListener('blur', ()=>{ if(_mdDrag) mdClearDragSel(); _mdPointerSel=false; });
+  _mdSelection=createMarkdownSelection(ed, pane.querySelector('#mdSelLayer'), mdUpdateActive);
+  document.addEventListener('mousedown', e=>{
+    if(mdMode && !pane.contains(e.target)) flushMdEdits();
+  }, true);
   document.addEventListener('selectionchange', ()=>{
-    if(!mdMode || _mdPointerSel || _mdComposing) return;
+    if(!mdMode || (_mdSelection && _mdSelection.active) || _mdComposing) return;
     if(document.activeElement!==document.getElementById('mdEditor')) return;
     if(_mdSelRAF) return;
     _mdSelRAF=requestAnimationFrame(()=>{ _mdSelRAF=0; mdUpdateActive(); });
@@ -3068,11 +2928,12 @@ function ensureMdPane(){
         const {w:W1,h:H1}=_stageSize();
         if(isFinite(cx0)&&isFinite(cy0)&&W1>1&&H1>1) _reframeSmooth(cx0, cy0, W1, H1);
       }catch(_){}
-      placeMdPane(); mdSyncGutterRowHeights(); };
+      mdClearDragSel(); };
     window.addEventListener('mousemove',mv); window.addEventListener('mouseup',up);
   });
 }
 function syncTextFromMap(){
+  clearTimeout(_mdTimer); _mdTimer=0;
   const ed=document.getElementById('mdEditor'); if(!ed) return;
   const oldLines=_mdLines, oldFolds=_mdFolds;   // remember before rebuilding, to carry fold state across the resync
   const newLines=[];
@@ -3118,14 +2979,17 @@ function mdHighlightNode(id){   // node -> select + scroll its line in the edito
   const arr=ed.value.split('\n'); let start=0; for(let i=0;i<vline;i++) start+=(arr[i]||'').length+1;
   try{ ed.setSelectionRange(start, start); }catch(e){}   // caret at line start (no whole-line selection)
   ed.scrollLeft=0;                                       // don't jump horizontally on open
-  ed.scrollTop=Math.max(0, vline*_mdLH - ed.clientHeight/2);
-  mdUpdateActive(); mdSyncScroll();
+  const point=mdNodeAt(ed,start), range=document.createRange();
+  range.setStart(point.node,point.off); range.collapse(true);
+  const caret=range.getBoundingClientRect(), box=ed.getBoundingClientRect();
+  if(caret.height) ed.scrollTop=Math.max(0, ed.scrollTop+caret.top-box.top-ed.clientHeight/2);
+  mdUpdateActive();
   // A browser can apply its own "scroll the caret into view" adjustment asynchronously —
   // a tick after the selection change above — which would silently reintroduce horizontal
   // scroll. Re-assert once more on the next frame to catch that.
-  requestAnimationFrame(()=>{ ed.scrollLeft=0; mdSyncScroll(); });
+  requestAnimationFrame(()=>{ ed.scrollLeft=0; });
 }
-// ---- VS Code-style decorations: syntax highlight + line numbers + active line ----
+// ---- Syntax coloring for the editable text ----
 function _hlLine(raw){
   const esc=t=>t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   let s=esc(raw);
@@ -3222,7 +3086,7 @@ function mdLinePrefix(pfx){ const ed=document.getElementById('mdEditor'); if(!ed
   ed.value=ed.value.slice(0,ls)+out+ed.value.slice(Math.max(e,ls)); ed.selectionStart=ls; ed.selectionEnd=ls+out.length; ed.focus(); mdAfterEdit(); }
 function mdLineToggle(pfx){ const ed=document.getElementById('mdEditor'); if(!ed) return; const s=ed.selectionStart; const ls=ed.value.lastIndexOf('\n',s-1)+1; let le=ed.value.indexOf('\n',ls); if(le<0) le=ed.value.length;
   let line=ed.value.slice(ls,le).replace(/^#{1,6}\s+/,''); const nl=pfx+line; ed.value=ed.value.slice(0,ls)+nl+ed.value.slice(le); ed.selectionStart=ed.selectionEnd=ls+nl.length; ed.focus(); mdAfterEdit(); }
-function mdInsertText(text, caret){ const ed=document.getElementById('mdEditor'); if(!ed) return; const s=ed.selectionStart; ed.value=ed.value.slice(0,s)+text+ed.value.slice(ed.selectionEnd); const pos=s+(caret!=null?caret:text.length); ed.selectionStart=ed.selectionEnd=pos; ed.focus(); mdAfterEdit(); }
+function mdInsertText(text, caret){ const ed=document.getElementById('mdEditor'); if(!ed||ed.readOnly) return; const s=ed.selectionStart; ed.value=ed.value.slice(0,s)+text+ed.value.slice(ed.selectionEnd); const pos=s+(caret!=null?caret:text.length); ed.selectionStart=ed.selectionEnd=pos; ed.focus(); mdAfterEdit(); }
 function mdFormat(a){ const ed=document.getElementById('mdEditor'); if(!ed||ed.readOnly) return;
   switch(a){
     case 'bold': mdWrapSel('**','**'); break;
@@ -3320,17 +3184,13 @@ function mdTogglePreview(){
   if(mdPreview) mdRenderPreviewIfActive();
   else mdRefreshDecorations();   // gutter/highlight were display:none while previewing — re-sync now that they're visible again, rather than trusting whatever was last written while hidden
 }
-// Word wrap: the textarea and the (invisible-text-bearing) highlight overlay share one
-// CSS rule for white-space (see styles.css), so switching both to pre-wrap at once keeps
-// them pixel-aligned — same font/width/padding, same text, so the browser wraps both
-// identically. The fold-toggle gutter stays visible too — mdRefreshDecorations() (called
-// below) re-syncs each of its row heights to match the now-possibly-wrapped line it labels.
+// The editor's own layout supplies wrapped caret and selection geometry.
 function mdToggleWrap(){
   mdWrap=!mdWrap;
   const pane=document.getElementById('mdPane'); if(!pane) return;
   pane.classList.toggle('md-wrap', mdWrap);
   const btn=pane.querySelector('.md-wrap-btn'); if(btn) btn.classList.toggle('on', mdWrap);
-  mdRefreshDecorations();
+  mdClearDragSel();
 }
 // "Download PDF": renders the full markdown into a dedicated print-only container and
 // hands off to the browser's native print dialog (Save as PDF works everywhere without
@@ -3435,19 +3295,6 @@ function mdBuildView(){
   return { fullLines, depths, allRanges, hidden, foldInfo, visLineToFull, fullToVis };
 }
 function mdVisibleText(view){ return view.visLineToFull.map(i=>view.fullLines[i]).join('\n'); }
-function mdRenderGutter(view){
-  let g='';
-  for(let vi=0; vi<view.visLineToFull.length; vi++){
-    const fi=view.visLineToFull[vi];
-    const foldable=view.allRanges.has(fi);
-    const folded=foldable && _mdFolds.has(fi);
-    const btn=foldable
-      ? '<span class="gl-fold" data-full="'+fi+'" title="'+(folded?'Unfold':'Fold')+'">'+(folded?'\u25B8':'\u25BE')+'</span>'
-      : '<span class="gl-fold"></span>';
-    g+='<div class="gl" data-l="'+vi+'">'+btn+'<span class="gl-num">'+(fi+1)+'</span></div>';
-  }
-  return g;
-}
 // Reveals every fold that hides `fullLineIdx`. Returns true if anything changed.
 function mdUnfoldAncestorsOf(fullLineIdx){
   const view=_mdView||mdBuildView(); let changed=false;
@@ -3496,112 +3343,29 @@ function mdHighlight(text, view){
         }
       }
     }
-    // Real block-level rows (not just newline-joined spans) so the active-line highlight
-    // is a plain CSS class on the actual row — always pixel-perfect, in or out of view,
-    // with no separate position math to keep in sync while clicking/scrolling.
+    // Newlines belong to the editable text; coloring adds inline spans only.
     parts.push(html||'');
     if(i<lines.length-1) parts.push('\n');
   }
   return parts.join('');
-}
-function mdSyncScroll(){
-  const ed=document.getElementById('mdEditor'); if(!ed) return;
-  const hl=document.querySelector('#mdPane .md-hl-inner'), gut=document.querySelector('#mdPane .md-gutter-inner');
-  // A transform on the INNER wrapper, not `scrollTop` on the outer (clipping) element itself.
-  // Setting `scrollTop` gets silently clamped to that element's OWN scrollHeight — and the
-  // overlay's <div>-per-line rows can end up a pixel or two taller/shorter in total than the
-  // textarea's native line rendering (different rendering paths for a <textarea> vs plain
-  // block content), so the clamp would kick in once scrolled far enough, making the
-  // highlighted row drift from the real caret row — exactly the "only happens once there's a
-  // scrollbar" symptom. A transform has no such ceiling: it always shifts by exactly what the
-  // textarea reports, full stop. (Transforming .md-hl/.md-gutter directly would be wrong too —
-  // that would drag their own overflow:hidden clipping box along with it; the transform has to
-  // land on a plain, non-clipping inner element instead.)
-  const dx=-ed.scrollLeft, dy=-ed.scrollTop;
-  if(hl) hl.style.transform='translate('+dx+'px,'+dy+'px)';
-  if(gut) gut.style.transform='translateY('+dy+'px)';
 }
 function mdUpdateActive(){
   const ed=document.getElementById('mdEditor'); if(!ed) return;
   const {line, col}=mdLineColFromPos(ed.value, ed.selectionStart, _mdPosCache);
   _mdActiveLine=line;
   const pos=document.querySelector('#mdPane .md-pos'); if(pos) pos.textContent='Ln '+(line+1)+', Col '+(col+1);
-  mdSyncScroll();
+
 }
 function mdRefreshDecorations(){
   mdInvalidatePosCache();
   const ed=document.getElementById('mdEditor'); if(!ed) return;
-  const hl=document.querySelector('#mdPane .md-hl-inner');
-  const gut=document.querySelector('#mdPane .md-gutter-inner');
-  const view=mdBuildView(); _mdView=view;
-  // ed.value is expected to already match this view — mdCommitVisibleEdit's job on every
-  // edit — but mdHighlight(ed.value, view) below counts rows from ed.value.split('\n')
-  // while mdRenderGutter(view) counts rows from view.visLineToFull; if the two ever drift
-  // apart (an edge case in the fold-index-shift math elsewhere), the highlight pane and
-  // gutter silently render a different number of rows, with no visible error beyond the
-  // misalignment itself. Detect and correct that here rather than trusting the invariant
-  // blindly — only touches ed.value (and the cursor) on the rare mismatch, not on every
-  // refresh, so normal typing is unaffected.
-  const expectedVis = mdVisibleText(view);
-  mdPaint(ed, expectedVis, true);
-  _mdPrevVisible = expectedVis;
-  if(gut) gut.innerHTML=mdRenderGutter(view);
-  mdSyncGutterRowHeights(hl, gut);
-  mdCalibrate();
-  mdUpdateActive(); mdSyncScroll();
-  // A layout shift that settles just after this synchronous pass (a scrollbar
-  // appearing now that the content is taller, the pane's own width still
-  // transitioning, ...) would leave the row heights just measured baked in as
-  // stale — nothing else would re-check them until an unrelated click happened to
-  // trigger another full refresh. Re-measure once more next frame to catch that.
-  requestAnimationFrame(()=>{ if(document.getElementById('mdEditor')) mdSyncGutterRowHeights(hl, gut); });
+  _mdView=mdBuildView();
+  const visible=mdVisibleText(_mdView);
+  mdPaint(ed, visible, true);
+  _mdPrevVisible=visible;
+  mdUpdateActive();
 }
-// Each .gl gutter row is normally a fixed 20px (one Markdown line = one visual row). Once
-// word wrap is on, a line can span several visual rows, so its .gl row needs to grow to
-// match — otherwise every row below it drifts further out of alignment with the text it
-// labels. Reads every .hl-line's rendered height first and only then writes the matching
-// .gl heights (rather than interleaving read/write per row), so this doesn't force a
-// separate synchronous layout reflow for every single line.
-function mdSyncGutterRowHeights(hl, gut){
-  if(!mdWrap) return;
-  hl = hl || document.querySelector('#mdPane .md-hl-inner');
-  gut = gut || document.querySelector('#mdPane .md-gutter-inner');
-  if(!hl || !gut) return;
-  // Both are display:none while in Preview mode (and offsetParent is null for any hidden
-  // element), so getBoundingClientRect() would measure everything as 0 here — writing that
-  // 0px straight into each row's inline height. Nothing re-measures on the way back to edit
-  // mode, so those 0px rows would stay collapsed on top of each other indefinitely. A window
-  // resize firing while Preview is open (the pane's own resize listener doesn't check which
-  // sub-mode is active) is exactly the kind of thing that triggers this call at the wrong time.
-  if(hl.offsetParent===null || gut.offsetParent===null) return;
-  const hlRows=hl.querySelectorAll('.hl-line'), glRows=gut.querySelectorAll('.gl');
-  // getBoundingClientRect() returns visual pixels — already scaled by the current
-  // Display Size zoom. Assigning that raw value into style.height would scale it a
-  // SECOND time when the browser renders it (the .gl row lives inside the same
-  // zoomed pane), silently shrinking every row height at any zoom below 100% and
-  // making the gutter drift further from the text with every subsequent row.
-  const z=_uiZ();
-  const heights=[]; for(let i=0;i<hlRows.length;i++) heights.push(hlRows[i].getBoundingClientRect().height/z);
-  for(let i=0;i<glRows.length && i<heights.length;i++) glRows[i].style.height=heights[i]+'px';
-}
-function mdCalibrate(){   // derive the textarea's real line-height + padding (used to centre a target line when jumping to it)
-  const ed=document.getElementById('mdEditor'); if(!ed) return;
-  const cs=getComputedStyle(ed);
-  _mdPT=parseFloat(cs.paddingTop)||12;
-  const pb=parseFloat(cs.paddingBottom)||12, n=(ed.value.match(/\n/g)||[]).length+1;
-  let lh=parseFloat(cs.lineHeight);
-  if(ed.scrollHeight > ed.clientHeight + 4 && n>2){ lh=(ed.scrollHeight-_mdPT-pb)/n; }   // trust the measurement only when content overflows
-  if(!(lh>6 && lh<80)) lh=20;
-  _mdLH=lh;
-  // NOTE: deliberately NOT writing this back as hl.style.lineHeight / gut.style.lineHeight.
-  // The overlay, gutter, and textarea all share one CSS-declared line-height (20px) already,
-  // which keeps every row in the three layers pixel-identical by construction. Overriding it
-  // here with a heuristic measurement (only once content overflows — i.e. exactly when the
-  // editor is scrolled) is what caused the active-line highlight to drift below the real
-  // caret row on scrolled text. _mdLH/_mdPT are still used for the scroll-into-view centring
-  // math in mdHighlightNode(), which only needs an approximate value.
-}
-// ---- Merging a textarea edit (typing, paste, toolbar action, …) back into _mdFullText ----
+// ---- Merging an editor edit (typing, paste, toolbar action, …) back into _mdFullText ----
 function mdLineDiff(oldLines,newLines){
   let p=0; const maxP=Math.min(oldLines.length,newLines.length);
   while(p<maxP && oldLines[p]===newLines[p]) p++;
@@ -3634,6 +3398,9 @@ function mdCommitVisibleEdit(){
     return;
   }
   const newFullLines=newLines.slice(p,newEnd);
+  const retainedIds=_mdLines.slice(fullOldStart,fullOldEnd);
+  _mdLines.length=view.fullLines.length;
+  _mdLines.splice(fullOldStart,fullOldEnd-fullOldStart,...newFullLines.map((_,i)=>retainedIds[i]));
   const fullLines=view.fullLines.slice();
   fullLines.splice(fullOldStart, fullOldEnd-fullOldStart, ...newFullLines);
   _mdFullText=fullLines.join('\n');
@@ -3659,20 +3426,38 @@ function mdAfterEdit(){
   mdCommitVisibleEdit();
   mdRefreshDecorations();
   clearTimeout(_mdTimer);
-  _mdTimer=setTimeout(applyMdToMap, 300);
+  const target=map;
+  _mdTimer=setTimeout(()=>{ _mdTimer=0; if(map===target) applyMdToMap(); }, 300);
+}
+function flushMdEdits(){
+  if(!mdMode || _mdSyncing || _mdComposing || !_mdTimer) return;
+  clearTimeout(_mdTimer); _mdTimer=0;
+  applyMdToMap();
 }
 function applyMdToMap(){
-  const ed=document.getElementById('mdEditor'); if(!ed||!mdMode) return;
+  const ed=document.getElementById('mdEditor'); if(!ed||!mdMode||!map) return;
   if(typeof READONLY!=='undefined' && READONLY) return;
-  let parsed; try{ parsed=parseMarkdownOutline(_mdFullText, map.title||'Map'); }catch(e){ return; }   // full text: folds must never delete nodes
-  if(!parsed||!parsed.rootId||!parsed.nodes||!parsed.nodes[parsed.rootId]) return;   // ignore un-parseable/empty text
+  const nextLines=[];
+  let parsed;
+  try{
+    parsed=parseMarkdownOutline(_mdFullText,map.title||'Map',{
+      previousNodes:map.nodes, nodeIdsByLine:_mdLines, lineMap:nextLines
+    });
+  }catch(e){ console.warn('Markdown sync failed:',e); return; }
+  if(!parsed||!parsed.rootId||!parsed.nodes||!parsed.nodes[parsed.rootId]) return;
   _mdSyncing=true;
-  sel=null; document.querySelectorAll('.node.sel').forEach(n=>n.classList.remove('sel')); document.getElementById('nodebar')?.remove();
-  map.nodes=parsed.nodes; map.rootId=parsed.rootId;
-  if(typeof balanceRootSides==='function') balanceRootSides();
-  autoLayout(); pushHistory();   // undoable + persists (guarded so it won't clobber the editor)
-  _mdSyncing=false;
+  try{
+    sel=null;
+    document.querySelectorAll('.node.sel').forEach(n=>n.classList.remove('sel'));
+    document.getElementById('nodebar')?.remove();
+    map.nodes=parsed.nodes; map.rootId=parsed.rootId;
+    map.links=(map.links||[]).filter(link=>map.nodes[link.from] && map.nodes[link.to]);
+    _mdLines=nextLines;
+    if(typeof balanceRootSides==='function') balanceRootSides();
+    autoLayout(); pushHistory();
+  }finally{ _mdSyncing=false; }
 }
+
 function mdPaneTargetWidthPx(){
   const app=(typeof document!=='undefined' && document.querySelector) ? document.querySelector('.app') : null;
   const raw=(app && typeof getComputedStyle==='function' && getComputedStyle(app).getPropertyValue('--md-w').trim()) || '';
@@ -3701,6 +3486,7 @@ function reframeKeepZoomForMd(opening, stageBox, mdW){
 }
 function toggleMdMode(on){
   const want=(on===undefined)?!mdMode:!!on; if(want===mdMode) return;
+  if(!want){ flushMdEdits(); mdClearDragSel(); }
   ensureMdPane();
   const _pane=document.getElementById('mdPane'); if(_pane) void _pane.offsetWidth;
   const opening=want;
@@ -3717,34 +3503,28 @@ function toggleMdMode(on){
       ed.readOnly=!!(typeof READONLY!=='undefined' && READONLY);
       ed.focus();
       if(sel) mdHighlightNode(sel);
-      else{ try{ ed.setSelectionRange(0,0); }catch(e){} ed.scrollTop=0; ed.scrollLeft=0; mdUpdateActive(); mdSyncScroll(); }
+      else{ try{ ed.setSelectionRange(0,0); }catch(e){} ed.scrollTop=0; ed.scrollLeft=0; mdUpdateActive(); }
       // Belt-and-suspenders: a browser can apply its own "scroll the caret into view"
       // adjustment asynchronously (a tick after focus/selection change), which would
       // silently reintroduce horizontal scroll after the synchronous reset above. Re-assert
       // once more on the next frame to catch that — same defensive pattern as the earlier
       // click-auto-scroll fix for the active-line highlight.
-      requestAnimationFrame(()=>{ ed.scrollLeft=0; mdSyncScroll(); });
+      requestAnimationFrame(()=>{ ed.scrollLeft=0; });
     }
   }
   else if(!(typeof READONLY!=='undefined' && READONLY)) pushHistory();   // one undo entry for the md session
-  setTimeout(()=>{
-    try{ placeMdPane(); }catch(e){}
-    try{ if(mdMode) mdCalibrate(); }catch(e){}
-    // The pane's own width transition (220ms, pure CSS) is still running when
-    // syncTextFromMap() -> mdRefreshDecorations() measured gutter row heights just
-    // above — at/near width:0, word-wrap makes every line "wrap" into many tiny
-    // rows, baking wildly wrong heights in as permanent inline styles. Nothing else
-    // re-measures once the transition actually finishes, so re-sync once more now
-    // that the pane has reached its real width.
-    try{ if(mdMode) mdSyncGutterRowHeights(); }catch(e){}
-  }, 260);
+
+}
+function mapHistorySnapshot(){
+  return JSON.stringify({nodes:map.nodes,rootId:map.rootId,title:map.title,titleAuto:map.titleAuto,
+    color:map.color,links:map.links||[],layout:map.layout,vars:map.vars||{},style:map.style,frontmatter:map.frontmatter});
 }
 function pushHistory(){
   // Snapshot the live WK editor, not the hidden placeholder card. Otherwise
   // marker/color/task clicks (which do not blur-commit) save the pre-edit text
   // and then render() leaves the .edit-float clone on screen.
   if(typeof flushOpenEditToModel==='function') flushOpenEditToModel();
-  const snapshot = JSON.stringify({nodes:map.nodes,rootId:map.rootId,title:map.title,color:map.color,links:map.links||[],layout:map.layout,vars:map.vars||{}});
+  const snapshot = mapHistorySnapshot();
   if(history.length && hpos>=0 && history[hpos]===snapshot) return;   // nothing actually changed — don't save/flash "Saving…" for no reason
   history=history.slice(0,hpos+1);
   history.push(snapshot);
@@ -3760,7 +3540,14 @@ function restore(s){
   // Drop the WK editor without writing it — the snapshot is about to replace
   // the model, and flushing would stamp the live draft onto the restored map.
   if(typeof discardEditOverlay==='function') discardEditOverlay();
-  const o=JSON.parse(s); map.nodes=o.nodes; map.rootId=o.rootId; map.title=o.title; map.color=o.color; if(o.links) map.links=o.links; if(o.layout) map.layout=o.layout; if(o.vars) map.vars=o.vars; $('#mapTitle').value=map.title; autoLayout(); if(mdMode && !_mdSyncing) syncTextFromMap();
+  const o=JSON.parse(s);
+  for(const key of ['nodes','rootId','title','titleAuto','color','links','layout','vars','style','frontmatter']){
+    if(Object.hasOwn(o,key)) map[key]=o[key]; else delete map[key];
+  }
+  $('#mapTitle').value=map.title;
+  autoLayout();
+  if(mdMode && !_mdSyncing) syncTextFromMap();
+  scheduleSave();
 }
 let _historyChordAt=0;
 function undo(){ if(hpos>0){hpos--;restore(history[hpos]);updateUndo(); opLog('undo');} }
@@ -5583,7 +5370,7 @@ function chordTitle(nameKey, chordId, fallback){
 function refreshLocaleChrome(){
   if(typeof window.rmsApplyI18n==='function') window.rmsApplyI18n();
   const save=$('#saveText');
-  if(save && !$('#savePill')?.classList.contains('saving')) save.textContent=rmsTr('saved','Saved');
+  if(save) updateMapSaveStatus();
   if(typeof sel!=='undefined' && sel && typeof positionNodeBar==='function') positionNodeBar();
   if(typeof multiSel!=='undefined' && multiSel.size>=2 && typeof showBulkBar==='function') showBulkBar();
   if(typeof refreshList==='function' && $('#mapList')) refreshList();
@@ -5800,7 +5587,7 @@ function fieldCutSelected(el){
   return text;
 }
 function insertFieldText(el, text){
-  if(!el) return false;
+  if(!el || el.readOnly) return false;
   const str = String(text == null ? '' : text);
   try{ if(typeof el.focus === 'function') el.focus(); }catch(_){}
   if(el.id!=='mdEditor' && el.tagName !== 'INPUT' && el.tagName !== 'TEXTAREA'){
@@ -8064,7 +7851,7 @@ function updateBreadcrumb(){
    ============================================================ */
 // Per-map "⋮" menu (Duplicate / Delete) for the sidebar — one open at a time,
 // closes on outside click / scroll / blur. Frees row width for the map title.
-let _rowPop=null, _rowPopOut=null;
+let _rowPop=null, _rowPopOut=null, _mapLoadGeneration=0, _listGeneration=0;
 function closeRowMenu(){
   if(_rowPop){ try{ _rowPop.remove(); }catch(_){} _rowPop=null; }
   if(_rowPopOut){
@@ -8097,8 +7884,15 @@ function openRowMenu(btn, m){
   pop.querySelector('[data-a="dup"]').onclick=ev=>{ ev.stopPropagation(); closeRowMenu(); duplicateMap(m.id); };
   pop.querySelector('[data-a="del"]').onclick=async ev=>{ ev.stopPropagation(); closeRowMenu();
     if(!confirm(rmsTr('confirmDeleteMap','Delete “%s”?').replace('%s', m.title||rmsTr('untitled','Untitled')))) return;
-    await Store.remove(m.id);
-    if(map && map.id===m.id){ map=null; render(); }
+    ++_mapLoadGeneration;
+    try{ await _mapSaves.remove(m.id,id=>Store.remove(id)); }
+    catch(e){ toast(rmsTr('deleteMapFailed','Could not delete the map. Please retry.')); return; }
+    _mapSaveStates.delete(m.id); _saveErrorNotified.delete(m.id);
+    if(map && map.id===m.id){
+      mdClearDragSel(); clearTimeout(_mdTimer); _mdTimer=0;
+      map=null; render();
+      const ed=document.getElementById('mdEditor'); if(ed) ed.value='';
+    }
     refreshList(); toast(rmsTr('mapDeleted','Map deleted'));
   };
   _rowPop=pop;
@@ -8110,8 +7904,11 @@ function openRowMenu(btn, m){
   },0);
 }
 async function refreshList(){
-  let idx=[];
-  try{ idx=await Store.list(); }catch(e){ idx=[]; }
+  const generation=++_listGeneration;
+  let idx;
+  try{ idx=await Store.list(); }
+  catch(e){ console.warn('Could not refresh map list:',e); return; }
+  if(generation!==_listGeneration) return;
   // Merge the current in-memory map so title edits / new maps appear immediately
   // (don't wait for the debounced save to hit the database). Shared maps (_cloudView)
   // are NOT owned — they belong in "Shared with me", never in "Your maps".
@@ -8172,7 +7969,7 @@ async function togglePin(id){
   if(!target){ toast(rmsTr('couldNotOpenMap','Could not open map')); return; }
   const now = !target.pinned;
   if(now) target.pinned = true; else delete target.pinned;
-  try{ await Store.save(target); }
+  try{ await saveMapNow(target); }
   catch(e){ toast('Could not update pin'); return; }
   if(map && map.id===id){ if(now) map.pinned=true; else delete map.pinned; }
   refreshList();
@@ -8374,6 +8171,7 @@ function showNotesEditor(nodeId, opts){
   bindNotesPopupDrag(popup);
   const editor=popup.querySelector('.np-editor');
   editor.innerHTML = sanitizeNotes(n.notes||'');   // safe: inert-parsed, whitelisted
+  editor._initialHTML=sanitizeNotes(editor.innerHTML);
   applyNotesPopupHeight(popup);
   if(sticky){
     editor.focus();
@@ -8422,6 +8220,7 @@ function showNotesEditor(nodeId, opts){
    functions that use them stay here.
    ============================================================ */
 async function createMapFromTemplate(templateId){
+  ++_mapLoadGeneration;
   if(!leaveLiveForSwitch()) return;
   const tpl = TEMPLATES[templateId];
   if(!tpl){ createMap(); return; }
@@ -8457,6 +8256,7 @@ async function createMapFromTemplate(templateId){
     ? tpl.links.filter(l => keyToId[l.from] && keyToId[l.to])
                .map(l => ({ from: keyToId[l.from], to: keyToId[l.to] }))
     : [];
+  flushPendingSave();
   map = { id, title: tpl.name, titleAuto: false, color: tpl.color, layout: 'balanced', rootId, nodes, links };
   sel = rootId; history = []; hpos = -1;
   opLog('newMap', {id, text:tpl.name||''});
@@ -8477,7 +8277,7 @@ async function duplicateMap(id){
   copy.title = (src.title||'Untitled') + ' (copy)';
   copy.titleAuto = false;
   copy.updated = Date.now();
-  await Store.save(copy);
+  await saveMapNow(copy);
   let imgOk = true;
   try{
     const r = await fetch(apiUrl('/api/maps/'+encodeURIComponent(copy.id)+'/images/duplicate'), {
@@ -8618,6 +8418,7 @@ function showTemplatesMenu(){
 }
 
 function createMap(){
+  ++_mapLoadGeneration;
   if(!leaveLiveForSwitch()) return;
   exitSharedMode();
   const id=uid(); const rid=uid();
@@ -8642,10 +8443,14 @@ function createMap(){
   setTimeout(()=>startEdit(rid),120);
 }
 async function loadMap(id){
+  const generation=++_mapLoadGeneration;
   if(!leaveLiveForSwitch()) return;
   exitSharedMode();            // if we were viewing a shared map, leave it cleanly
+  flushPendingSave();
   let m=null;
-  try{ m=await Store.get(id); }catch(e){ toast('Could not load map'); return false; }
+  try{ await _mapSaves.flush(id); m=await Store.get(id); }
+  catch(e){ if(generation===_mapLoadGeneration) toast(rmsTr('couldNotOpenMap','Could not open map')); return false; }
+  if(generation!==_mapLoadGeneration) return false;
   if(!m){ toast('Map not found'); return false; }
   // Legacy migration: old maps may still store `comment` — promote it to `notes`
   for(const n of Object.values(m.nodes||{})){
@@ -8659,7 +8464,7 @@ async function loadMap(id){
   const _imported = !!map._import; if(_imported) delete map._import;
   // Initialise history WITHOUT triggering a save — loading is not a change,
   // so the sidebar order (sorted by `updated`) must not be reshuffled.
-  history=[JSON.stringify({nodes:map.nodes,rootId:map.rootId,title:map.title,color:map.color})];
+  history=[mapHistorySnapshot()];
   hpos=0; updateUndo();
   $('#mapTitle').value=map.title;
   opLog('open', {id:map.id, text:map.title||''});
@@ -8675,57 +8480,87 @@ async function loadMap(id){
   else if(userZoom!=null && !_imported){ view.k=userZoom; recenter(); }
   else fit();
   refreshList();
-  if(mdMode) syncTextFromMap();   // keep the Markdown editor in sync when switching maps
+  if(mdMode) syncTextFromMap();
+  updateMapSaveStatus();
   return true;
 }
 
 /* ---------- title ---------- */
 $('#mapTitle').addEventListener('input',e=>{
-  if(!map) return;
+  if(!map || READONLY) return;
   map.title=e.target.value;
   map.titleAuto=false;          // user took control — stop mirroring the root text
   scheduleSave(); refreshList();
 });
 
 /* ---------- autosave ---------- */
-function scheduleSave(){
-  if(!map || READONLY || map._ephemeral) return;   // live-session guest map is not persisted to a repo
-  if(map._cloudEdit){ scheduleCloudSave(); return; }   // shared cloud map saves back to the Durable Object
-  const target = map;          // bind THIS map: switching maps before the timer
-  _pendingSaveMap = target;    // fires must NOT redirect the write onto another map
-  $('#savePill').classList.add('saving'); $('#saveText').textContent=rmsTr('saving','Saving…');
-  clearTimeout(saveTimer);
-  // Cloud mode talks to GitHub — debounce longer to stay well under 5000 req/h
-  const delay = (MODE==='cloud') ? 1500 : 600;
-  saveTimer=setTimeout(async()=>{
-    saveTimer=null;
-    try{
-      await Store.save(target);
-      if(_pendingSaveMap===target) _pendingSaveMap=null;
-      $('#savePill').classList.remove('saving'); $('#saveText').textContent=rmsTr('saved','Saved');
-    }catch(e){
-      $('#savePill').classList.remove('saving'); $('#saveText').textContent=rmsTr('saveRetrying','Retrying…');
-      // The map was copied to local storage before the network write, so the
-      // edit isn't lost. Tell the user plainly and retry once after a short wait.
-      toast((MODE==='cloud')
-        ? 'Couldn’t sync to GitHub just now — your changes are saved on this device and will retry.'
-        : 'Couldn’t reach the server — your changes are saved on this device and will retry.');
-      setTimeout(async()=>{
-        try{ await Store.save(target); if(_pendingSaveMap===target) _pendingSaveMap=null; $('#savePill').classList.remove('saving'); $('#saveText').textContent=rmsTr('saved','Saved'); }
-        catch(e2){ $('#saveText').textContent=rmsTr('saveFailed','Save failed'); }
-      }, 4000);
+const _mapSaveStates=new Map(), _saveErrorNotified=new Set();
+const _mapSaves=createMapSaveQueue({
+  save:snapshot=>Store.save(snapshot),
+  onState(id,state,error){
+    _mapSaveStates.set(id,state);
+    if(state==='saved') _saveErrorNotified.delete(id);
+    if(map && map.id===id) updateMapSaveStatus();
+    if(error && !_saveErrorNotified.has(id)){
+      _saveErrorNotified.add(id);
+      console.warn('Map save failed:',id,error);
+      toast(rmsTr('savePendingWarning','Changes are still in this window and have not been saved. Retrying; keep the app open.'));
     }
-  },delay);
+  }
+});
+function updateMapSaveStatus(){
+  const state=map && _mapSaveStates.get(map.id);
+  const busy=state==='saving'||state==='retrying';
+  $('#savePill').classList.toggle('saving',busy);
+  const key=state==='failed' ? 'saveFailed' : state==='retrying' ? 'saveRetrying' : busy ? 'saving' : 'saved';
+  const fallback={saveFailed:'Save failed',saveRetrying:'Retrying…',saving:'Saving…',saved:'Saved'};
+  $('#saveText').textContent=rmsTr(key,fallback[key]);
 }
-// Commit any pending debounced edit to ITS OWN map right now — call before
-// switching maps so the write lands on the map that was edited, never on the
-// one just opened (which would reorder/overwrite it).
+function scheduleSave(){
+  if(!map || READONLY || map._ephemeral || _historyPreview) return;
+  if(map._cloudEdit){ scheduleCloudSave(); return; }
+  map.updated=Date.now();
+  _mapSaves.schedule(map,MODE==='cloud' ? 1500 : 600);
+}
+async function saveMapNow(target){
+  target.updated=Date.now();
+  _mapSaves.schedule(target,0);
+  await _mapSaves.flush(target.id);
+}
+// Callers can await the same queue that owns both timers and in-flight writes.
+// Ignoring the return value is safe during a UI switch: errors remain visible,
+// snapshots stay queued for retry, and they keep their original map identity.
 function flushPendingSave(){
-  if(!saveTimer) return;
-  clearTimeout(saveTimer); saveTimer=null;
-  const target=_pendingSaveMap; _pendingSaveMap=null;
-  if(target && !READONLY){ Promise.resolve().then(()=>Store.save(target)).catch(()=>{}); }
+  flushMdEdits();
+  const pending=_mapSaves.flush();
+  pending.catch(error=>console.warn('Pending map save failed:',error));
+  return pending;
 }
+window.rmsFlushForHide=function(){
+  mdClearDragSel();
+  if(map && !READONLY && !_historyPreview){
+    flushMdEdits();
+    if(!_mdComposing) pushHistory();
+  }
+  flushPendingSave();
+};
+window.rmsFlushPendingEdits=async function(){
+  const notes=document.querySelector('.notes-popup .np-editor');
+  if(notes && sanitizeNotes(notes.innerHTML)!==notes._initialHTML){
+    throw new Error(rmsTr('finishNoteBeforeQuit','Save or cancel your open note before quitting.'));
+  }
+  // Blurring confirms the IME's marked text before taking a model snapshot.
+  document.activeElement?.blur();
+  if(_mdComposing) throw new Error(rmsTr('finishComposition','Finish text input before quitting.'));
+  window.rmsFlushForHide();
+  await flushPendingSave();
+};
+window.rmsRetryPendingSaves=function(){
+  if(Store===ServerStore && !map) proceedBoot().catch(showStoreFailure);
+  else flushPendingSave();
+};
+window.addEventListener('pagehide',()=>window.rmsFlushForHide());
+document.addEventListener('visibilitychange',()=>{ if(document.hidden) window.rmsFlushForHide(); });
 
 /* ============================================================
    EXPORT  (JSON + PNG via manual canvas render)
@@ -8795,6 +8630,7 @@ function exportMenu(){
    Cloud mode: real GitHub commit history of the map's file.
    Server mode: SQLite snapshots taken on each content change.
    ============================================================ */
+let _historyRequestGeneration=0;
 let _historyPreview = null;   // {original} while previewing a past version
 function relTime(ts){
   const s=Math.floor((Date.now()-ts)/1000);
@@ -8819,7 +8655,9 @@ async function showVersionHistory(){
   const list=panel.querySelector('.hist-list');
   const mapId=map.id;
   let versions=[];
-  try{ versions=await Store.history(mapId); }catch(e){ versions=[]; }
+  try{ versions=await Store.history(mapId); }
+  catch(e){ list.textContent=rmsTr('storageUnavailable','Could not load your maps.'); return; }
+  if(!panel.isConnected || !map || map.id!==mapId) return;
   if(!versions || !versions.length){
     list.innerHTML=`<div class="hist-status">No earlier versions yet.<br><span class="hist-sub">Versions are recorded each time the map changes${MODE==='cloud'?' (your GitHub commit history)':''}. Make an edit, then check back.</span></div>`;
     return;
@@ -8851,9 +8689,22 @@ function diffMaps(oldMap, newMap){
   for(const id in N){ if(id in O){ const a=plain(O[id].text), b=plain(N[id].text); if(a!==b) changed.push({from:a,to:b}); } }
   return {added, removed, changed};
 }
+async function loadHistoryVersion(mapId,ref){
+  const generation=++_historyRequestGeneration, mapGeneration=_mapLoadGeneration;
+  try{
+    await flushPendingSave();
+    const data=await Store.version(mapId,ref);
+    if(generation!==_historyRequestGeneration || mapGeneration!==_mapLoadGeneration || !map || map.id!==mapId) return null;
+    if(!data) toast('Could not load that version');
+    return data;
+  }catch(error){
+    if(generation===_historyRequestGeneration && mapGeneration===_mapLoadGeneration) toast('Could not load that version');
+    return null;
+  }
+}
 async function diffVersion(mapId, ref){
-  const data=await Store.version(mapId, ref);
-  if(!data){ toast('Could not load that version'); return; }
+  const data=await loadHistoryVersion(mapId,ref);
+  if(!data) return;
   const past=normalizeLoadedMap(data);
   const current=_historyPreview ? _historyPreview.original : map;   // real current map
   showDiffPanel(diffMaps(past, current));
@@ -8876,10 +8727,13 @@ function showDiffPanel(d){
   panel.querySelector('.diff-x').onclick=()=>panel.remove();
 }
 async function previewVersion(mapId, ref, row){
-  const data=await Store.version(mapId, ref);
-  if(!data){ toast('Could not load that version'); return; }
-  if(!_historyPreview) _historyPreview={ original: JSON.parse(JSON.stringify(map)) };
+  const data=await loadHistoryVersion(mapId,ref);
+  if(!data) return;
+  if(!_historyPreview) _historyPreview={original:JSON.parse(JSON.stringify(map)),readOnly:READONLY};
+  READONLY=true;
   map = normalizeLoadedMap(data);
+  $('#mapTitle').readOnly=true;
+  if(mdMode){ syncTextFromMap(); document.getElementById('mdEditor').readOnly=true; }
   render(); fit();
   document.querySelectorAll('.hist-row').forEach(r=>r.classList.remove('active'));
   row?.classList.add('active');
@@ -8897,20 +8751,27 @@ function showPreviewBanner(mapId, ref){
   b.querySelector('.hb-cancel').onclick=()=>{ cancelHistoryPreview(); };
 }
 function cancelHistoryPreview(){
+  ++_historyRequestGeneration;
   document.querySelectorAll('.hist-banner').forEach(b=>b.remove());
-  if(_historyPreview){ map=_historyPreview.original; _historyPreview=null; render(); fit(); }
+  if(_historyPreview){
+    map=_historyPreview.original; READONLY=_historyPreview.readOnly; _historyPreview=null;
+    $('#mapTitle').readOnly=READONLY;
+    if(mdMode){ syncTextFromMap(); document.getElementById('mdEditor').readOnly=READONLY; }
+    render(); fit();
+  }
 }
 async function restoreVersion(mapId, ref){
-  const data=await Store.version(mapId, ref);
-  if(!data){ toast('Could not load that version'); return; }
+  const data=await loadHistoryVersion(mapId,ref);
+  if(!data) return;
   const restored=normalizeLoadedMap(data);
   restored.id=mapId;                 // keep identity
   restored.updated=Date.now();
-  _historyPreview=null;
+  cancelHistoryPreview();
   map=restored;
   history=[]; hpos=-1; pushHistory();   // restored state becomes a fresh undo baseline
   render(); fit();
-  try{ await Store.save(map); }catch(e){ console.warn('save after history restore failed:', e.message); toast('Restored, but saving failed \u2014 changes are local only'); }
+  try{ await saveMapNow(restored); }catch(e){ console.warn('save after history restore failed:',e); return; }
+  if(map!==restored) return;
   document.querySelectorAll('.hist-banner,.hist-panel').forEach(p=>p.remove());
   refreshList();
   toast('Version restored');
@@ -9309,7 +9170,7 @@ function importFile(){
         });
       }
       m.id=uid();
-      await Store.save(m);
+      await saveMapNow(m);
       await loadMap(m.id);
       // Imported nodes have no positions (all at 0,0) — lay them out into a
       // proper tree, then frame the result.
@@ -9449,7 +9310,15 @@ function frontmatterNodeToYaml(n){
   lines.push('---');
   return lines.join('\n');
 }
-function parseMarkdownOutline(text, filename){
+function parseMarkdownOutline(text, filename, editorState){
+  // An editor session carries node identity separately from the exported text.
+  // Imports still allocate independent IDs. Metadata indexed by outline paths is
+  // appropriate for import, but cannot identify nodes after an in-place insert.
+  const previousNodes=editorState && editorState.previousNodes;
+  const idsByLine=(editorState && editorState.nodeIdsByLine)||[];
+  const lineMap=editorState && editorState.lineMap;
+  if(lineMap) lineMap.length=0;
+  let sourceLine=0, prefixLines=0, frontmatterLine=0;
   let _meta=null, _frontmatter=null;
   // Strip a leading <!-- mindspark ... --> comment and a leading YAML --- ... --- block,
   // in whichever order they appear. Looping instead of checking each once matters: if
@@ -9458,9 +9327,9 @@ function parseMarkdownOutline(text, filename){
   // outline as literal text/nodes instead of being recognized as metadata.
   for(let guard=0; guard<4; guard++){
     const mm = text.match(/^\uFEFF?\s*<!--\s*mindspark\s*\r?\n([\s\S]*?)\r?\n\s*-->\s*\r?\n?/i);
-    if(mm){ try{ _meta=JSON.parse(mm[1].trim()); }catch(e){ _meta=null; } text=text.slice(mm[0].length); continue; }
+    if(mm){ try{ _meta=JSON.parse(mm[1].trim()); }catch(e){ _meta=null; } prefixLines+=(mm[0].match(/\n/g)||[]).length; text=text.slice(mm[0].length); continue; }
     const fm = text.match(/^\s*---\r?\n([\s\S]*?)\r?\n---[ \t]*\r?\n?/);
-    if(fm){ _frontmatter=('---\n'+fm[1].replace(/\s+$/,'')+'\n---'); text=text.slice(fm[0].length); continue; }
+    if(fm){ frontmatterLine=prefixLines; _frontmatter=('---\n'+fm[1].replace(/\s+$/,'')+'\n---'); prefixLines+=(fm[0].match(/\n/g)||[]).length; text=text.slice(fm[0].length); continue; }
     break;
   }
   const title = (filename||'').replace(/\.[^.]+$/, '') || 'Imported';
@@ -9476,9 +9345,10 @@ function parseMarkdownOutline(text, filename){
   // child once the sole-top-level-heading gets promoted to root, below.
   let frontmatterId = null;
   if(_frontmatter){
-    frontmatterId = uid();
+    frontmatterId = previousNodes && previousNodes[idsByLine[frontmatterLine]] ? idsByLine[frontmatterLine] : uid();
+    if(lineMap) lineMap[frontmatterLine]=frontmatterId;
     const fields = parseFrontmatterFields(_frontmatter);
-    nodes[frontmatterId] = { id:frontmatterId, parent:rootId, x:0, y:0, frontmatter:true, html: frontmatterFieldsToHtml(fields) };
+    nodes[frontmatterId] = { ...(previousNodes && previousNodes[frontmatterId]), id:frontmatterId, parent:rootId, x:0, y:0, frontmatter:true, html: frontmatterFieldsToHtml(fields) };
   }
   const stack = [{ id:rootId, depth:0 }];
   let sideCounter = 0, lastHeadingDepth = 0, subDepth = null;
@@ -9486,7 +9356,10 @@ function parseMarkdownOutline(text, filename){
   const add = (txt, depth, task, extra) => {
     while(stack.length>1 && stack[stack.length-1].depth >= depth) stack.pop();
     const parentId = stack[stack.length-1].id;
-    const id = uid();
+    const oldId=idsByLine[sourceLine];
+    const previous=previousNodes && previousNodes[oldId] && !nodes[oldId] ? previousNodes[oldId] : null;
+    const id=previous ? oldId : uid();
+    if(lineMap) lineMap[sourceLine]=id;
     let side = 'right';
     if(parentId===rootId) side = (sideCounter++ % 2) ? 'left' : 'right';
     else side = nodes[parentId].side || 'right';
@@ -9538,7 +9411,13 @@ function parseMarkdownOutline(text, filename){
         text = peelStyle(text);
       }
     }
-    nodes[id] = { id, text, parent:parentId, side, x:0, y:0 };
+    const carried=previous ? {...previous} : {};
+    // These fields are represented by editable Markdown; removing their syntax
+    // must remove the corresponding formatting/content. Other node properties
+    // (marker, dimensions, color, citation, etc.) remain owned by this node.
+    for(const key of ['text','html','raw','lang','task','listType','bold','italic','strike','underline',
+      'fontSize','textColor','highlight','align','notes','image','imageAlt','hlevel','hr','para']) delete carried[key];
+    nodes[id] = { ...carried, id, text, parent:parentId, side:previous ? previous.side : side, x:0, y:0 };
     if(listType) nodes[id].listType = listType;
     Object.assign(nodes[id], styleProps);
     if(task) nodes[id].task = task;
@@ -9564,6 +9443,7 @@ function parseMarkdownOutline(text, filename){
   const stripWrap = x => x.replace(/^<(?:p|div|center|figure|picture|span|section|article)\b[^>]*>/i,'').replace(/<\/(?:p|div|center|figure|picture|span|section|article)>$/i,'').trim();
   const nextIsBullet = from => { for(let k=from+1;k<L.length;k++){ if(!L[k].trim()) continue; return /^\s*(?:[-*+]|\d+\.)\s+/.test(L[k]); } return false; };
   for(let i=0; i<L.length; i++){
+    sourceLine=prefixLines+i;
     const line = L[i];
     // Fenced code block -> its own block child node of the nearest heading (renders the code)
     const fence = line.match(/^(\s*)(`{3,}|~{3,})(.*)$/);
@@ -9654,7 +9534,7 @@ function parseMarkdownOutline(text, filename){
   const setBranch = (id, side) => { nodes[id].side = side; Object.values(nodes).filter(c => c.parent === id).forEach(c => setBranch(c.id, side)); };
   kids.forEach((k, i) => setBranch(k.id, i < half ? 'right' : 'left'));
   nodes[finalRoot].side = 'root';
-  if(_meta && _meta.nodes){
+  if(_meta && _meta.nodes && !previousNodes){
     const kidsOrd = pid => Object.values(nodes).filter(n=>n.parent===pid);   // document order (matches export)
     const applyMeta=(id,path)=>{ const mm=_meta.nodes[path], n=nodes[id];
       if(mm && n){
@@ -10246,9 +10126,9 @@ function buildMarkdown(startId, opts){
   };
   // A frontmatter child of root (Claude Skill name/description, etc.) is emitted as real
   // YAML --- frontmatter --- at the very top of the file, not as inline content.
-  let frontmatterYaml = null;
+  let frontmatterYaml = null, frontmatterNodeId=null;
   { const fmChild = childrenOf(root).find(cid => map.nodes[cid] && map.nodes[cid].frontmatter);
-    if(fmChild) frontmatterYaml = frontmatterNodeToYaml(map.nodes[fmChild]);
+    if(fmChild){ frontmatterNodeId=fmChild; frontmatterYaml = frontmatterNodeToYaml(map.nodes[fmChild]); }
   }
   walk(root, 0, '0');
   let out=lines, shift=0; const prefix=[];
@@ -10260,10 +10140,11 @@ function buildMarkdown(startId, opts){
     if(Object.keys(nmeta).length) meta.nodes=nmeta;
     if(Object.keys(meta).length>1){ prefix.push('<!-- mindspark', JSON.stringify(meta), '-->', ''); }
   }
+  const frontmatterStart=prefix.length;
   if(frontmatterYaml){ frontmatterYaml.split('\n').forEach(l=>prefix.push(l)); prefix.push(''); }
   else if(rich && map.frontmatter){ map.frontmatter.split('\n').forEach(l=>prefix.push(l)); prefix.push(''); }   // legacy fallback
   if(prefix.length){ out=prefix.concat(lines); shift=prefix.length; }
-  if(lineMap){ lineMap.length=0; for(const k in lm) lineMap[+k+shift]=lm[k]; }
+  if(lineMap){ lineMap.length=0; for(const k in lm) lineMap[+k+shift]=lm[k]; if(frontmatterNodeId) lineMap[frontmatterStart]=frontmatterNodeId; }
   return out.join('\n');
 }
 
@@ -11629,7 +11510,6 @@ function applyUiScale(v){
   // Sidebar width follows --ui-zoom, so the stage got a new CSS-pixel size —
   // keep the centred map point centred, same as a window resize.
   if(typeof stage!=='undefined' && stage) _recenterForStageChange();
-  if(typeof placeMdPane==='function') placeMdPane();
   if(typeof updateMinimap==='function' && map) updateMinimap();
 }
 function setUiScale(v){
@@ -12331,8 +12211,22 @@ async function seedDemoMap(){
   const savedV=loadMapView(map.id);
   if(savedV) applyMapView(savedV); else fit();
   refreshList();
-  try{ await Store.save(map); }catch(e){ console.warn('save after map load failed:', e.message); }
+  try{ await saveMapNow(map); }catch(e){ console.warn('save after map load failed:', e.message); }
   return true;
+}
+function showStoreFailure(error){
+  console.warn('Map storage unavailable:',error);
+  const empty=$('#empty');
+  if(empty && !map){
+    empty.style.display='grid';
+    empty.replaceChildren();
+    const message=document.createElement('p'), retry=document.createElement('button');
+    message.textContent=rmsTr('storageUnavailable','Could not load your maps. Your saved maps have not been changed.');
+    retry.textContent=rmsTr('retry','Retry');
+    retry.onclick=()=>{ retry.disabled=true; proceedBoot().catch(showStoreFailure); };
+    empty.append(message,retry);
+  }
+  toast(rmsTr('storageUnavailable','Could not load your maps. Your saved maps have not been changed.'));
 }
 async function proceedBoot(){
   loadUserTemplates();   // merge any saved "My templates" into the catalog
@@ -12340,10 +12234,10 @@ async function proceedBoot(){
   if(await consumePendingImport()) return;
   try{ const _mid=new URLSearchParams(location.search).get('map'); if(_mid && await loadMap(_mid)) return; }catch(e){}
   let idx=[];
-  try{ idx=await Store.list(); }catch(e){ console.warn('could not list maps; starting with an empty list:', e.message); }
+  idx=await Store.list();
   if(idx && idx.length){
     const ok=await loadMap(idx[0].id);
-    if(!ok) createMap();
+    if(!ok) throw new Error('Could not open the saved map');
   } else {
     // Empty list. Before seeding a blank map, check for orphan map files that
     // exist in the repo but aren't in the index and weren't deleted — the
@@ -12626,7 +12520,7 @@ async function consumePendingImport(){
   sel=map.rootId; history=[]; hpos=-1; pushHistory();
   $('#mapTitle').value=map.title;
   render(); fit();
-  if(typeof Store!=='undefined' && Store){ try{ await Store.save(map); }catch(e){ console.warn('saving the editable copy failed:', e.message); toast('Copy created, but saving failed \u2014 it is local only'); } }
+  if(typeof Store!=='undefined' && Store){ try{ await saveMapNow(map); }catch(e){ console.warn('saving the editable copy failed:', e.message); toast('Copy created, but saving failed \u2014 it is local only'); } }
   refreshList();
   toast('Editable copy created');
   return true;
@@ -13279,6 +13173,7 @@ function _applySharedMap(id, token, data){
 // banner/read-only state, and clear #shared= from the URL so you can switch straight
 // back to "Your maps" in the same session (no browser back button needed).
 function exitSharedMode(){
+  cancelHistoryPreview();
   flushCloudSave();
   stopCloudPoll();
   const ce=document.getElementById('cloudEditBanner'); if(ce) ce.remove();
@@ -13361,7 +13256,7 @@ async function tryEnterLiveSession(){
   }
 })().catch(e=>{
   console.error(e);
-  if(!map) createMap();
+  showStoreFailure(e);
 }).finally(()=>{
   // No rAF: the overlay parks the window off-screen, and rAF does not fire
   // on an occluded WKWebView. Ready must be synchronous after boot.
