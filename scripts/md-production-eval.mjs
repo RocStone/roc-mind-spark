@@ -326,6 +326,11 @@ function main() {
       runner: 'scripts/md-select-eval.swift',
       runnerMode: options.overlay ? 'overlay-panel' : 'regular-window',
       cases: options.cases,
+      interpretation: {
+        dragDirection: 'reverse (bottom-to-top)',
+        geometry: 'release pointer vs native Selection focus caret; legacy mdSetSel() sorts the range before commit, so reverse-drag distance can reflect endpoint direction loss rather than drag-paint latency',
+        cpu: 'synchronous production mouse handlers and rAF callbacks measured with performance.now(); this is browser-side callback time, not whole-process CPU accounting',
+      },
       source: {
         worktree: {
           path: 'web/public/app.js',

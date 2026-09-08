@@ -455,6 +455,13 @@ html, body { cursor: default !important; }
       // browser-side processing cost observed here; it is not whole-process
       // CPU accounting from macOS Activity Monitor.
       out.cpuTimeBasis = 'synchronous production mouse handlers and rAF callbacks measured with performance.now()';
+      // The fixed native driver path runs from the lower part of the editor
+      // toward the upper part. Geometry compares the release pointer with the
+      // native Selection focus caret. The legacy baseline sorts its range in
+      // mdSetSel(), so its focus caret can remain at the document end during a
+      // reverse drag; that distance describes lost direction, not paint lag.
+      out.geometryBasis = 'release pointer vs native Selection focus caret; reverse-drag legacy focus sorting can reflect endpoint direction loss rather than drag-paint latency';
+      out.dragDirection = 'reverse (bottom-to-top)';
       return out;
     }
 
