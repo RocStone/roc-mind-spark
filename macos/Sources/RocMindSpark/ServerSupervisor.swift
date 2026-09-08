@@ -7,6 +7,9 @@ import Foundation
 @MainActor
 final class ServerSupervisor {
     private var process: Process?
+    /// The parent holds the only write end. EOF tells Node its owner has gone,
+    /// including crashes/SIGKILL where applicationWillTerminate never runs.
+    private var lifetimePipe: Pipe?
     private let childStopQueue = DispatchQueue(label: "com.roc.mindspark.child-stop", qos: .utility)
     /// PID recorded when our Process started. Force-kill uses this, never lsof.
     private var heldChildPID: Int32?
@@ -80,6 +83,8 @@ final class ServerSupervisor {
     }
 
     private func clearChildState() {
+        try? lifetimePipe?.fileHandleForWriting.close()
+        lifetimePipe = nil
         process = nil
         heldChildPID = nil
         didLaunch = false
@@ -150,12 +155,15 @@ final class ServerSupervisor {
         env["OPS_LOG_PATH"] = Paths.opsLogFile.path
         env[AppConfig.productEnv] = AppConfig.product
         env[AppConfig.tokenEnv] = token
+        env["ROC_MINDSPARK_MANAGED_STDIN"] = "1"
 
         let proc = Process()
         proc.executableURL = node
         proc.arguments = ["--disable-warning=ExperimentalWarning", server.path]
         proc.currentDirectoryURL = web
         proc.environment = env
+        let lifetime = Pipe()
+        proc.standardInput = lifetime
         let logURL = try touch(Paths.serverLogFile)
         let log = try FileHandle(forWritingTo: logURL)
         try log.seekToEnd()
@@ -170,7 +178,9 @@ final class ServerSupervisor {
         }
         try proc.run()
         process = proc
+        lifetimePipe = lifetime
         heldChildPID = proc.processIdentifier
+        Paths.log("canvas child started pid=\(proc.processIdentifier) owner=\(ProcessInfo.processInfo.processIdentifier)")
         didLaunch = true
         launchToken = token
     }

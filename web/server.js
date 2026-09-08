@@ -346,6 +346,25 @@ const server = http.createServer(async (req, res) => {
 });
 
 if (require.main === module) {
+  // Only the macOS supervisor opts in and supplies a dedicated stdin pipe.
+  // EOF is an OS-owned lifetime signal, so even SIGKILL of the app releases
+  // its server; no PID polling, stale ownership files, or port-based killing.
+  if (process.env.ROC_MINDSPARK_MANAGED_STDIN === '1') {
+    let stopping = false;
+    const ownerGone = () => {
+      if (stopping) return;
+      stopping = true;
+      console.log('Canvas owner pipe closed; stopping server.');
+      const finish = () => { db.close(); process.exit(0); };
+      // Drain requests already received, but do not let an idle/partial client
+      // retain the listener after the application owning it has disappeared.
+      setTimeout(finish, 2000).unref();
+      server.close(finish);
+    };
+    process.stdin.once('end', ownerGone);
+    process.stdin.once('error', ownerGone);
+    process.stdin.resume();
+  }
   server.listen(Number(PORT), LISTEN_HOST, () => {
     const addr = server.address();
     const host = addr && addr.address ? addr.address : LISTEN_HOST;
