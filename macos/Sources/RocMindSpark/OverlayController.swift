@@ -6,6 +6,7 @@ import WebKit
 final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
     private let panel = OverlayPanel()
     private var webView: WKWebView!
+    private var selectionDiagnostics: SelectionDiagnostics?
     private let server: ServerSupervisor
     private var clickMonitor: Any?
     private var toggleListenLocal: Any?
@@ -84,6 +85,10 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
         config.defaultWebpagePreferences.allowsContentJavaScript = true
         config.preferences.setValue(true, forKey: "developerExtrasEnabled")
         config.websiteDataStore = .default()
+        if let directory = SelectionDiagnostics.directory {
+            selectionDiagnostics = SelectionDiagnostics(window: panel, directory: directory)
+            if let script = SelectionDiagnostics.userScript() { config.userContentController.addUserScript(script) }
+        }
         config.userContentController.addUserScript(Self.shortcutScript())
         config.userContentController.addUserScript(Self.readyScript())
         config.userContentController.addUserScript(Self.readyWatchScript())
@@ -132,6 +137,7 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
     }
 
     func hide(restorePrevious: Bool = true) {
+        panel.cancelPendingDrag()
         cancelOpenPanel()
         if isVisible {
             Paths.opsLog("overlay-hide")
@@ -445,7 +451,7 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
     }
 
     private func hideIfClickOutside(_: NSEvent) {
-        guard isVisible, !pickingOpenPanel else { return }
+        guard isVisible, !pickingOpenPanel, !SelectionDiagnostics.keepVisible else { return }
         if Self.isScreenshotApp(NSWorkspace.shared.frontmostApplication) { return }
         let point = NSEvent.mouseLocation
         if !panel.frame.contains(point) {
@@ -459,6 +465,7 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
     }
 
     @objc private func spaceChanged() {
+        guard !SelectionDiagnostics.keepVisible else { return }
         if isVisible { hide() }
     }
 
@@ -488,7 +495,7 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
     }
 
     @objc private func anotherAppActivated(_ note: Notification) {
-        guard isVisible, !pickingOpenPanel else { return }
+        guard isVisible, !pickingOpenPanel, !SelectionDiagnostics.keepVisible else { return }
         let app = (note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication)
             ?? NSWorkspace.shared.frontmostApplication
         let shouldHide = Self.shouldHideOnActivation(
@@ -621,6 +628,10 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
     private func handleNative(_ body: Any) {
         guard let spec = body as? [String: Any] else { return }
         let op = spec["op"] as? String ?? ""
+        if op == "selectionTrace", let payload = spec["payload"] {
+            selectionDiagnostics?.recordPage(payload)
+            return
+        }
         if op == "getState" {
             pushNativeState()
             return
