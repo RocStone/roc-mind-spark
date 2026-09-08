@@ -888,6 +888,8 @@
 
   /* ===== Context toolbar on selected node ===== */
   .nodebar{position:absolute;z-index:25;display:flex;align-items:center;gap:2px;background:var(--toolbar-bg);color:var(--toolbar-text);border-radius:10px;padding:4px;box-shadow:var(--shadow-lg)}
+  .nodebar{width:max-content;overflow-x:auto}
+  .nodebar > *{flex-shrink:0}
   .nodebar .nb-group{display:flex;gap:1px}
   .nodebar .nb-div{width:1px;height:22px;background:color-mix(in srgb, var(--toolbar-text) 22%, transparent);margin:0 4px}
   .nodebar button{border:none;background:none;color:var(--toolbar-text);min-width:30px;height:30px;padding:0;border-radius:7px;font-size:14px;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;font-family:inherit}

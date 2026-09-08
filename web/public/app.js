@@ -6488,15 +6488,27 @@ function positionAndClampNodeBar(bar, n){
   // make on every single pan/zoom/drag frame.
   const bounds=(_prevStageRect && _prevStageRect.width>1) ? _prevStageRect : stage.getBoundingClientRect();
   const margin=8*z;   // keep the comparison in the same raw space as bounds/rect rather than mixing a CSS-px margin into it
+  // The stage includes the fixed top toolbar. Its controls occupy real space,
+  // even though the rest of that overlay is pointer-transparent.
+  const topbar=stage.querySelector('.topbar')?.getBoundingClientRect();
+  const minTop=Math.max(bounds.top+margin, topbar?.height ? topbar.bottom+margin : bounds.top+margin);
+  const maxTop=bounds.bottom-margin;
+  const minLeft=bounds.left+margin, maxLeft=bounds.right-margin;
+  const node=document.querySelector('.node.sel')?.getBoundingClientRect();
+  // Do not leave an orphan toolbar pinned to the edge when its node is offscreen.
+  bar.style.visibility=node && (node.right<=minLeft || node.left>=maxLeft || node.bottom<=minTop || node.top>=maxTop)
+    ? 'hidden' : '';
+  // A narrow canvas (e.g. beside Markdown) must still contain every action.
+  // Horizontal scrolling preserves the compact toolbar without covering chrome.
+  bar.style.maxWidth=Math.max(0,(maxLeft-minLeft)/z)+'px';
   const rect=bar.getBoundingClientRect();
   const k=view.k||1;
   let dx=0, dy=0;
-  const maxLeft=bounds.right-margin, minLeft=bounds.left+margin;
   if(rect.right>maxLeft) dx=maxLeft-rect.right;
   if(rect.left+dx<minLeft) dx=minLeft-rect.left;   // bar wider than the stage: pin to the left edge rather than overflow both sides
-  const maxTop=bounds.bottom-margin, minTop=bounds.top+margin;
   if(rect.bottom>maxTop) dy=maxTop-rect.bottom;
   if(rect.top+dy<minTop) dy=minTop-rect.top;
+  if(rect.height>maxTop-minTop) bar.style.visibility='hidden';
   if(dx||dy){
     bar.style.left=(pos.left+dx/(k*z))+'px';
     bar.style.top=(pos.top+dy/(k*z))+'px';
