@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// --native-input additionally checks the installed IME and temporarily switches input sources.
 import {spawn} from 'node:child_process';
 import {once} from 'node:events';
 import {mkdtemp,rm} from 'node:fs/promises';
@@ -37,7 +38,7 @@ try{
     const response=await fetch(url+'/api/maps/'+id,{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify(map)});
     if(!response.ok) throw new Error('Could not seed isolated map: '+response.status);
   }
-  const runner=spawn('swift',[join(root,'scripts/wk-app-eval.swift'),url+'/?map=eval-a',join(root,'scripts/app-e2e.js')],{stdio:'inherit'});
+  const runner=spawn('swift',[join(root,'scripts/wk-app-eval.swift'),url+'/?map=eval-a',join(root,'scripts/app-e2e.js'),...(process.argv.includes('--native-input') ? ['--native-input'] : [])],{stdio:'inherit'});
   const [code]=await once(runner,'exit');
   if(code!==0) throw new Error('WK acceptance runner failed: '+code);
 }finally{

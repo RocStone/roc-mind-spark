@@ -339,6 +339,7 @@
     applyCanvas();
     document.querySelectorAll('.rms-settings').forEach(n=>n.remove());
     const lang = window.rmsLang ? window.rmsLang() : 'en';
+    const levelState = getLevelColorsState();
     const m=document.createElement('div');
     m.className='rms-settings var-form';
     m.innerHTML=`
@@ -371,6 +372,12 @@
           <div id="rmsCanvasRows"></div>
         </div>
         <div class="rms-set-sec">
+          <h3>${t('currentMap')}</h3>
+          <p class="vf-sub" style="margin:0 0 8px">${t('levelColorsHelp')}</p>
+          <label class="rms-check"><input type="checkbox" id="rmsLevelColorsToggle"${levelState.enabled?' checked':''}${levelState.disabled?' disabled':''}> ${t('levelColors')}</label>
+          ${levelState.disabled ? `<p class="vf-sub rms-level-colors-disabled" style="margin:6px 0 0">${t('levelColorsDisabled')}</p>` : ''}
+        </div>
+        <div class="rms-set-sec">
           <h3>${t('buttonShortcuts')}</h3>
           <p class="vf-sub" style="margin:0 0 8px">${t('buttonShortcutsHelp')}</p>
           <div id="rmsButtonRows"></div>
@@ -381,6 +388,15 @@
     m.querySelector('.vf-close').onclick=close;
     m.querySelector('.vf-backdrop').onclick=close;
     m.querySelector('#rmsLoginToggle').onchange=ev=>nativePost({ op:'setLogin', on:ev.target.checked });
+    const levelToggle=m.querySelector('#rmsLevelColorsToggle');
+    if(levelToggle) levelToggle.onchange=ev=>{
+      if(levelToggle.disabled) return;
+      const wanted=!!ev.target.checked;
+      if(!setLevelColorsEnabled(wanted)){
+        levelToggle.checked=!wanted;
+        paintSettings();
+      }
+    };
     m.querySelectorAll('.rms-lang [data-lang]').forEach(btn=>{
       btn.onclick=()=>{
         const next=btn.dataset.lang;
@@ -408,6 +424,15 @@
   }
   window.rmsOpenSettings = openSettings;
 
+  function getLevelColorsState(){
+    return window.rmsGetLevelColorsState();
+  }
+  function setLevelColorsEnabled(on){
+    window.rmsSetLevelColorsEnabled(on);
+    paintSettings();
+    return true;
+  }
+
   function paintSettings(){
     const root=document.querySelector('.rms-settings');
     if(!root) return;
@@ -416,6 +441,11 @@
     if(login) login.checked=!!native.login;
     const tog=root.querySelector('#rmsToggleChord');
     if(tog && !listening) tog.textContent=native.toggleDisplay||'Caps + Q';
+    const levelState=getLevelColorsState();
+    const level=root.querySelector('#rmsLevelColorsToggle');
+    if(level){ level.checked=levelState.enabled; level.disabled=levelState.disabled; }
+    const levelHint=root.querySelector('.rms-level-colors-disabled');
+    if(levelHint) levelHint.textContent=t('levelColorsDisabled');
     const canvas=canvasMap();
     const box=root.querySelector('#rmsCanvasRows');
     if(box){

@@ -795,6 +795,7 @@ function clearNodes(){
 }
 
 function render(){
+  if(typeof applyLevelColors==='function') applyLevelColors();
   // Rebuild destroys .node elements. If a WK .edit-float is still mounted,
   // drop it here — never write it back. Callers that care about the draft
   // (pushHistory, cycleTask, setMarker) flush first.
@@ -3517,13 +3518,14 @@ function toggleMdMode(on){
 }
 function mapHistorySnapshot(){
   return JSON.stringify({nodes:map.nodes,rootId:map.rootId,title:map.title,titleAuto:map.titleAuto,
-    color:map.color,links:map.links||[],layout:map.layout,vars:map.vars||{},style:map.style,frontmatter:map.frontmatter});
+    color:map.color,sameLevelColors:map.sameLevelColors,links:map.links||[],layout:map.layout,vars:map.vars||{},style:map.style,frontmatter:map.frontmatter});
 }
-function pushHistory(){
+function pushHistory({preserveEditor=false}={}){
   // Snapshot the live WK editor, not the hidden placeholder card. Otherwise
   // marker/color/task clicks (which do not blur-commit) save the pre-edit text
   // and then render() leaves the .edit-float clone on screen.
-  if(typeof flushOpenEditToModel==='function') flushOpenEditToModel();
+  if(typeof flushOpenEditToModel==='function') flushOpenEditToModel({preserveEditor});
+  if(typeof applyLevelColors==='function') applyLevelColors();
   const snapshot = mapHistorySnapshot();
   if(history.length && hpos>=0 && history[hpos]===snapshot) return;   // nothing actually changed — don't save/flash "Saving…" for no reason
   history=history.slice(0,hpos+1);
@@ -3541,7 +3543,7 @@ function restore(s){
   // the model, and flushing would stamp the live draft onto the restored map.
   if(typeof discardEditOverlay==='function') discardEditOverlay();
   const o=JSON.parse(s);
-  for(const key of ['nodes','rootId','title','titleAuto','color','links','layout','vars','style','frontmatter']){
+  for(const key of ['nodes','rootId','title','titleAuto','color','sameLevelColors','links','layout','vars','style','frontmatter']){
     if(Object.hasOwn(o,key)) map[key]=o[key]; else delete map[key];
   }
   $('#mapTitle').value=map.title;
@@ -3592,6 +3594,18 @@ function performHistoryChord(which){
   else if(typeof undo==='function') undo();
   return true;
 }
+
+function applyLevelColors(){
+  if(typeof RMSLevelColors!=='undefined' && map) RMSLevelColors.apply(map, NODE_COLORS.slice(1));
+}
+window.rmsGetLevelColorsState=()=>({enabled:!!map?.sameLevelColors,disabled:!map || READONLY});
+window.rmsSetLevelColorsEnabled=function(on){
+  if(!map || READONLY) return;
+  commitOpenEdit();
+  RMSLevelColors.setEnabled(map, !!on, NODE_COLORS.slice(1));
+  pushHistory();
+  render();
+};
 
 function insertChildNode(parent, extra){
   const pn=map.nodes[parent]||map.nodes[map.rootId];
@@ -3695,6 +3709,7 @@ function select(id,edit,fromPointer){
   if(mdMode && !_mdSelSync && id) mdHighlightNode(id);   // node click -> highlight its Markdown line
   if(edit) setTimeout(()=>startEdit(id),0);
   syncAddSiblingBtn();
+  if(!edit && !mdMode && multiSel.size<2) prepareNodeTyping(id);
 }
 function syncAddSiblingBtn(){
   const btn=document.getElementById('addSiblingBtn');
@@ -3723,6 +3738,7 @@ function clearMultiSelect(){
   updateMultiSelUI();
 }
 function updateMultiSelUI(){
+  if(multiSel.size>=2 && pendingNodeTyping()) discardEditOverlay();
   document.querySelectorAll('.node.multi-sel').forEach(n=>n.classList.remove('multi-sel'));
   multiSel.forEach(id=>{
     document.querySelector(`.node[data-id="${id}"]`)?.classList.add('multi-sel');
@@ -3732,6 +3748,7 @@ function updateMultiSelUI(){
     showBulkBar();
   } else {
     hideBulkBar();
+    if(sel && !mdMode) prepareNodeTyping(sel);
   }
 }
 function hideBulkBar(){ $('#bulkBar')?.remove(); }
@@ -5169,9 +5186,23 @@ function tryMarkdownShortcut(){
 // made contentEditable and, on commit, read back into n.html (code -> re-escaped
 // <pre><code>; table -> sanitized <table>) so n.text is never corrupted. Blur / Esc /
 // Ctrl+Enter finish; inside a code block Enter just adds a newline.
+function captureBlockEditHTML(box, original){
+  let html;
+  if(/<pre[\s>]/i.test(original||'')){
+    const pre=box.querySelector('pre');
+    const tmp=(pre||box).cloneNode(true);
+    tmp.querySelectorAll('br').forEach(br=>br.replaceWith(document.createTextNode('\n')));
+    const code=(tmp.textContent||'').replace(/\n$/,'');
+    html='<pre><code>'+code.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')+'</code></pre>';
+  } else {
+    const tbl=box.querySelector('table');
+    html=sanitizeNotes(tbl?tbl.outerHTML:box.innerHTML);
+  }
+  return html && html.replace(/<[^>]+>/g,'').trim() ? html : original;
+}
 function startBlockEdit(id, el){
   const node=map.nodes[id]; const box=el.querySelector('.node-block'); if(!node||!box) return;
-  const isCode=/<pre[\s>]/i.test(node.html||''); const original=node.html;
+  const original=node.html;
   el.classList.add('editing','editing-block');
   _liveEditing=true;
   armEditorHost(box); box.focus();
@@ -5184,24 +5215,14 @@ function startBlockEdit(id, el){
     box.removeEventListener('compositionstart',onCompositionStart);
     box.removeEventListener('compositionend',onCompositionEnd);
     if(commit){
-      let html;
-      if(isCode){
-        const pre=box.querySelector('pre'); let code;
-        if(pre){ const tmp=pre.cloneNode(true); tmp.querySelectorAll('br').forEach(br=>br.replaceWith(document.createTextNode('\n'))); code=(tmp.textContent||'').replace(/\n$/,''); }
-        else code=(box.textContent||'');
-        html='<pre><code>'+code.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')+'</code></pre>';
-      } else {
-        const tbl=box.querySelector('table');
-        html=sanitizeNotes(tbl?tbl.outerHTML:box.innerHTML);
-      }
-      if(!html || !html.replace(/<[^>]+>/g,'').trim()) html=original;   // never allow it to be emptied
+      const html=captureBlockEditHTML(box, original);
       map.nodes[id].html=html; pushHistory();
     }
     autoLayout();   // re-renders the node fresh from n.html (drops contentEditable cruft)
   };
   let composing=false, blurTimer=0;
-  const onCompositionStart=()=>{ composing=true; };
-  const onCompositionEnd=()=>{ composing=false; if(typeof markImeCompositionEnd==='function') markImeCompositionEnd(); };
+  const onCompositionStart=()=>{ composing=true; box._rmsComposing=true; };
+  const onCompositionEnd=()=>{ composing=false; box._rmsComposing=false; if(typeof markImeCompositionEnd==='function') markImeCompositionEnd(); };
   const onBlur=()=>{
     if(composing) return;
     clearTimeout(blurTimer);
@@ -5531,7 +5552,7 @@ function nodeClipboardPlain(n){
 }
 function isAppTextField(ae){
   if(!ae) return false;
-  if(ae.closest && ae.closest('.node.editing, .notes-popup')) return false;
+  if(ae.closest && ae.closest('.node.editing, .edit-float, .notes-popup')) return false;
   const tag = ae.tagName;
   if(tag === 'INPUT' || tag === 'TEXTAREA') return true;
   if(ae.isContentEditable) return true;
@@ -5619,7 +5640,7 @@ function openNotesEditorEl(){
   return document.querySelector('.notes-popup .np-editor');
 }
 function openClipboardTarget(){
-  return openNotesEditorEl() || openEditorTextEl();
+  return openNotesEditorEl() || ((typeof pendingNodeTyping==='function' && pendingNodeTyping()) ? null : openEditorTextEl());
 }
 function shouldTakeNodeClipboard(){
   if(typeof openOverlayTextField==='function' && openOverlayTextField()) return false;
@@ -6219,18 +6240,24 @@ function syncAutoTitleFromRoot(id){
   }
   if(typeof refreshList === 'function') refreshList();
 }
-function flushOpenEditToModel(){
+function flushOpenEditToModel({preserveEditor=false}={}){
   if(typeof document === 'undefined' || !map || !map.nodes) return null;
   const float = (typeof _editFloat!=='undefined') ? _editFloat : null;
+  if(float && float.classList && float.classList.contains('input-ready')) return null;
   const el = document.querySelector ? document.querySelector('.node.editing') : null;
   const id = (float && float.dataset && float.dataset.nodeId) || (el && el.dataset && el.dataset.id);
   const n = id && map.nodes[id];
   if(!n) return null;
-  if(el && el.classList && el.classList.contains('editing-block')) return id;
+  if(el && el.classList && el.classList.contains('editing-block')){
+    const box=el.querySelector('.node-block');
+    if(box) n.html=captureBlockEditHTML(box, n.html);
+    return id;
+  }
   const textEl = (float && editFloatLiveTextEl(float)) || (el && ((el.querySelector && el.querySelector('.node-text')) || el));
   if(!textEl) return null;
   applyNodeEditCapture(n, captureNodeEditText(textEl));
   syncAutoTitleFromRoot(id);
+  if(preserveEditor) return id;
   if(typeof unmountEditFloat==='function') unmountEditFloat(el, el && el.querySelector && el.querySelector('.node-text'));
   // Drop the class so the delayed blur handler will not finish() a session
   // that render() is about to replace.
@@ -6262,17 +6289,53 @@ if(typeof document!=='undefined' && document.addEventListener){
     if(peekEditReplaceAll()) selectEditorContents(textEl);
   });
 }
+// Give the selected node a real text-input destination before the first key.
+// IMEs decide whether to compose before JavaScript receives keydown; focusing
+// only after that event turns the first Pinyin letter into literal Latin text.
+function pendingNodeTyping(){
+  return !!(_editFloat && _editFloat.classList.contains('input-ready'));
+}
+function prepareNodeTyping(id){
+  if(READONLY || !document.documentElement.classList.contains('rms-wk') || document.querySelector('.node.editing')) return;
+  if(pendingNodeTyping() && _editFloat.dataset.nodeId===id) return;
+  discardEditOverlay();
+  const node=map?.nodes[id];
+  const el=node && document.querySelector(`.node[data-id="${id}"]`);
+  if(!el || node.hr || node.html) return;
+  const textEl=el.querySelector('.node-text')||el;
+  const host=mountEditFloat(el,textEl);
+  const raw=node.text||'';
+  if(INLINE_HTML_RE.test(raw)) host.innerHTML=sanitizeInlineHTML(raw);
+  else host.textContent=raw;
+  _editFloat.classList.add('input-ready');
+  el.classList.remove('edit-placeholder');
+  const activate=e=>{
+    host.removeEventListener('beforeinput',activate);
+    host.removeEventListener('compositionstart',activate);
+    host.removeEventListener('input',activate);
+    delete host._activateNodeInput;
+    host._rmsComposing=e.type==='compositionstart' || !!e.isComposing;
+    startEdit(id);
+  };
+  host._activateNodeInput=activate;
+  host.addEventListener('beforeinput',activate);
+  host.addEventListener('compositionstart',activate);
+  host.addEventListener('input',activate);
+  selectEditorContents(host);
+}
 function startEdit(id){
   if(READONLY) return;
   const already=typeof document!=='undefined' && document.querySelector && document.querySelector('.node.editing');
   if(already && already.dataset.id===id && _liveEditing) return;
   if(_liveEditing || (already && already.dataset.id && already.dataset.id!==id)) commitOpenEdit();
+  consumeEditBlurCommit();
   opLog('editStart', {id});
   if(_nodeBarTimer){ clearTimeout(_nodeBarTimer); _nodeBarTimer=0; }
   if(map.nodes[id] && map.nodes[id].hr) return;   // dividers aren't editable
   const el=document.querySelector(`.node[data-id="${id}"]`); if(!el) return;
   if(map.nodes[id] && map.nodes[id].html){ startBlockEdit(id, el); return; }   // edit code/table in place
   const textEl=el.querySelector('.node-text')||el;
+  const prepared=pendingNodeTyping() && _editFloat.dataset.nodeId===id;
   const raw = map.nodes[id]?.text || '';
   // Preserve any inline formatting (bold/italic/etc.) for the user to edit
   if(INLINE_HTML_RE.test(raw)) textEl.innerHTML = sanitizeInlineHTML(raw);
@@ -6281,16 +6344,24 @@ function startEdit(id){
   _liveEditing=true;
   _editTyped=false;
   armEditorHost(textEl);
-  const host=mountEditFloat(el, textEl);
-  // Keep the format toolbar visible — it's what makes inline B/I/U work
-  host.focus();
-  // select all text so typing replaces it
-  const range=document.createRange(); range.selectNodeContents(host);
-  const s=getSelection(); s.removeAllRanges(); s.addRange(range);
+  const host=prepared ? editFloatLiveTextEl(_editFloat) : mountEditFloat(el, textEl);
+  if(prepared){
+    if(host._activateNodeInput){
+      for(const name of ['beforeinput','compositionstart','input']) host.removeEventListener(name,host._activateNodeInput);
+      delete host._activateNodeInput;
+    }
+    _editFloat.classList.remove('input-ready');
+    el.classList.add('edit-placeholder');
+    clearEditReplaceAll();
+  } else {
+    host.focus();
+    selectEditorContents(host);
+  }
   let _editRAF=0;
-  let composing=false, blurTimer=0;
+  let composing=!!host._rmsComposing, blurTimer=0;
   const onCompositionStart=()=>{
     composing=true;
+    host._rmsComposing=true;
     if(document.activeElement===host || (host.contains && host.contains(document.activeElement))) clearEditReplaceAll();
     // A layout rAF from the previous keystroke will move the node and
     // dismiss the IME candidate window — that race is why 中文 fails only sometimes.
@@ -6298,6 +6369,8 @@ function startEdit(id){
   };
   const onCompositionEnd=()=>{
     composing=false;
+    host._rmsComposing=false;
+    _editTyped=true;
     if(typeof markImeCompositionEnd==='function') markImeCompositionEnd();
     tryMarkdownShortcut();
     updateFormulaAutocomplete(host, id);
@@ -7085,6 +7158,7 @@ stage.addEventListener('mousedown',e=>{
     panning=true; panStart={x:pt.x,y:pt.y,vx:view.x,vy:view.y};
     if(sel){
       sel=null;
+      if(pendingNodeTyping()) discardEditOverlay();
       document.querySelectorAll('.node.sel').forEach(n=>n.classList.remove('sel'));
       $('#nodebar')?.remove();
     }
@@ -7252,7 +7326,7 @@ stage.addEventListener('touchstart', e=>{
   } else {
     dragNode=null;                       // drop any stale drag state from an interrupted gesture
     panning=true; panStart={x:t.clientX,y:t.clientY,vx:view.x,vy:view.y};
-    if(sel){ sel=null; document.querySelectorAll('.node.sel').forEach(n=>n.classList.remove('sel')); $('#nodebar')?.remove(); }
+    if(sel){ sel=null; if(pendingNodeTyping()) discardEditOverlay(); document.querySelectorAll('.node.sel').forEach(n=>n.classList.remove('sel')); $('#nodebar')?.remove(); }
   }
 }, {passive:false});
 
@@ -7546,7 +7620,7 @@ window.addEventListener('keydown', e=>{
   if(clipboardEditAction(e)) return;
   if(isImeEvent(e)) return;
   if(document.querySelector('.node.editing')) return;
-  if(e.target && e.target.isContentEditable) return;
+  if(e.target && e.target.isContentEditable && !pendingNodeTyping()) return;
   if(e.target && e.target.closest && e.target.closest('#mdPane')) return;
   const dir = (e.code==='ArrowUp' || e.key==='ArrowUp') ? 'up'
             : (e.code==='ArrowDown' || e.key==='ArrowDown') ? 'down'
@@ -7571,8 +7645,11 @@ window.addEventListener('keydown',e=>{
     return;
   }
   if(clipboardEditAction(e)) return;
-  if(['INPUT','TEXTAREA'].includes(e.target.tagName)||e.target.isContentEditable||document.querySelector('.node.editing')) return;
-  if(isImeEvent(e)) return;
+  if(['INPUT','TEXTAREA'].includes(e.target.tagName)||(e.target.isContentEditable && !pendingNodeTyping())||document.querySelector('.node.editing')) return;
+  if(isImeEvent(e)){
+    if(sel && map && !READONLY && !e.metaKey && !e.ctrlKey && !e.altKey) startEdit(sel);
+    return;
+  }
   if(rms('undo', e, (e.ctrlKey||e.metaKey)&&!e.shiftKey&&e.key.toLowerCase()==='z')){e.preventDefault();performHistoryChord('undo');return;}
   if(rms('redo', e, (e.ctrlKey||e.metaKey)&&e.shiftKey&&e.key.toLowerCase()==='z') || ((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='y')){e.preventDefault();performHistoryChord('redo');return;}
   if(e.key==='Escape'){
@@ -7603,20 +7680,15 @@ window.addEventListener('keydown',e=>{
     startLinkMode(sel);
   }
   else if(e.key.length===1&&!e.ctrlKey&&!e.metaKey){
-    // Replace mode: set the text to the typed key and enter edit with cursor at end.
-    // Never steal the first key of an IME composition (Pinyin etc.).
-    if(isImeEvent(e) || isImeSwitchEvent(e)) return;
+    if(pendingNodeTyping() && e.target===openEditorTextEl()) return;
+    if(isImeSwitchEvent(e) || e.altKey) return;
     e.preventDefault();
-    map.nodes[sel].text=e.key;
-    const tEl=document.querySelector(`.node[data-id="${sel}"] .node-text`);
-    if(tEl) tEl.textContent=e.key;
     startEdit(sel);
-    requestAnimationFrame(()=>{
-      const t2=document.querySelector(`.node[data-id="${sel}"] .node-text`);
-      if(!t2) return;
-      const r=document.createRange(); r.selectNodeContents(t2); r.collapse(false);
-      const s=getSelection(); s.removeAllRanges(); s.addRange(r);
-    });
+    const host=openEditorTextEl();
+    if(!host) return;
+    insertEditorText(host, e.key, true);
+    clearEditReplaceAll();
+    emitEditorInput(host);
   }
 });
 stage.addEventListener('dblclick',e=>{
@@ -8494,6 +8566,7 @@ async function loadMap(id){
   refreshList();
   if(mdMode) syncTextFromMap();
   updateMapSaveStatus();
+  if(!mdMode && typeof prepareNodeTyping==='function') prepareNodeTyping(sel);
   return true;
 }
 
@@ -8530,6 +8603,7 @@ function updateMapSaveStatus(){
 }
 function scheduleSave(){
   if(!map || READONLY || map._ephemeral || _historyPreview) return;
+  if(typeof applyLevelColors==='function') applyLevelColors();
   if(map._cloudEdit){ scheduleCloudSave(); return; }
   map.updated=Date.now();
   _mapSaves.schedule(map,MODE==='cloud' ? 1500 : 600);
@@ -8548,11 +8622,31 @@ function flushPendingSave(){
   pending.catch(error=>console.warn('Pending map save failed:',error));
   return pending;
 }
+let _suspendedEditorSelection=null;
+window.rmsRestoreAfterShow=function(){
+  if(!openEditorTextEl() && sel && !mdMode && !openOverlayTextField()) prepareNodeTyping(sel);
+  const host=openEditorTextEl();
+  if(!host || openOverlayTextField()) return;
+  const saved=_suspendedEditorSelection;
+  _suspendedEditorSelection=null;
+  host.focus();
+  if(saved && saved.host===host && host.contains(saved.range.startContainer) && host.contains(saved.range.endContainer)){
+    const selection=getSelection();
+    selection.removeAllRanges(); selection.addRange(saved.range);
+  } else if(peekEditReplaceAll()) selectEditorContents(host);
+};
 window.rmsFlushForHide=function(){
+  const host=openEditorTextEl();
+  const selection=getSelection();
+  if(host && selection.rangeCount){
+    const range=selection.getRangeAt(0);
+    if(host.contains(range.startContainer) && host.contains(range.endContainer))
+      _suspendedEditorSelection={host,range:range.cloneRange()};
+  }
   mdClearDragSel();
   if(map && !READONLY && !_historyPreview){
     flushMdEdits();
-    if(!_mdComposing) pushHistory();
+    if(!_mdComposing && !host?._rmsComposing) pushHistory({preserveEditor:true});
   }
   flushPendingSave();
 };
@@ -8791,7 +8885,7 @@ async function restoreVersion(mapId, ref){
 // Normalize a loaded/decoded map object to the current shape (defensive defaults).
 function normalizeLoadedMap(m){
   return { id:m.id, title:m.title||'Untitled map', titleAuto:!!m.titleAuto, color:m.color||'#e0613a',
-           rootId:m.rootId, style:m.style, layout:m.layout||'balanced',
+           rootId:m.rootId, sameLevelColors:m.sameLevelColors, style:m.style, layout:m.layout||'balanced',
            nodes:m.nodes||{}, links:m.links||[], vars:m.vars||{} };
 }
 
@@ -9932,6 +10026,7 @@ function shouldIgnoreTransientToolbarClick(detail, now, nodeDownAt, windowMs){
   return false;
 }
 function clearCanvasTextSelection(){
+  if(typeof pendingNodeTyping==='function' && pendingNodeTyping()) return;
   try{
     const s = typeof window!=='undefined' && window.getSelection && window.getSelection();
     if(s && s.rangeCount) s.removeAllRanges();

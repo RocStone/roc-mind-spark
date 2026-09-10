@@ -423,6 +423,15 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
         panel.makeKey()
         if boot.shouldLoadCanvas {
             panel.makeFirstResponder(webView)
+            // AppKit drops WebKit's native editor focus while this panel is
+            // parked. Reconnect the live page editor after showing it again.
+            webView.evaluateJavaScript(
+                "window.rmsRestoreAfterShow&&window.rmsRestoreAfterShow()"
+            ) { _, error in
+                if let error {
+                    Paths.log("restore editor after show js error \(error.localizedDescription)")
+                }
+            }
         } else {
             panel.makeFirstResponder(statusView)
         }

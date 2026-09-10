@@ -385,6 +385,7 @@
   .node.sel:hover{z-index:10}
   .node.editing{z-index:12;cursor:text;user-select:text;-webkit-user-select:text;outline:none !important;box-shadow:none}
   .node.editing .node-text{outline:none;user-select:text;-webkit-user-select:text;cursor:text}
+  .edit-float.input-ready{opacity:0;pointer-events:none}
   .node.edit-placeholder{visibility:hidden}
   .edit-float{
     position:absolute; z-index:40; box-sizing:border-box; transform:none;
