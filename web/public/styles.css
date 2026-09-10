@@ -595,8 +595,6 @@
     overflow:hidden;
     display:flex; flex-direction:column;
     max-height:calc(100vh - 16px);
-    transform:rotate(-1deg);          /* slight sticky-note tilt */
-    transform-origin:top center;
   }
   .notes-popup.np-dragging{cursor:grabbing; user-select:none; -webkit-user-select:none}
   .notes-popup::before{
