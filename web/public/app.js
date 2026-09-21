@@ -2600,7 +2600,7 @@ function treeLayoutOpts(name, hGap, vGap){
     : { ...base, gapMain: hGap, gapCross: vGap };
 }
 
-function autoLayout(noRender){
+function autoLayout(noRender, opts){
   if(!map) return;
   const _prevCI=_ci; _ci=buildChildIndex();   // O(1) childrenOf for the whole layout
   // Snapshot current positions before anything below moves them — used to FLIP-animate
@@ -2661,7 +2661,7 @@ function autoLayout(noRender){
       _place();
       render();
     }
-    scheduleSave();
+    if(!(opts && opts.persist===false)) scheduleSave();
     flipAnimateNodes(_beforePos);
   }
   } finally { _ci=_prevCI; }
@@ -3683,6 +3683,9 @@ function deleteNode(id){
   autoLayout();      // re-tidy first…
   pushHistory();     // …then snapshot the clean, balanced state
 }
+// Find-next keeps focus in the search box. select() would otherwise mount the
+// WK typing host and steal the caret.
+let _searchNavigating=false;
 function select(id,edit,fromPointer){
   // Toggle .sel class on existing elements rather than re-rendering — so the
   // DOM element identity is preserved across clicks (required for dblclick).
@@ -3709,7 +3712,7 @@ function select(id,edit,fromPointer){
   if(mdMode && !_mdSelSync && id) mdHighlightNode(id);   // node click -> highlight its Markdown line
   if(edit) setTimeout(()=>startEdit(id),0);
   syncAddSiblingBtn();
-  if(!edit && !mdMode && multiSel.size<2) prepareNodeTyping(id);
+  if(!edit && !mdMode && multiSel.size<2 && !_searchNavigating) prepareNodeTyping(id);
 }
 function syncAddSiblingBtn(){
   const btn=document.getElementById('addSiblingBtn');
@@ -7712,6 +7715,107 @@ stage.addEventListener('scroll',()=>{ if(stage.scrollLeft||stage.scrollTop){ sta
 /* ============================================================
    SEARCH
    ============================================================ */
+let searchMatches=[], searchPos=-1;
+let searchReveal=null;
+let searchAutoExpanded=new Set();
+
+function nodeSearchText(n){
+  if(!n) return '';
+  const raw = n.text || '';
+  if(typeof hasInlineMarkup==='function' && hasInlineMarkup(raw) && typeof nodeTextPlain==='function'){
+    return nodeTextPlain(raw);
+  }
+  return raw;
+}
+function searchWalkIds(){
+  const ids=[];
+  if(!map || !map.rootId || !map.nodes) return ids;
+  const walk=id=>{
+    if(!id || !map.nodes[id]) return;
+    ids.push(id);
+    const kids = typeof childrenOf==='function' ? childrenOf(id) : [];
+    for(let i=0;i<kids.length;i++) walk(kids[i]);
+  };
+  walk(map.rootId);
+  return ids;
+}
+function collectSearchMatches(q){
+  q=String(q||'').trim().toLowerCase();
+  if(!q || !map || !map.nodes) return [];
+  const hits=[];
+  const ids=searchWalkIds();
+  for(let i=0;i<ids.length;i++){
+    const id=ids[i];
+    const plain=nodeSearchText(map.nodes[id]);
+    if(String(plain).toLowerCase().includes(q)) hits.push(id);
+  }
+  return hits;
+}
+function searchCollapsedAncestors(id){
+  const out=[];
+  let p=map && map.nodes && map.nodes[id] ? map.nodes[id].parent : null;
+  while(p){
+    const n=map.nodes[p];
+    if(!n) break;
+    if(n.collapsed) out.push(p);
+    p=n.parent;
+  }
+  return out;
+}
+function searchExpandAncestors(id){
+  const opened=searchCollapsedAncestors(id);
+  for(let i=0;i<opened.length;i++){
+    const n=map.nodes[opened[i]];
+    if(n) n.collapsed=false;
+  }
+  return opened;
+}
+function searchIsDescendantOf(id, anc){
+  let p=map && map.nodes && map.nodes[id] ? map.nodes[id].parent : null;
+  while(p){
+    if(p===anc) return true;
+    p=map.nodes[p] ? map.nodes[p].parent : null;
+  }
+  return false;
+}
+function searchNodeFingerprint(id){
+  const n=map && map.nodes ? map.nodes[id] : null;
+  if(!n) return null;
+  const kids = typeof childrenOf==='function' ? childrenOf(id) : [];
+  return JSON.stringify({
+    text:n.text||'',
+    html:n.html||'',
+    notes:n.notes||'',
+    parent:n.parent||null,
+    task:n.task||'',
+    marker:n.marker||'',
+    kids
+  });
+}
+function searchNodeWasModified(id, fingerprint){
+  if(!id || fingerprint==null) return false;
+  return searchNodeFingerprint(id)!==fingerprint;
+}
+function searchIdsToRestore(autoExpanded, nextId, modified, currentId){
+  const skip=new Set();
+  if(modified && currentId){
+    let p=map && map.nodes && map.nodes[currentId] ? map.nodes[currentId].parent : null;
+    while(p){ skip.add(p); p=map.nodes[p] ? map.nodes[p].parent : null; }
+  }
+  const out=[];
+  const list=autoExpanded || [];
+  for(let i=0;i<list.length;i++){
+    const aid=list[i];
+    if(skip.has(aid)) continue;
+    if(nextId && searchIsDescendantOf(nextId, aid)) continue;
+    out.push(aid);
+  }
+  return out;
+}
+function findChordShouldClose(wrapIsOpen, withReplace){
+  return !!wrapIsOpen && !withReplace;
+}
+
 function openSearch(withReplace){
   const w=$('#searchWrap');
   w.classList.add('open');
@@ -7719,6 +7823,10 @@ function openSearch(withReplace){
   $('#search').focus(); $('#search').select();
 }
 function closeSearch(){
+  const foldChanged=searchLeaveCurrent(null);
+  searchAutoExpanded.clear();
+  searchReveal=null;
+  if(foldChanged) autoLayout(false, {persist:false});
   const w=$('#searchWrap');
   w.classList.remove('open','replace-mode','all-mode');
   $('#search').value=''; $('#replace').value='';
@@ -7727,6 +7835,7 @@ function closeSearch(){
   globalSearchMode=false;
   hideGlobalResults();
   doSearch('');
+  if(sel && !mdMode && multiSel.size<2) prepareNodeTyping(sel);
 }
 let globalSearchMode=false;
 $('#allMapsToggle')?.addEventListener('click', ()=>{
@@ -7756,7 +7865,7 @@ $('#replace').addEventListener('keydown',e=>{
 $('#replaceOne').onclick=replaceNext;
 $('#replaceAll').onclick=replaceAll;
 
-// Global shortcuts: Ctrl/⌘+F opens find, Ctrl/⌘+H opens find+replace.
+// Global shortcuts: Ctrl/⌘+F toggles find (second press closes), Ctrl/⌘+H opens find+replace.
 // Registered separately so they fire even when a node is being edited.
 window.addEventListener('keydown', e=>{
   if(clipboardEditAction(e)) return;
@@ -7765,7 +7874,8 @@ window.addEventListener('keydown', e=>{
     e.preventDefault();
     armEditBlurCommit();
     document.querySelector('.node.editing .node-text')?.blur();
-    openSearch(false);
+    if(findChordShouldClose($('#searchWrap')?.classList.contains('open'), false)) closeSearch();
+    else openSearch(false);
     return;
   }
   if(rms('findReplace', e, (e.ctrlKey||e.metaKey) && !e.altKey && !(e.ctrlKey && e.metaKey) && e.key.toLowerCase()==='h')){
@@ -7776,31 +7886,81 @@ window.addEventListener('keydown', e=>{
   }
 }, true);  // capture phase — beat the browser's native find on Ctrl/⌘+F
 
-let searchMatches=[], searchPos=-1;
-function doSearch(q){
-  q=q.trim().toLowerCase();
-  searchMatches=[]; searchPos=-1;
+function searchLeaveCurrent(nextId){
+  if(!searchReveal && !searchAutoExpanded.size) return false;
+  const currentId=searchReveal ? searchReveal.id : null;
+  const modified=!!(searchReveal && searchNodeWasModified(searchReveal.id, searchReveal.fingerprint));
+  const toCollapse=searchIdsToRestore([...searchAutoExpanded], nextId, modified, currentId);
+  let changed=false;
+  for(let i=0;i<toCollapse.length;i++){
+    const aid=toCollapse[i];
+    if(map.nodes[aid] && !map.nodes[aid].collapsed){
+      map.nodes[aid].collapsed=true;
+      changed=true;
+    }
+    searchAutoExpanded.delete(aid);
+  }
+  if(modified && currentId){
+    let p=map.nodes[currentId] ? map.nodes[currentId].parent : null;
+    while(p){ searchAutoExpanded.delete(p); p=map.nodes[p] ? map.nodes[p].parent : null; }
+  }
+  searchReveal=null;
+  return changed;
+}
+function searchEnterExpand(id){
+  const opened=searchExpandAncestors(id);
+  for(let i=0;i<opened.length;i++) searchAutoExpanded.add(opened[i]);
+  return opened.length>0;
+}
+function paintSearchHits(){
+  const q=($('#search')?.value||'').trim();
+  const matchSet=new Set(searchMatches);
+  const current=searchPos>=0 ? searchMatches[searchPos] : null;
   document.querySelectorAll('.node').forEach(el=>{
     el.classList.remove('dim','match','match-current');
-    if(!q)return;
-    const raw = map.nodes[el.dataset.id].text || '';
-    const plain = INLINE_HTML_RE.test(raw) ? nodeTextPlain(raw) : raw;
-    if(plain.toLowerCase().includes(q)){ el.classList.add('match'); searchMatches.push(el.dataset.id); }
-    else el.classList.add('dim');
+    if(!q) return;
+    if(matchSet.has(el.dataset.id)){
+      el.classList.add('match');
+      if(el.dataset.id===current) el.classList.add('match-current');
+    } else el.classList.add('dim');
   });
+}
+function keepSearchFocus(){
+  const input=$('#search');
+  const wrap=$('#searchWrap');
+  if(!input || !wrap || !wrap.classList.contains('open')) return;
+  if(document.activeElement!==input) input.focus({preventScroll:true});
+}
+function doSearch(q){
+  const raw=q==null ? ($('#search')?.value||'') : q;
+  searchMatches=collectSearchMatches(raw);
+  searchPos=-1;
+  paintSearchHits();
   const cnt=$('#searchCount');
-  if(cnt) cnt.textContent = q ? (searchMatches.length ? rmsTr('searchFound','%s found').replace('%s', searchMatches.length) : rmsTr('searchNone','none')) : '';
+  const needle=String(raw||'').trim();
+  if(cnt) cnt.textContent = needle ? (searchMatches.length ? rmsTr('searchFound','%s found').replace('%s', searchMatches.length) : rmsTr('searchNone','none')) : '';
 }
 function focusNextMatch(){
-  if(!searchMatches.length) return;
-  searchPos = (searchPos+1) % searchMatches.length;
-  const id = searchMatches[searchPos];
-  document.querySelectorAll('.node.match-current').forEach(n=>n.classList.remove('match-current'));
-  const el=document.querySelector(`.node[data-id="${id}"]`);
-  el?.classList.add('match-current');
-  select(id,false);
-  centreOn(id);
-  $('#searchCount').textContent = `${searchPos+1} / ${searchMatches.length}`;
+  if(!searchMatches.length){ keepSearchFocus(); return; }
+  if(typeof flushOpenEditToModel==='function') flushOpenEditToModel();
+  const nextPos=(searchPos+1)%searchMatches.length;
+  const nextId=searchMatches[nextPos];
+  const foldChanged=searchLeaveCurrent(nextId);
+  const opened=searchEnterExpand(nextId);
+  searchPos=nextPos;
+  if(foldChanged || opened) autoLayout(false, {persist:false});
+  searchReveal={ id:nextId, fingerprint:searchNodeFingerprint(nextId) };
+  paintSearchHits();
+  _searchNavigating=true;
+  try{
+    select(nextId,false);
+    centreOn(nextId);
+  } finally {
+    _searchNavigating=false;
+  }
+  const cnt=$('#searchCount');
+  if(cnt) cnt.textContent = `${searchPos+1} / ${searchMatches.length}`;
+  keepSearchFocus();
 }
 // Replace in a single node's text, HTML-aware (operates on the plain text, then
 // re-stores; if the node had inline HTML we replace within text nodes only).
