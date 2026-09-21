@@ -21,6 +21,15 @@ check(tblTable.querySelector('th')?.textContent==='A' && tblTable.querySelector(
   'header A and first cell 1 are visible');
 check(!tbl.classList.contains('editing') && !tbl.querySelector('.node-text')?.isContentEditable,
   'the painted table is not in an editor');
+const tblText=tbl.querySelector('.node-text');
+const tblTh=tbl.querySelector('th');
+const tblTd=tbl.querySelector('td');
+check(getComputedStyle(tblTh).fontSize===getComputedStyle(tblText).fontSize,
+  'header type size matches the node');
+check(getComputedStyle(tblTd).fontSize===getComputedStyle(tblText).fontSize,
+  'cell type size matches the node');
+check(!/239,\s*232,\s*219/.test(getComputedStyle(tblTh).backgroundColor),
+  'header is not the paper beige');
 check(getComputedStyle(tbl).overflow==='visible' && getComputedStyle(tbl).overflowX==='visible',
   'the table card does not clip overflow, so + stays outside');
 select('tbl', false);
@@ -36,6 +45,10 @@ check(!!mix && mix.classList.contains('has-md-table') && !!tableIn('mix'),
   'a topic with prose plus a GFM table still paints the table');
 check((mix.querySelector('.node-md-text')?.textContent||'').indexOf('Notes')>=0,
   'surrounding prose stays next to the table');
+check(getComputedStyle(mix.querySelector('.node-text')).fontSize==='20px',
+  'a sized node keeps its 20px type');
+check(getComputedStyle(mix.querySelector('th')).fontSize==='20px' && getComputedStyle(mix.querySelector('td')).fontSize==='20px',
+  'table type size follows the node font size');
 
 const pipes=nodeEl('pipes');
 check(!!pipes && !pipes.classList.contains('has-md-table') && !tableIn('pipes'),

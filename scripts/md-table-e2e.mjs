@@ -36,8 +36,8 @@ try{
     rootId:'root',
     nodes:{
       root:{id:'root',text:'Mind',parent:null,side:'root',x:0,y:0},
-      tbl:{id:'tbl',text:'| A | B |\n| --- | --- |\n| 1 | 2 |',parent:'root',side:'right',x:160,y:0},
-      mix:{id:'mix',text:'Notes:\n| A | B |\n| --- | --- |\n| 1 | 2 |',parent:'root',side:'right',x:160,y:80},
+      tbl:{id:'tbl',text:'| A | B |\n| --- | --- |\n| 1 | 2 |',parent:'root',side:'right',x:160,y:0,color:'#c4b5fd'},
+      mix:{id:'mix',text:'Notes:\n| A | B |\n| --- | --- |\n| 1 | 2 |',parent:'root',side:'right',x:160,y:80,fontSize:20},
       pipes:{id:'pipes',text:'use | for or',parent:'root',side:'left',x:-160,y:0}
     },
     links:[]
