@@ -4,7 +4,7 @@ Versions follow the macOS bundle `CFBundleShortVersionString` and the matching G
 
 ## [Unreleased]
 
-- A GFM Markdown table in a topic is rendered as a table while the topic is not being edited. Double-click or F2 still edits the Markdown source.
+- A GFM Markdown table in a topic is rendered as a table while the topic is not being edited. Double-click or F2 still edits the Markdown source. The add-child plus stays outside the card; the table scrolls inside the topic text.
 - Find in the current map includes topics hidden by a **−** fold. Enter cycles hits, unfolds the ancestor chain, and refolds the previous path when that topic was not edited. A second **⌘F** closes the find box.
 - Added a feature requirement baseline and implementation review with acceptance criteria.
 - Markdown drag selection now uses WebKit glyph geometry, a per-gesture text index, and visible-range painting once per frame. Removed the retired textarea highlight/gutter path.

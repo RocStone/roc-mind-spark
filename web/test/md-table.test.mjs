@@ -1,5 +1,8 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { loadFns } from './helpers/load-app-fns.mjs';
 
 const {
@@ -147,5 +150,22 @@ describe('splitTextWithGfmTables — view-mode node text', () => {
 
   test('rejects a one-column pipe block', () => {
     assert.equal(nodeTextHasGfmTable('| A |\n| --- |\n| 1 |'), false);
+  });
+});
+
+describe('has-md-table CSS keeps handles outside the card', () => {
+  const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'public', 'styles.css'), 'utf8');
+  const card = css.match(/\.node\.has-md-table\{[^}]*\}/);
+  const text = css.match(/\.node\.has-md-table \.node-text\{[^}]*\}/);
+
+  test('the card itself stays overflow:visible', () => {
+    assert.ok(card, 'has a .node.has-md-table rule');
+    assert.match(card[0], /overflow:\s*visible/);
+    assert.doesNotMatch(card[0], /overflow:\s*(auto|hidden|scroll)/);
+  });
+
+  test('the table body scrolls inside .node-text', () => {
+    assert.ok(text, 'has a .node.has-md-table .node-text rule');
+    assert.match(text[0], /overflow:\s*auto/);
   });
 });

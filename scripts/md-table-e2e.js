@@ -21,6 +21,15 @@ check(tblTable.querySelector('th')?.textContent==='A' && tblTable.querySelector(
   'header A and first cell 1 are visible');
 check(!tbl.classList.contains('editing') && !tbl.querySelector('.node-text')?.isContentEditable,
   'the painted table is not in an editor');
+check(getComputedStyle(tbl).overflow==='visible' && getComputedStyle(tbl).overflowX==='visible',
+  'the table card does not clip overflow, so + stays outside');
+select('tbl', false);
+ensureNodeChrome(tbl);
+const plus=tbl.querySelector('.h-child');
+check(!!plus, 'selected GFM table still has the add-child plus');
+const nr=tbl.getBoundingClientRect();
+const pr=plus.getBoundingClientRect();
+check(pr.left+0.5>=nr.right, 'add-child plus sits outside the right edge of the card');
 
 const mix=nodeEl('mix');
 check(!!mix && mix.classList.contains('has-md-table') && !!tableIn('mix'),

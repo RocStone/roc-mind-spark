@@ -7543,7 +7543,7 @@ function readWheelSpeed(){
 let wheelSpeed=readWheelSpeed();
 
 function wheelConsumedByScrollable(e){
-  const box=e.target && e.target.closest && e.target.closest('.table-node .node-block, .node.has-md-table');
+  const box=e.target && e.target.closest && e.target.closest('.table-node .node-block, .node.has-md-table .node-text');
   if(!box) return false;
   const dy=e.deltaY||0, dx=e.deltaX||0;
   if(Math.abs(dy)>=Math.abs(dx)){
