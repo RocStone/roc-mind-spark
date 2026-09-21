@@ -4,6 +4,7 @@ Versions follow the macOS bundle `CFBundleShortVersionString` and the matching G
 
 ## [Unreleased]
 
+- Find in the current map includes topics hidden by a **−** fold. Enter cycles hits, unfolds the ancestor chain, and refolds the previous path when that topic was not edited. A second **⌘F** closes the find box.
 - Added a feature requirement baseline and implementation review with acceptance criteria.
 - Markdown drag selection now uses WebKit glyph geometry, a per-gesture text index, and visible-range painting once per frame. Removed the retired textarea highlight/gutter path.
 - Markdown edits retain node identity, marker/dimension metadata, and valid cross-links. Closing the pane flushes pending text; selection and navigation work in wrapped and read-only text.

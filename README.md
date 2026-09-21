@@ -74,6 +74,7 @@ The default shortcut is deliberately busy so it rarely collides with the app beh
 | **L** | Cross-link to another node |
 | **Delete** | Remove |
 | **Space** | Collapse / expand |
+| **⌘F** | Find in this map, including folded topics. Enter next hit. Press again to close |
 | **?** | Full shortcut list |
 
 Scroll to zoom, drag empty canvas to pan. Right-click any toolbar button to bind a custom shortcut.
@@ -119,6 +120,7 @@ make install
 | Command | What it does |
 |---|---|
 | `make test` | Canvas Node tests and Swift tests |
+| `make search-e2e` | WKWebView find: folded hits, Enter cycling, fold restore, ⌘F toggle |
 | `make build` | `swift build -c release` |
 | `make app` | Ad-hoc `.app` in `dist/` |
 | `make release-archive` | arm64 release ZIP and SHA-256 in `dist/` |

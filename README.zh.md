@@ -74,6 +74,7 @@ macOS 会把这份 App 保存为例外，以后可以正常双击。公司或学
 | **L** | 连到另一个节点 |
 | **Delete** | 删除 |
 | **Space** | 折叠 / 展开 |
+| **⌘F** | 在当前图查找，含被折叠的节点。回车下一项。再按关闭 |
 | **?** | 全部快捷键 |
 
 滚轮缩放，拖空白处平移。任意工具栏按钮上右键可以绑自定义快捷键。
@@ -119,6 +120,7 @@ make install
 | 命令 | 作用 |
 |---|---|
 | `make test` | 画布 Node 测试和 Swift 测试 |
+| `make search-e2e` | WKWebView 查找：折叠命中、回车轮询、折叠恢复、⌘F 开关 |
 | `make build` | `swift build -c release` |
 | `make app` | ad-hoc `.app`，在 `dist/` |
 | `make release-archive` | arm64 发布 ZIP 和 SHA-256，放在 `dist/` |

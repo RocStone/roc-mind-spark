@@ -30,7 +30,8 @@ What Roc Mind Spark can do today, as a **macOS overlay**. This is the product ca
 - **⌘ + drag** box-select. **⌘ + click** add or remove a topic from the selection. Bulk format, recolor, re-parent, or delete the selection.
 - Copy the selection as a Markdown outline from the bulk bar (**MD**) or **⌘C**. Parent/child among the selected topics is kept as indent. Unselected descendants are left out.
 - Cross-link any two topics with **L**.
-- Collapse / expand a branch with **Space**. Collapse all, one level per click.
+- Collapse / expand a branch with **Space**. The **−** / **+** control on a topic is the same fold. Collapse all, one level per click.
+- **⌘F** finds topic text in the current map, including topics hidden by a **−** fold. Focus stays in the find box. Enter cycles to the next hit, centres the canvas on it, and unfolds its ancestor chain. Enter again refolds that temporary chain when the previous topic was not edited. A second **⌘F** while find is open closes it. **⌘H** opens find and replace. The toolbar 🌐 control searches across all maps.
 - Undo / redo for map edits. Node text, Markdown, and notes undo with the focused editor, not the map stack.
 - Inline format on a topic: bold, italic, underline, strikethrough, size, color, highlight, alignment.
 - Markers, hyperlinks, todo checkboxes, citations (DOI lookup when you ask), Markdown tables, code blocks, dividers.

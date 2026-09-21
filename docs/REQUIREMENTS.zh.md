@@ -28,6 +28,7 @@
 | MD-03 | 调整文本与画布的工作区域 | 面板宽度、换行、预览、节点跳转文本；打开和调整面板保持画布缩放及中心，跳转在换行后仍定位到正确文本 | `app.js`: `toggleMdMode`、`mdToggleWrap`、`mdHighlightNode` |
 | MD-04 | 阅读和输出渲染结果 | 渲染预览、数学公式、代码、表格、PDF；预览和 PDF 使用完整文本，隐藏元数据不显示为正文 | `app.js`: `mdToHtml`、`mdDownloadPdf` |
 | VIEW-01 | 浏览大图 | 平移、缩放、Fit、小地图、方向导航、折叠、逐层折叠；鼠标位置和显示坐标一致，不改变内容历史 | `app.js`: `applyView`、布局与导航 |
+| SEARCH-01 | 在当前图里找到节点，包括被折叠的 | **⌘F** 打开查找，搜索框开着时再按一次关闭；匹配包含被节点 **−** 收起的子树；焦点留在搜索框，回车按树前序轮询下一项，展开到该节点的祖先链路并定位；切到下一项或关闭查找时，若上一项的文字和结构未被修改，则收回这次为查看而临时展开的折叠，下一项仍需要的共用祖先保持展开；查找造成的临时展开不进入撤销历史、不单独触发保存 | `app.js`: `collectSearchMatches`、`focusNextMatch`、`searchLeaveCurrent`；`scripts/search-e2e.mjs` |
 | VIEW-02 | 改变布局与外观 | 平衡树、单向树、组织图、时间线、鱼骨、放射、网格、矩阵及布局 JSON；主题、图样式、手写等外观；重排不改业务父子关系 | `app.js`: `autoLayout`、布局库；`styles.css` |
 | VIEW-03 | 调整界面与展示 | 中英文、界面大小、专注分支、逐节点演示；界面语言不改节点文本，界面大小不破坏指针坐标 | `i18n.js`、`L10n.swift`；`app.js`: 专注和演示 |
 | IO-01 | 交换与备份导图 | JSON、OPML、Markdown、GitMind `.gmind`、MindMeister `.mind` 导入；PNG、Markdown、文本、Word、Mermaid、JSON、参考文献导出；支持子树范围和文本中的数学公式 | `app.js`: 导入导出、Markdown 解析与序列化 |
