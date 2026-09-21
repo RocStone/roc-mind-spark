@@ -169,13 +169,17 @@ describe('has-md-table CSS keeps handles outside the card', () => {
     assert.match(text[0], /overflow:\s*auto/);
   });
 
-  test('table type size follows the node, header tints from currentColor', () => {
+  test('table type size and weight follow the node, header tints from currentColor', () => {
     const table = css.match(/\.node\.has-md-table table\{[^}]*\}/);
+    const cells = css.match(/\.node\.has-md-table th, \.node\.has-md-table td\{[^}]*\}/);
     const th = css.match(/\.node\.has-md-table th\{[^}]*\}/);
-    assert.ok(table && th);
+    assert.ok(table && cells && th);
     assert.match(table[0], /font-size:\s*inherit/);
+    assert.match(table[0], /font-weight:\s*inherit/);
     assert.doesNotMatch(table[0], /font-size:\s*\d/);
+    assert.match(cells[0], /font-weight:\s*inherit/);
     assert.match(th[0], /currentColor/);
+    assert.doesNotMatch(th[0], /font-weight:\s*6/);
     assert.doesNotMatch(th[0], /--paper-2/);
   });
 });

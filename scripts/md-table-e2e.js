@@ -28,6 +28,12 @@ check(getComputedStyle(tblTh).fontSize===getComputedStyle(tblText).fontSize,
   'header type size matches the node');
 check(getComputedStyle(tblTd).fontSize===getComputedStyle(tblText).fontSize,
   'cell type size matches the node');
+check(getComputedStyle(tblTd).fontWeight===getComputedStyle(tbl).fontWeight,
+  'cell weight matches the node');
+check(getComputedStyle(tblTh).fontWeight===getComputedStyle(tbl).fontWeight,
+  'header weight matches the node');
+check(/pingfang/i.test(getComputedStyle(tblTd).fontFamily),
+  'table uses PingFang SC');
 check(!/239,\s*232,\s*219/.test(getComputedStyle(tblTh).backgroundColor),
   'header is not the paper beige');
 check(getComputedStyle(tbl).overflow==='visible' && getComputedStyle(tbl).overflowX==='visible',
