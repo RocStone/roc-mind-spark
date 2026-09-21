@@ -10,10 +10,16 @@ const {
   parseFlatCopiedTable,
   parseMarkdownTable,
   markdownTableToHtml,
+  splitTextWithGfmTables,
+  nodeTextHasGfmTable,
 } = loadFns([
   'splitPipeRow',
   'isGfmSepLine',
   'normalizeTableGrid',
+  'parseGfmAligns',
+  'nodeTextForTableScan',
+  'splitTextWithGfmTables',
+  'nodeTextHasGfmTable',
   'parseGfmMarkdownTable',
   'parseDelimitedTable',
   'parseFlatCopiedTable',
@@ -87,5 +93,59 @@ describe('markdownTableToHtml', () => {
     assert.match(html, /<thead>/);
     assert.match(html, /<th>B&lt;<\/th>/);
     assert.match(html, /<td>2&amp;<\/td>/);
+  });
+
+  test('writes GFM alignment onto cells', () => {
+    const html = markdownTableToHtml({
+      headers: ['L', 'R'],
+      rows: [['1', '2']],
+      aligns: ['left', 'right'],
+    });
+    assert.match(html, /<th style="text-align:left">L<\/th>/);
+    assert.match(html, /<td style="text-align:right">2<\/td>/);
+  });
+});
+
+describe('splitTextWithGfmTables — view-mode node text', () => {
+  test('keeps a node without pipes as one text part', () => {
+    const parts = splitTextWithGfmTables('hello');
+    assert.equal(parts.length, 1);
+    assert.equal(parts[0].type, 'text');
+    assert.equal(parts[0].value, 'hello');
+    assert.equal(nodeTextHasGfmTable('hello'), false);
+  });
+
+  test('does not treat a pipe line without a separator as a table', () => {
+    assert.equal(nodeTextHasGfmTable('use | for or\nnext line'), false);
+  });
+
+  test('finds a GFM table mixed with surrounding text', () => {
+    const parts = splitTextWithGfmTables('Notes:\n| A | B |\n| --- | --- |\n| 1 | 2 |\nend');
+    assert.equal(parts.length, 3);
+    assert.equal(parts[0].type, 'text');
+    assert.equal(parts[0].value, 'Notes:');
+    assert.equal(parts[1].type, 'table');
+    assert.deepEqual(parts[1].grid.headers, ['A', 'B']);
+    assert.deepEqual(parts[1].grid.rows, [['1', '2']]);
+    assert.equal(parts[2].type, 'text');
+    assert.equal(parts[2].value, 'end');
+    assert.equal(nodeTextHasGfmTable('Notes:\n| A | B |\n| --- | --- |\n| 1 | 2 |'), true);
+  });
+
+  test('reads alignment from the separator row', () => {
+    const parts = splitTextWithGfmTables('| L | C | R |\n| :--- | :---: | ---: |\n| a | b | c |');
+    assert.equal(parts[0].type, 'table');
+    assert.deepEqual(parts[0].grid.aligns, ['left', 'center', 'right']);
+  });
+
+  test('turns <br> into line breaks before scanning', () => {
+    const parts = splitTextWithGfmTables('| A | B |<br>| --- | --- |<br>| 1 | 2 |');
+    assert.equal(parts.length, 1);
+    assert.equal(parts[0].type, 'table');
+    assert.deepEqual(parts[0].grid.rows, [['1', '2']]);
+  });
+
+  test('rejects a one-column pipe block', () => {
+    assert.equal(nodeTextHasGfmTable('| A |\n| --- |\n| 1 |'), false);
   });
 });

@@ -954,6 +954,7 @@ function render(){
         }
       } else {
         renderNodeText(t, n.text||'', n.listType);
+        if(t.classList.contains('has-md-table')) el.classList.add('has-md-table');
       }
     }
     // Per-node styling
@@ -1286,7 +1287,7 @@ function isGfmSepLine(line){
     return /^:?-+:?$/.test(t) && t.indexOf('-')>=0;
   });
 }
-function normalizeTableGrid(headers, rows){
+function normalizeTableGrid(headers, rows, aligns){
   const cols=headers.length;
   if(cols<2) return null;
   const body=(rows||[]).map(r => {
@@ -1294,7 +1295,72 @@ function normalizeTableGrid(headers, rows){
     while(row.length<cols) row.push('');
     return row.slice(0, cols);
   });
-  return { headers, rows: body };
+  const out={ headers, rows: body };
+  if(aligns && aligns.length){
+    const a=aligns.slice();
+    while(a.length<cols) a.push('');
+    out.aligns=a.slice(0, cols);
+  }
+  return out;
+}
+function parseGfmAligns(sepLine){
+  return splitPipeRow(sepLine).map(c => {
+    const t=String(c).replace(/\s/g,'');
+    const left=t.charAt(0)===':';
+    const right=t.charAt(t.length-1)===':';
+    if(left && right) return 'center';
+    if(right) return 'right';
+    if(left) return 'left';
+    return '';
+  });
+}
+function nodeTextForTableScan(text){
+  return String(text==null?'':text)
+    .replace(/\r\n/g,'\n').replace(/\r/g,'\n')
+    .replace(/<br\s*\/?>/gi,'\n')
+    .replace(/<\/(?:div|p)\s*>\s*<(?:div|p)\b[^>]*>/gi,'\n');
+}
+function splitTextWithGfmTables(text){
+  const raw=nodeTextForTableScan(text);
+  if(raw.indexOf('|')<0) return [{type:'text', value:raw}];
+  const lines=raw.split('\n');
+  const parts=[];
+  let i=0, buf=[];
+  const flush=()=>{
+    if(!buf.length) return;
+    parts.push({type:'text', value:buf.join('\n')});
+    buf=[];
+  };
+  while(i<lines.length){
+    const line=lines[i];
+    if(line.indexOf('|')>=0 && i+1<lines.length && isGfmSepLine(lines[i+1])){
+      const headers=splitPipeRow(line);
+      if(headers.length>=2){
+        const aligns=parseGfmAligns(lines[i+1]);
+        const body=[];
+        let j=i+2;
+        while(j<lines.length && lines[j].indexOf('|')>=0 && String(lines[j]).trim()!==''){
+          body.push(splitPipeRow(lines[j]));
+          j++;
+        }
+        const grid=normalizeTableGrid(headers, body, aligns);
+        if(grid){
+          flush();
+          parts.push({type:'table', grid});
+          i=j;
+          continue;
+        }
+      }
+    }
+    buf.push(line);
+    i++;
+  }
+  flush();
+  return parts.length ? parts : [{type:'text', value:raw}];
+}
+function nodeTextHasGfmTable(text){
+  if(!text || String(text).indexOf('|')<0) return false;
+  return splitTextWithGfmTables(text).some(p => p.type==='table');
 }
 function parseGfmMarkdownTable(text){
   const lines=String(text||'').split('\n').map(l => l.trim()).filter(l => l);
@@ -1307,8 +1373,9 @@ function parseGfmMarkdownTable(text){
     return normalizeTableGrid(rows[0], rows.slice(1));
   }
   const headers=splitPipeRow(lines[0]);
+  const aligns=parseGfmAligns(lines[sepAt]);
   const body=lines.slice(sepAt+1).filter(l => l.indexOf('|')>=0).map(splitPipeRow);
-  return normalizeTableGrid(headers, body);
+  return normalizeTableGrid(headers, body, aligns);
 }
 function parseDelimitedTable(lines, delim){
   const rows=lines.filter(l => String(l).trim()!=='').map(l => String(l).split(delim).map(c => c.trim()));
@@ -1350,12 +1417,28 @@ function parseMarkdownTable(raw){
   if(tsv) return tsv;
   return parseFlatCopiedTable(lines);
 }
-function markdownTableToHtml(grid){
+function markdownTableToHtml(grid, cellHtml){
   if(!grid || !grid.headers || grid.headers.length<2) return '';
   const esc=s => String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-  const head='<thead><tr>'+grid.headers.map(h => '<th>'+esc(h)+'</th>').join('')+'</tr></thead>';
-  const body='<tbody>'+(grid.rows||[]).map(r => '<tr>'+grid.headers.map((_,i) => '<td>'+esc(r[i]||'')+'</td>').join('')+'</tr>').join('')+'</tbody>';
+  const cell=typeof cellHtml==='function' ? cellHtml : esc;
+  const align=i=>{
+    const a=grid.aligns && grid.aligns[i];
+    return a ? ' style="text-align:'+a+'"' : '';
+  };
+  const head='<thead><tr>'+grid.headers.map((h,i) => '<th'+align(i)+'>'+cell(h)+'</th>').join('')+'</tr></thead>';
+  const body='<tbody>'+(grid.rows||[]).map(r => '<tr>'+grid.headers.map((_,i) => '<td'+align(i)+'>'+cell(r[i]||'')+'</td>').join('')+'</tr>').join('')+'</tbody>';
   return '<table>'+head+body+'</table>';
+}
+function formatNodeTableCell(raw){
+  const escaped=String(raw==null?'':raw).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const html=typeof mdInlineToHtml==='function' ? mdInlineToHtml(escaped) : escaped;
+  return typeof sanitizeInlineHTML==='function' ? sanitizeInlineHTML(html) : html;
+}
+function appendNodeMarkdownTable(container, grid){
+  const wrap=document.createElement('div');
+  wrap.className='node-md-table';
+  wrap.innerHTML=markdownTableToHtml(grid, formatNodeTableCell);
+  container.appendChild(wrap);
 }
 function htmlTableToGrid(html){
   if(!html || typeof document==='undefined') return null;
@@ -1568,20 +1651,11 @@ function formatNodeTimestamp(ts){
     return d.toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'})+' \u00b7 '+d.toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'});
   }catch(e){ return ''; }
 }
-function renderNodeText(container, text, listType){
-  container.textContent='';
+function renderNodeTextList(container, text, listType){
   const isHTML = hasInlineMarkup(text);
-  if(!listType){
-    // Build formatting + math together so e.g. <b>$x^2$</b> renders both.
-    renderFormattedWithMath(container, text);
-    return;
-  }
-  // List mode: split on newlines (or <br> if HTML), one bullet per line
   let lines;
   if(isHTML){
-    // Normalize <br> to \n for splitting; strip tags for prefixing purposes
     const tmp=document.createElement('div'); tmp.innerHTML=sanitizeInlineHTML(text);
-    // Replace <br> with \n
     tmp.querySelectorAll('br').forEach(br=>br.replaceWith(document.createTextNode('\n')));
     lines = tmp.innerHTML.split(/\n+/);
   } else {
@@ -1595,10 +1669,31 @@ function renderNodeText(container, text, listType){
     container.appendChild(prefix);
     const span=document.createElement('span');
     container.appendChild(span);
-    // Bullet lines support the same formatting + math, so equations inside a
-    // list render as math instead of raw $...$.
     renderFormattedWithMath(span, line);
   });
+}
+function renderNodeText(container, text, listType){
+  container.textContent='';
+  const parts=splitTextWithGfmTables(text);
+  if(parts.some(p => p.type==='table')){
+    container.classList.add('has-md-table');
+    parts.forEach(p=>{
+      if(p.type==='table') appendNodeMarkdownTable(container, p.grid);
+      else if(p.value){
+        const span=document.createElement('span');
+        span.className='node-md-text';
+        if(listType) renderNodeTextList(span, p.value, listType);
+        else renderFormattedWithMath(span, p.value);
+        container.appendChild(span);
+      }
+    });
+    return;
+  }
+  if(!listType){
+    renderFormattedWithMath(container, text);
+    return;
+  }
+  renderNodeTextList(container, text, listType);
 }
 // Walk text nodes inside `root` and convert any bare URLs into <a> links.
 // Skips text already inside an <a>, so we don't double-link.
@@ -7448,7 +7543,7 @@ function readWheelSpeed(){
 let wheelSpeed=readWheelSpeed();
 
 function wheelConsumedByScrollable(e){
-  const box=e.target && e.target.closest && e.target.closest('.table-node .node-block');
+  const box=e.target && e.target.closest && e.target.closest('.table-node .node-block, .node.has-md-table');
   if(!box) return false;
   const dy=e.deltaY||0, dx=e.deltaX||0;
   if(Math.abs(dy)>=Math.abs(dx)){

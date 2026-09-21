@@ -1,4 +1,4 @@
-.PHONY: build app release-archive install run test clean md-select-eval app-e2e search-e2e md-production-eval
+.PHONY: build app release-archive install run test clean md-select-eval app-e2e search-e2e md-table-e2e md-production-eval
 
 PREFIX ?= /Applications
 APP_NAME = Roc Mind Spark.app
@@ -32,6 +32,9 @@ app-e2e:
 
 search-e2e:
 	node scripts/search-e2e.mjs
+
+md-table-e2e:
+	node scripts/md-table-e2e.mjs
 
 md-production-eval:
 	node scripts/md-production-eval.mjs --overlay
