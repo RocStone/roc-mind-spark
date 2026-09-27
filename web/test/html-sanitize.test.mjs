@@ -147,3 +147,17 @@ describe('sanitizeInlineHTML — node/notes sanitizer', () => {
     assert.equal(fns.sanitizeInlineHTML('<img src="javascript:1">', ['img'], { img:true }), '');
   });
 });
+
+describe('safeColor — only well-formed color literals reach style/fill attributes', () => {
+  const { safeColor } = loadFns(['safeColor'], { SAFE_COLOR_NAMES: extractConst('SAFE_COLOR_NAMES') });
+  test('accepts hex, rgb/rgba/hsl and a few names', () => {
+    for(const c of ['#fff', '#FFFFFF', '#e0613a', '#11223344', 'rgb(1, 2, 3)', 'rgba(1,2,3,.5)', 'hsl(120 50% 40%)', 'hsla(120, 50%, 40%, 0.3)', 'red', 'transparent']){
+      assert.equal(safeColor(c), c, c);
+    }
+  });
+  test('rejects anything that could break out of an attribute or load a resource', () => {
+    for(const c of ['red" onmouseover="alert(1)', '#fff;background:url(x)', 'url(javascript:1)', 'expression(alert(1))', 'var(--x)', '#ggg', 'rgb(1,2)', '', null, 42, {}]){
+      assert.equal(safeColor(c), '', String(c));
+    }
+  });
+});

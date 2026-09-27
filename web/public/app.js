@@ -1215,6 +1215,22 @@ const ENTITY_RE = /&(#\d+|#x[0-9a-fA-F]+|[a-zA-Z][a-zA-Z0-9]+);/;
 const hasInlineMarkup = t => INLINE_HTML_RE.test(t||'') || ENTITY_RE.test(t||'');
 // Sanitize HTML: keep only a small inline-formatting whitelist; strip everything else
 const SAFE_TAGS = new Set(['b','i','u','s','strong','em','br','a','span','font','div','ul','ol','li','p','sub','sup','code','kbd','mark','ins','del','small','abbr']);
+// Colors from the map model end up inside style="" / fill="" attributes and canvas
+// fillStyle, so only well-formed color literals pass. Returns '' for anything else.
+const SAFE_COLOR_NAMES = new Set(['transparent','currentcolor','black','white','red','green','blue','yellow',
+  'orange','purple','pink','gray','grey','brown','cyan','magenta','navy','teal','olive','maroon','lime',
+  'aqua','fuchsia','silver','gold','indigo','violet','coral','salmon','tomato','crimson','khaki','beige']);
+function safeColor(c){
+  if(typeof c!=='string') return '';
+  const v=c.trim();
+  if(/^#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(v)) return v;
+  const num='\\s*[+-]?(?:\\d+\\.?\\d*|\\.\\d+)(?:%|deg)?\\s*';
+  const fn=new RegExp('^(?:rgba?|hsla?)\\(('+num+')(?:,('+num+')){2,3}\\)$','i');
+  const fnSpace=new RegExp('^(?:rgba?|hsla?)\\((?:'+num+'){3}(?:/'+num+')?\\)$','i');
+  if(fn.test(v) || fnSpace.test(v)) return v;
+  if(SAFE_COLOR_NAMES.has(v.toLowerCase())) return v;
+  return '';
+}
 // Only these link schemes may become clickable (<a href>) or be handed to the
 // native opener: javascript:/file:/custom app schemes render as plain text.
 function isSafeLinkUrl(url, allowMailto){
@@ -5273,14 +5289,26 @@ function renderGlobalResults(results, q){
   // Group by map
   const byMap={};
   results.forEach(r=>{ (byMap[r.mapId]=byMap[r.mapId]||{title:r.mapTitle, items:[]}).items.push(r); });
-  const re=new RegExp('('+q.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+')','ig');
+  // Highlight on the PLAIN snippet, then escape each piece: running the regex over
+  // already-escaped HTML could split an entity (&amp;) or match inside one.
+  const ql=String(q||'').toLowerCase();
+  const hl=snip=>{
+    const s=String(snip||''), low=s.toLowerCase();
+    if(!ql || low.length!==s.length) return escapeHtml(s);
+    let out='', from=0, at;
+    while((at=low.indexOf(ql, from))>=0){
+      out+=escapeHtml(s.slice(from,at))+'<mark>'+escapeHtml(s.slice(at,at+ql.length))+'</mark>';
+      from=at+ql.length;
+    }
+    return out+escapeHtml(s.slice(from));
+  };
   panel.innerHTML=`<div class="gs-head">${(results.length===1?rmsTr('matchAcross','%s match across %s map'):rmsTr('matchesAcross','%s matches across %s maps')).replace('%s', results.length).replace('%s', Object.keys(byMap).length)}</div>`+
     Object.entries(byMap).map(([mid,g])=>`
       <div class="gs-group">
         <div class="gs-map">${escapeHtml(g.title)}${mid===(map&&map.id)?' <span class="gs-cur">(current)</span>':''}</div>
         ${g.items.slice(0,8).map(it=>`
-          <button class="gs-item" data-map="${mid}" data-node="${it.nodeId}">
-            ${escapeHtml(it.snippet).replace(re,'<mark>$1</mark>')}
+          <button class="gs-item" data-map="${escapeHtml(String(mid))}" data-node="${escapeHtml(String(it.nodeId))}">
+            ${hl(it.snippet)}
           </button>`).join('')}
         ${g.items.length>8?`<div class="gs-more">+${g.items.length-8} more…</div>`:''}
       </div>`).join('');
@@ -6780,8 +6808,8 @@ function positionNodeBar(){
   const isRoot=sel===map.rootId;
   const hasKids=childrenOf(sel).length>0;
   const fs = n.fontSize || (isRoot?19:15);
-  const tc = n.textColor || (isRoot?'#ffffff':'#23201b');
-  const hl = n.highlight || 'transparent';
+  const tc = safeColor(n.textColor) || (isRoot?'#ffffff':'#23201b');
+  const hl = safeColor(n.highlight) || 'transparent';
 
   const bar=document.createElement('div'); bar.className='nodebar'; bar.id='nodebar';
   bar.innerHTML=`
@@ -6792,7 +6820,7 @@ function positionNodeBar(){
       <button data-a="edit" title="${chordTitle('scEditNode','editNode','Edit node')}">✎</button>
       <button data-a="notes" class="${(n.notes||'').trim()?'on':''}" title="${(n.notes||'').trim()?rmsTr('actNotesEdit','Edit notes'):rmsTr('actNotesAdd','Add notes')}">📝</button>
       <button data-a="task" class="${n.task?'on':''}" title="${rmsTr('actTask','Todo state')}">☑</button>
-      <button data-a="marker" class="${n.marker?'on':''}" title="${n.marker?rmsTr('actMarkerChange','Change marker'):rmsTr('actMarkerAdd','Add a marker')}">${n.marker||'\u2B50'}</button>
+      <button data-a="marker" class="${n.marker?'on':''}" title="${n.marker?rmsTr('actMarkerChange','Change marker'):rmsTr('actMarkerAdd','Add a marker')}">${n.marker?escapeHtml(String(n.marker)):'\u2B50'}</button>
       <button data-a="cite" class="${n.ref?'on':''}" title="${rmsTr('actCite','Cite')}">📖</button>
       <button data-a="href" class="${n.url?'on':''}" title="${n.url?rmsTr('actHrefEdit','Edit hyperlink'):rmsTr('actHrefAdd','Add hyperlink')}">🔗</button>
       <button data-a="image" class="${n.image?'on':''}" title="${rmsTr('actImage','Image')}">🖼</button>
@@ -8190,8 +8218,9 @@ function updateMinimap(){
     const n=map.nodes[id];
     const x=ox+(n.x-minx)*scale, y=oy+(n.y-miny)*scale;
     const w=Math.max(2,(n.w||120)*scale), h=Math.max(2,(n.h||40)*scale);
-    const col = id===map.rootId ? (map.color||'#e0613a')
-      : (n.color && n.color!=='#fff' && n.color!=='#ffffff') ? n.color : 'var(--line-2)';
+    const nc = safeColor(n.color);
+    const col = id===map.rootId ? (safeColor(map.color)||'#e0613a')
+      : (nc && nc!=='#fff' && nc!=='#ffffff') ? nc : 'var(--line-2)';
     return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" rx="1.5" fill="${col}" ${id===sel?'class="mm-sel"':''}/>`;
   }).join('');
   mm.innerHTML=`<svg viewBox="0 0 ${MM_W} ${MM_H}" width="${MM_W}" height="${MM_H}">${rects}<rect id="mmView" fill="none"/></svg>`;
@@ -8238,7 +8267,7 @@ function updateBreadcrumb(){
   bc.innerHTML=path.map((id,i)=>{
     const label=nodeTextPlain(map.nodes[id].text||'')||'(untitled)';
     const short=label.length>22 ? label.slice(0,22)+'…' : label;
-    const crumb=`<button class="bc-crumb${id===sel?' current':''}" data-id="${id}" title="${escapeHtml(label)}">${escapeHtml(short)}</button>`;
+    const crumb=`<button class="bc-crumb${id===sel?' current':''}" data-id="${escapeHtml(String(id))}" title="${escapeHtml(label)}">${escapeHtml(short)}</button>`;
     return crumb + (i<path.length-1 ? '<span class="bc-sep">›</span>' : '');
   }).join('');
   bc.querySelectorAll('.bc-crumb').forEach(b=>b.onclick=()=>{ select(b.dataset.id,false); centreOn(b.dataset.id); });
@@ -8322,7 +8351,7 @@ async function refreshList(){
   (idx||[]).forEach(m=>{
     const el=document.createElement('div');
     el.className='map-item'+(map&&m.id===map.id?' active':'')+(m.pinned?' pinned':'');
-    el.innerHTML=`<span class="dot" style="background:${m.color||'#e0613a'}"></span><span class="nm">${escapeHtml(m.title||rmsTr('untitled','Untitled'))}</span><button class="row-menu" title="${rmsTr('more','More')}" aria-haspopup="true" aria-label="${rmsTr('moreActions','More actions')}">\u22ee</button>`;
+    el.innerHTML=`<span class="dot" style="background:${safeColor(m.color)||'#e0613a'}"></span><span class="nm">${escapeHtml(m.title||rmsTr('untitled','Untitled'))}</span><button class="row-menu" title="${rmsTr('more','More')}" aria-haspopup="true" aria-label="${rmsTr('moreActions','More actions')}">\u22ee</button>`;
     el.style.cursor='pointer';
     el.onclick=()=>{ if(!map || map.id!==m.id) loadMap(m.id); };
     el.querySelector('.row-menu').onclick=ev=>{ ev.stopPropagation(); openRowMenu(ev.currentTarget, m); };
@@ -8348,7 +8377,7 @@ async function refreshList(){
       const badge = sm.mine
         ? '<span class="shared-badge" title="'+rmsTr('sharedByYou','Shared by you')+'">\uD83D\uDD17</span>'
         : '<span class="shared-badge" title="'+(sm.token?rmsTr('sharedWithYouEdit','Shared with you · editable'):rmsTr('sharedWithYouView','Shared with you · view only'))+'">'+(sm.token?'\u270F\uFE0F':'\uD83D\uDC41')+'</span>';
-      el.innerHTML='<span class="dot" style="background:'+(sm.color||'#e0613a')+'"></span>'+
+      el.innerHTML='<span class="dot" style="background:'+(safeColor(sm.color)||'#e0613a')+'"></span>'+
         '<span class="nm">'+escapeHtml(sm.title||'Shared map')+'</span>'+badge+
         '<button class="row-menu" title="'+rmsTr('more','More')+'" aria-haspopup="true" aria-label="'+rmsTr('moreActions','More actions')+'">\u22ee</button>';
       el.style.cursor='pointer';
