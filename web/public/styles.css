@@ -1131,6 +1131,10 @@
   body.focus-mode .topbar:has(.search-wrap.open) > :not(.search-wrap):not(.spacer){display:none !important}
   body.focus-mode .app{grid-template-columns:1fr}
   body.focus-mode .stage{width:100%; height:100%}
+  /* Branch focus: the ancestor chain stays on screen for context, dimmed so
+     the focused branch reads as the subject. Hover brings it back. */
+  body.focus-mode .node.focus-ancestor{opacity:.42; transition:opacity .2s}
+  body.focus-mode .node.focus-ancestor:hover{opacity:.85}
   /* Zoom bar fades out unless you hover near it */
   body.focus-mode .zoombar{opacity:.25; transition:opacity .25s}
   body.focus-mode .zoombar:hover{opacity:1}

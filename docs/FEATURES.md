@@ -19,6 +19,9 @@ What Roc Mind Spark can do today, as a **macOS overlay**. This is the product ca
 ## Maps
 
 - Any number of maps in a sidebar list. Create blank, duplicate, pin, rename, delete.
+- Autosave is queued per map; a failed save shows as unsaved and retries, and a normal quit waits for saves to finish.
+- Version history with preview, diff and restore; preview is read-only. Steady editing keeps one version per 5-minute window, up to 50 per map.
+- Confirmations (delete map, delete template, remove image) and prompts (URL, template name) are in-page dialogs, not system pop-ups.
 - Autosave to a local SQLite file under `~/Library/Application Support/RocMindSpark/`.
 - Images dropped or pasted onto a map are stored locally with the map.
 - Start from a built-in template, or save the current map as a reusable template.
@@ -35,7 +38,7 @@ What Roc Mind Spark can do today, as a **macOS overlay**. This is the product ca
 - With one topic selected (not editing), **⌘C** copies its whole subtree as a Markdown outline. **⌘V** on a selected topic pastes a just-copied subtree as a clone (notes, markers, colors and links inside it kept), or splits a multi-line Markdown outline into child topics. A single line of text still replaces the topic text.
 - Cross-link any two topics with **L**.
 - Collapse / expand a branch with **Space**. The **−** / **+** control on a topic is the same fold. Collapse all, one level per click.
-- **⌘F** finds topic text in the current map, including topics hidden by a **−** fold. Focus stays in the find box. Enter cycles to the next hit, centres the canvas on it, and unfolds its ancestor chain. Enter again refolds that temporary chain when the previous topic was not edited. A second **⌘F** while find is open closes it. **⌘H** opens find and replace. The toolbar 🌐 control searches across all maps.
+- **⌘F** finds topic text in the current map, including topics hidden by a **−** fold. Focus stays in the find box. Enter cycles to the next hit (**⇧Enter** goes back to the previous one), centres the canvas on it, and unfolds its ancestor chain. Enter again refolds that temporary chain when the previous topic was not edited. A second **⌘F** while find is open closes it. **⌘H** opens find and replace. The toolbar 🌐 control searches across all maps.
 - Undo / redo for map edits. Node text, Markdown, and notes undo with the focused editor, not the map stack.
 - Inline format on a topic: bold, italic, underline, strikethrough, size, color, highlight, alignment.
 - Markers, hyperlinks, todo checkboxes, citations (DOI lookup when you ask), Markdown tables, code blocks, dividers. A GFM table in a topic is drawn as a table while the topic is not being edited; editing shows the Markdown source.
@@ -61,10 +64,12 @@ What Roc Mind Spark can do today, as a **macOS overlay**. This is the product ca
 - Layouts: balanced tree, left, right, down, org-chart up, timeline, fishbone, radial, grid, matrix. The 🎨 panel's **Layout presets** row lists the presets shipped in `web/public/layouts/`; click one to apply it. Its last tile, **Import…**, takes your own layout JSON.
 - Interface language: English or 中文. This does not translate the words you type into nodes.
 - Display size for chrome density. Scroll to zoom the map, drag empty canvas to pan, Fit to frame every topic, minimap to jump.
-- Focus mode is an immersive mode: it hides the sidebar, toolbar and tips so only the canvas is left (Esc exits); ⌘F still opens the find box there. Presentation mode to step through topics.
+- Focus mode: select a topic first and the canvas shows only that topic's branch, with its ancestor chain dimmed for context; every other branch is hidden and the view fits the branch. You can edit and add topics inside the branch, not outside it. With nothing or the central topic selected, focus mode is immersive only: sidebar, toolbar and tips are hidden so just the canvas is left. Esc exits either way; ⌘F still opens the find box. Focus never changes folds and is not saved.
+- Presentation mode to step through topics.
 
 ## Export and import
 
+- Exports open the native macOS Save panel so you pick the file name and folder.
 - PNG of the themed map.
 - Markdown file, or copy as a plain outline.
 - Word `.doc`, Mermaid, JSON backup, references list from citation nodes.
@@ -75,6 +80,7 @@ What Roc Mind Spark can do today, as a **macOS overlay**. This is the product ca
 
 - **?** for the full shortcut list.
 - Right-click any toolbar button to bind a custom shortcut.
+- Settings can reset a single canvas shortcut to its default, or reset them all.
 - Cut / Copy / Paste / Undo / Redo / Select All from the text-field context menu.
 
 ## What this Mac app does not claim
