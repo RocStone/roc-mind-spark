@@ -74,6 +74,8 @@ The default shortcut is deliberately busy so it rarely collides with the app beh
 | **L** | Cross-link to another node |
 | **Delete** | Remove |
 | **Space** | Collapse / expand |
+| **Right-click** a topic | Topic menu: add, notes, marker, copy, duplicate, fold, delete |
+| **⌘C** then **⌘V** on a topic | Paste the copied subtree or a multi-line outline as its children |
 | **⌘F** | Find in this map, including folded topics. Enter next hit. Press again to close |
 | **?** | Full shortcut list |
 
