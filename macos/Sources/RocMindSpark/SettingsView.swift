@@ -208,26 +208,3 @@ private struct ShortcutCatcher: NSViewRepresentable {
         }
     }
 }
-
-@MainActor
-final class SettingsController {
-    private var window: NSWindow?
-
-    func show(store: ShortcutStore, onChange: @escaping () -> Void) {
-        if window == nil {
-            let root = SettingsView(store: store, onChange: onChange)
-            let host = NSHostingController(rootView: root)
-            let win = NSWindow(contentViewController: host)
-            win.styleMask = [.titled, .closable]
-            win.title = L10n.t("settings.window")
-            win.titlebarAppearsTransparent = false
-            win.isReleasedWhenClosed = false
-            win.center()
-            window = win
-        } else if let host = window?.contentViewController as? NSHostingController<SettingsView> {
-            host.rootView = SettingsView(store: store, onChange: onChange)
-        }
-        NSApp.activate(ignoringOtherApps: true)
-        window?.makeKeyAndOrderFront(nil)
-    }
-}

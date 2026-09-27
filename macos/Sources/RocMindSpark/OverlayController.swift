@@ -275,21 +275,6 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
         webView.evaluateJavaScript("window.__rmsNativeState&&window.__rmsNativeState(\(json))")
     }
 
-    /// WKWebView's default data store keeps disk cache across launches.
-    /// That pinned overlay users to a stale styles.css so a rebuilt app
-    /// still showed the closed search-wrap sliver. Keep localStorage.
-    private func purgeStaleWebCache() async {
-        let keep: Set<String> = [
-            WKWebsiteDataTypeLocalStorage,
-            WKWebsiteDataTypeSessionStorage,
-            WKWebsiteDataTypeCookies,
-            WKWebsiteDataTypeIndexedDBDatabases,
-        ]
-        let types = WKWebsiteDataStore.allWebsiteDataTypes().subtracting(keep)
-        await WKWebsiteDataStore.default().removeData(ofTypes: types, modifiedSince: .distantPast)
-        Paths.log("purged webview cache")
-    }
-
     private func attachStatusView(to root: NSView) {
         if statusView != nil { return }
         let status = CanvasStatusView(frame: .zero)
