@@ -1815,6 +1815,12 @@
   .diff-panel{ position:fixed; right:18px; top:64px; width:360px; max-height:70vh; overflow:auto;
     background:var(--paper); border:1px solid var(--line); border-radius:14px; box-shadow:var(--shadow-lg);
     z-index:120; padding:6px 0; font-size:13px; }
+  /* Opened from the history panel: sit to its left instead of on top of it
+     (history is 320px wide at right:18px). Too narrow for both: drop below. */
+  .hist-panel ~ .diff-panel{ right:calc(18px + 320px + 12px); }
+  @media (max-width:760px){
+    .hist-panel ~ .diff-panel{ right:18px; top:auto; bottom:18px; max-height:45vh; }
+  }
   .diff-head{ display:flex; align-items:center; justify-content:space-between; padding:8px 14px; border-bottom:1px solid var(--line); position:sticky; top:0; background:var(--paper); }
   .diff-head b{ color:var(--ink); }
   .diff-x{ border:0; background:transparent; font-size:18px; cursor:pointer; color:var(--ink-soft); line-height:1; }

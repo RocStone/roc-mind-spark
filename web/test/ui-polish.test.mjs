@@ -1,6 +1,11 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { loadFns, extractConst } from './helpers/load-app-fns.mjs';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+import { loadFns, extractConst, extractFunction } from './helpers/load-app-fns.mjs';
+
+const here = dirname(fileURLToPath(import.meta.url));
 
 function swatches(vars){
   global.document = { documentElement: {} };
@@ -14,6 +19,15 @@ function swatches(vars){
   delete global.document;
   return out;
 }
+
+describe('history / diff panels', () => {
+  test('diff panel sits beside the history panel, and both go when the map changes', () => {
+    const css = readFileSync(join(here, '..', 'public', 'styles.css'), 'utf8');
+    assert.match(css, /\.hist-panel ~ \.diff-panel\{ right:calc\(18px \+ 320px \+ 12px\)/);
+    const body = extractFunction('resetMapViewState');
+    assert.match(body, /\.hist-panel, \.diff-panel/);
+  });
+});
 
 describe('toast duration', () => {
   const { toastDuration } = loadFns(['toastDuration'], { TOAST_ERROR_RE: extractConst('TOAST_ERROR_RE') });

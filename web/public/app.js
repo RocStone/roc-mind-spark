@@ -13359,6 +13359,8 @@ async function proceedBoot(){
 // and make the title editable again.
 function resetMapViewState(){
   cancelHistoryPreview();
+  // History and diff belong to the map being left.
+  document.querySelectorAll('.hist-panel, .diff-panel').forEach(p=>p.remove());
   READONLY=false;
   const t=$('#mapTitle'); if(t) t.readOnly=false;
 }
