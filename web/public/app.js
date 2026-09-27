@@ -9169,8 +9169,15 @@ async function restoreVersion(mapId, ref){
   restored.id=mapId;                 // keep identity
   restored.updated=Date.now();
   cancelHistoryPreview();
+  // Pinning is sidebar state of the map as it is now, not part of the version.
+  if(map && map.pinned) restored.pinned=true; else delete restored.pinned;
   map=restored;
-  history=[]; hpos=-1; pushHistory();   // restored state becomes a fresh undo baseline
+  if(sel && !map.nodes[sel]) sel=null;
+  if(typeof multiSel!=='undefined' && multiSel.size) clearMultiSelect();
+  $('#mapTitle').value=map.title;
+  // Append to the existing undo stack (pushHistory also resyncs the Markdown
+  // editor) so ⌘Z goes back to the pre-restore map.
+  pushHistory();
   render(); fit();
   try{ await saveMapNow(restored); }catch(e){ console.warn('save after history restore failed:',e); return; }
   if(map!==restored) return;
@@ -9179,8 +9186,10 @@ async function restoreVersion(mapId, ref){
   toast('Version restored');
 }
 // Normalize a loaded/decoded map object to the current shape (defensive defaults).
+// Unknown top-level fields (layoutConfig, layoutParams, layoutPreset,
+// frontmatter, …) are carried over so a restore doesn't silently drop them.
 function normalizeLoadedMap(m){
-  return { id:m.id, title:m.title||'Untitled map', titleAuto:!!m.titleAuto, color:m.color||'#e0613a',
+  return { ...m, id:m.id, title:m.title||'Untitled map', titleAuto:!!m.titleAuto, color:m.color||'#e0613a',
            rootId:m.rootId, sameLevelColors:m.sameLevelColors, style:m.style, layout:m.layout||'balanced',
            nodes:m.nodes||{}, links:m.links||[], vars:m.vars||{} };
 }

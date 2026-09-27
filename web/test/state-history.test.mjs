@@ -1,6 +1,6 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { extractFunction, extractConst } from './helpers/load-app-fns.mjs';
+import { extractFunction, extractConst, loadFns } from './helpers/load-app-fns.mjs';
 
 // restore()/insertChildNode() assign to module-level `let`s (sel, multiSel).
 // loadFns() passes deps as parameters, so writes would be invisible here —
@@ -71,6 +71,28 @@ describe('restore() keeps the selection pointing at real nodes', () => {
 test('uid() never yields an all-digit id (object key order)', () => {
   const uid = extractConst('uid');
   for (let i = 0; i < 2000; i++) assert.match(uid(), /^[a-z]/);
+});
+
+test('normalizeLoadedMap keeps map-level fields it does not know about', () => {
+  const { normalizeLoadedMap } = loadFns(['normalizeLoadedMap']);
+  const out = normalizeLoadedMap({
+    id: 'm', rootId: 'r', nodes: { r: { id: 'r' } },
+    layoutConfig: { balanced: { hGap: 10 } }, layoutParams: { gap: 2 }, layoutPreset: 'p1',
+    frontmatter: { a: 1 },
+  });
+  assert.deepEqual(out.layoutConfig, { balanced: { hGap: 10 } });
+  assert.deepEqual(out.layoutParams, { gap: 2 });
+  assert.equal(out.layoutPreset, 'p1');
+  assert.deepEqual(out.frontmatter, { a: 1 });
+  assert.equal(out.title, 'Untitled map');
+  assert.equal(out.layout, 'balanced');
+  assert.deepEqual(out.links, []);
+});
+
+test('restoreVersion appends to undo history instead of wiping it', () => {
+  const body = extractFunction('restoreVersion');
+  assert.doesNotMatch(body, /history\s*=\s*\[\]/);
+  assert.match(body, /pushHistory\(\)/);
 });
 
 describe('history snapshot covers layout settings', () => {
