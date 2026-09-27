@@ -1336,6 +1336,11 @@
   .rms-ctx button:disabled:hover{background:transparent}
   .rms-ctx-sep{height:1px; margin:4px 6px; background:var(--chrome-edge); pointer-events:none}
   .rms-ctx-wait{color:var(--accent); cursor:default}
+  .rms-ctx button:focus-visible{background:var(--hover); outline:none}
+  .node-menu button{display:flex; align-items:center; justify-content:space-between; gap:20px}
+  .node-menu kbd{font:inherit; font-size:12px; color:var(--ink-soft); background:none; border:none; padding:0}
+  .node-menu button.danger{color:#d64541}
+  html.lang-zh .node-menu{font-family:"PingFang SC",var(--sans)}
   html.lang-zh .text-edit-menu{font-family:"PingFang SC",var(--sans)}
 
   /* ===== Keyboard help overlay (press ?) ===== */

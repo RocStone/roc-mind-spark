@@ -4321,11 +4321,165 @@ function showNodeHrefMenu(ev, id){
     document.addEventListener('mousedown',off,true);
   },0);
 }
-function onNodeHrefContextMenu(e){
-  const id=nodeHrefContextId(e && e.target);
+// Right-click on a node (not on its handles / buttons / an open editor):
+// the node's own menu. Read-only previews only get "Open link".
+function nodeContextId(target){
+  if(!target || !target.closest) return null;
+  if(target.closest('.handle, .resize-grip, .nodebar, .picker, .notes-mark, .ref-mark, .task-check, .rms-ctx, .row-pop, .node.editing, input, textarea, [contenteditable="true"]')) return null;
+  const el=target.closest('.node');
+  if(!el || !el.dataset) return null;
+  const id=el.dataset.id;
+  if(!id || typeof map==='undefined' || !map || !map.nodes || !map.nodes[id]) return null;
+  return id;
+}
+function closeNodeContextMenu(){
+  document.querySelectorAll('.node-menu').forEach(p=>p.remove());
+}
+// Insert `ids` right after `anchor` in the key order of `nodes` (sibling order
+// follows key order), so a duplicate lands next to its original.
+function insertNodeKeysAfter(nodes, anchor, ids){
+  const set=new Set(ids), out={};
+  let placed=false;
+  for(const k in nodes){
+    if(set.has(k)) continue;
+    out[k]=nodes[k];
+    if(k===anchor){ ids.forEach(i=>{ if(nodes[i]) out[i]=nodes[i]; }); placed=true; }
+  }
+  if(!placed) ids.forEach(i=>{ if(nodes[i]) out[i]=nodes[i]; });
+  return out;
+}
+function duplicateSubtree(id){
+  if(READONLY || !map || !map.nodes[id] || id===map.rootId) return false;
+  flushOpenEditToModel();
+  const src=map.nodes[id];
+  const clip=serializeNodeClip([id], map.nodes, null, map.links);
+  if(!map.links) map.links=[];
+  const created=cloneNodeClipInto(clip, src.parent, map.nodes, uid, map.links);
+  if(!created.length) return false;
+  created.forEach(c=>{ map.nodes[c].side=src.side; });
+  map.nodes=insertNodeKeysAfter(map.nodes, id, created);
+  opLog('duplicate', {id, count:created.length});
+  pushHistory();
+  autoLayout();
+  select(created[0]);
+  toast(rmsTr('duplicatedNodes','Duplicated {n} nodes').replace('{n}', created.length));
+  return true;
+}
+function copyNodeAsMarkdown(id){
+  if(!map || !map.nodes[id]) return false;
+  const ids=Object.keys(serializeNodeClip([id], map.nodes, null).nodes);
+  const text=ids.length>1 ? buildSelectionMarkdown(ids, map.nodes, null) : nodeClipboardPlain(map.nodes[id]);
+  if(!text) return false;
+  rememberNodeClip(text, serializeNodeClip([id], map.nodes, null, map.links));
+  if(writeClipboardText(text)){ toast(rmsTr('copiedAsMd','Copied as Markdown')); return true; }
+  return false;
+}
+function nodeContextMenuItems(id){
+  const n=map.nodes[id];
+  const isRoot=id===map.rootId;
+  const hasKids=childrenOf(id).length>0;
+  const hasNotes=!!String(n.notes||'').trim();
+  const kb=cid=>(typeof window!=='undefined' && window.rmsChordLabel) ? window.rmsChordLabel(cid) : '';
+  const items=[
+    {a:'child', label:rmsTr('scAddChild','Add child'), kbd:kb('addChild')},
+    {a:'sibling', label:rmsTr('scAddSibling','Add sibling'), kbd:kb('addSibling'), off:isRoot},
+    {a:'edit', label:rmsTr('actEdit','Edit node'), kbd:kb('editNode'), off:!!(n.hr)},
+    {sep:true},
+    {a:'notes', label:hasNotes?rmsTr('actNotesEdit','Edit notes'):rmsTr('actNotesAdd','Add notes')},
+    {a:'marker', label:rmsTr('ctxSetMarker','Set marker…')},
+  ];
+  if(n.url) items.push({a:'open-href', label:rmsTr('actOpenHref','Open link')});
+  items.push(
+    {sep:true},
+    {a:'copymd', label:rmsTr('ctxCopyMd','Copy as Markdown')},
+    {a:'dup', label:rmsTr('ctxDuplicate','Duplicate subtree'), off:isRoot},
+  );
+  if(hasKids) items.push({a:'collapse', label:n.collapsed?rmsTr('ctxExpand','Expand'):rmsTr('ctxCollapse','Collapse'), kbd:kb('collapse')});
+  items.push({sep:true}, {a:'del', label:rmsTr('scDeleteNode','Delete node'), kbd:kb('deleteNode'), off:isRoot, danger:true});
+  return items;
+}
+function runNodeContextAction(a, id, anchor){
+  if(!map || !map.nodes[id]) return;
+  if(a==='child') addNode(id,false);
+  else if(a==='sibling') addNode(id,true);
+  else if(a==='edit') startEdit(id);
+  else if(a==='notes') showNotesEditor(id, { sticky:true });
+  else if(a==='marker') showMarkerPicker(anchor, id);
+  else if(a==='open-href') openNodeUrl(id);
+  else if(a==='copymd') copyNodeAsMarkdown(id);
+  else if(a==='dup') duplicateSubtree(id);
+  else if(a==='collapse'){
+    const n=map.nodes[id];
+    n.collapsed=!n.collapsed;
+    opLog(n.collapsed?'collapse':'expand', {id});
+    pushHistory(); autoLayout();
+  }
+  else if(a==='del') deleteNode(id);
+}
+function showNodeContextMenu(ev, id){
+  closeNodeContextMenu();
+  closeNodeHrefMenu();
+  if(sel!==id || (multiSel && multiSel.size)){
+    if(multiSel && multiSel.size && typeof clearMultiSelect==='function') clearMultiSelect();
+    select(id);
+  }
+  const nodeEl=document.querySelector(`.node[data-id="${CSS.escape(id)}"]`);
+  const p=document.createElement('div');
+  p.className='rms-ctx node-menu';
+  p.setAttribute('role','menu');
+  p.style.left=((ev && ev.clientX) || 8)+'px';
+  p.style.top=((ev && ev.clientY) || 8)+'px';
+  p.innerHTML=nodeContextMenuItems(id).map(it=>it.sep
+    ? '<div class="rms-ctx-sep" role="separator"></div>'
+    : `<button type="button" role="menuitem" data-a="${it.a}"${it.off?' disabled':''}${it.danger?' class="danger"':''}><span>${escapeHtml(it.label)}</span>${it.kbd?`<kbd>${escapeHtml(it.kbd)}</kbd>`:''}</button>`
+  ).join('');
+  document.body.appendChild(p);
+  const r=p.getBoundingClientRect();
+  if(r.right>innerWidth-8) p.style.left=Math.max(8, innerWidth-r.width-8)+'px';
+  if(r.bottom>innerHeight-8) p.style.top=Math.max(8, innerHeight-r.height-8)+'px';
+  const buttons=[...p.querySelectorAll('button:not([disabled])')];
+  let off=null;
+  const close=()=>{
+    p.remove();
+    if(off) document.removeEventListener('mousedown', off, true);
+  };
+  p.addEventListener('mousedown', e=>{ e.stopPropagation(); if(e.target.closest('button')) e.preventDefault(); });
+  p.addEventListener('click', e=>{
+    const b=e.target.closest('button[data-a]');
+    if(!b || b.disabled) return;
+    e.stopPropagation();
+    close();
+    runNodeContextAction(b.dataset.a, id, nodeEl && nodeEl.isConnected ? nodeEl : b);
+  });
+  // Keyboard: ↑/↓/Home/End move, Enter/Space run (native button), Esc closes.
+  p.addEventListener('keydown', e=>{
+    const i=buttons.indexOf(document.activeElement);
+    const go=j=>{ if(buttons.length){ buttons[(j+buttons.length)%buttons.length].focus(); } };
+    if(e.key==='ArrowDown'){ go(i+1); }
+    else if(e.key==='ArrowUp'){ go(i<0 ? buttons.length-1 : i-1); }
+    else if(e.key==='Home'){ go(0); }
+    else if(e.key==='End'){ go(buttons.length-1); }
+    else if(e.key==='Escape' || e.key==='Tab'){ close(); }
+    else if(e.key!=='Enter' && e.key!==' ') return;
+    if(e.key!=='Enter' && e.key!==' ') e.preventDefault();
+    e.stopPropagation();
+  });
+  if(buttons.length) buttons[0].focus({preventScroll:true});
+  setTimeout(()=>{
+    off=e=>{ if(!p.contains(e.target)) close(); };
+    if(p.isConnected) document.addEventListener('mousedown', off, true);
+  },0);
+}
+function onNodeContextMenu(e){
+  if(typeof READONLY!=='undefined' && READONLY){
+    const hid=nodeHrefContextId(e && e.target);
+    if(hid){ if(e.stopPropagation) e.stopPropagation(); showNodeHrefMenu(e, hid); }
+    return;
+  }
+  const id=nodeContextId(e && e.target);
   if(!id) return;
   if(e.stopPropagation) e.stopPropagation();
-  showNodeHrefMenu(e, id);
+  showNodeContextMenu(e, id);
 }
 function isRmsWk(){
   return !!(typeof document!=='undefined' && document.documentElement
@@ -11965,7 +12119,7 @@ function suppressNativeContextMenu(e){
    WIRE UP
    ============================================================ */
 document.addEventListener('contextmenu', suppressNativeContextMenu, true);
-document.addEventListener('contextmenu', onNodeHrefContextMenu, true);
+document.addEventListener('contextmenu', onNodeContextMenu, true);
 $('#newMap').onclick=createMap;
 $('#newMapMenu')?.addEventListener('click', e => { e.stopPropagation(); showTemplatesMenu(); });
 $('#emptyNew').onclick=createMap;

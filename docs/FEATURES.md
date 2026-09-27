@@ -28,6 +28,7 @@ What Roc Mind Spark can do today, as a **macOS overlay**. This is the product ca
 - Add a child with **Tab**, a sibling with **Enter**. Navigate with arrows. Edit with **F2** or double-click. Delete with Backspace / Delete.
 - **Drag** a topic to move its subtree. Drop on the centre of another topic to nest. Drop on the top or bottom edge to insert as a sibling or reorder.
 - **⌘ + drag** box-select. **⌘ + click** add or remove a topic from the selection. Bulk format, recolor, re-parent, or delete the selection.
+- Right-click a topic for Add child, Add sibling, Edit, Notes, Set marker, Copy as Markdown, Duplicate subtree, Collapse / Expand and Delete. Arrow keys move through the menu; Esc or a click outside closes it.
 - Copy the selection as a Markdown outline from the bulk bar (**MD**) or **⌘C**. Parent/child among the selected topics is kept as indent. Unselected descendants are left out.
 - With one topic selected (not editing), **⌘C** copies its whole subtree as a Markdown outline. **⌘V** on a selected topic pastes a just-copied subtree as a clone (notes, markers, colors and links inside it kept), or splits a multi-line Markdown outline into child topics. A single line of text still replaces the topic text.
 - Cross-link any two topics with **L**.
