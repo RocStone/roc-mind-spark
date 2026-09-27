@@ -9323,6 +9323,8 @@ function updateMapSaveStatus(){
   const state=map && _mapSaveStates.get(map.id);
   const busy=state==='saving'||state==='retrying';
   $('#savePill').classList.toggle('saving',busy);
+  $('#savePill').classList.toggle('failed',state==='failed'||state==='failed-terminal');
+  $('#savePill').classList.toggle('failed-terminal',state==='failed-terminal');
   const key=state==='failed-terminal' ? 'saveFailedTerminal' : state==='failed' ? 'saveFailed' : state==='retrying' ? 'saveRetrying' : busy ? 'saving' : 'saved';
   const fallback={saveFailedTerminal:'Save refused',saveFailed:'Save failed',saveRetrying:'Retrying…',saving:'Saving…',saved:'Saved'};
   $('#saveText').textContent=rmsTr(key,fallback[key]);
@@ -12180,7 +12182,25 @@ function roundRect(ctx,x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+
 function download(blob,name){const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);}
 
 /* ---------- toast ---------- */
-let toastT;function toast(msg){const t=$('#toast');t.textContent=msg;t.classList.add('show');clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),2000);}
+// How long a toast stays up: long enough to read (about 50 ms a character,
+// 2–8 s), and at least 6 s for an error. An explicit `ms` wins.
+const TOAST_ERROR_RE=/fail|could not|couldn|error|refused|cannot|can't|not valid|失败|无法|错误|拒绝/i;
+function toastDuration(msg, ms){
+  if(typeof ms==='number' && isFinite(ms) && ms>0) return Math.max(1000, ms);
+  const len=String(msg==null?'':msg).length;
+  let d=Math.min(8000, Math.max(2000, len*50));
+  if(ms==='error' || (ms && ms.error) || TOAST_ERROR_RE.test(String(msg||''))) d=Math.max(d, 6000);
+  return d;
+}
+let toastT;
+function toast(msg, ms){
+  const t=$('#toast');
+  if(!t) return;
+  t.textContent=msg;
+  t.classList.add('show');
+  clearTimeout(toastT);
+  toastT=setTimeout(()=>t.classList.remove('show'), toastDuration(msg, ms));
+}
 
 function textEditContextTarget(target){
   if(!target || !target.closest) return null;

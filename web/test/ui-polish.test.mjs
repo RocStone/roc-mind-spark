@@ -15,6 +15,23 @@ function swatches(vars){
   return out;
 }
 
+describe('toast duration', () => {
+  const { toastDuration } = loadFns(['toastDuration'], { TOAST_ERROR_RE: extractConst('TOAST_ERROR_RE') });
+  test('short messages stay at least 2 s, long ones scale up to 8 s', () => {
+    assert.equal(toastDuration('Saved'), 2000);
+    assert.equal(toastDuration('x'.repeat(100)), 5000);
+    assert.equal(toastDuration('x'.repeat(1000)), 8000);
+  });
+  test('errors stay at least 6 s', () => {
+    assert.equal(toastDuration('Copy failed'), 6000);
+    assert.equal(toastDuration('无法打开'), 6000);
+    assert.equal(toastDuration('Done', 'error'), 6000);
+  });
+  test('an explicit duration wins', () => {
+    assert.equal(toastDuration('Copy failed', 3000), 3000);
+  });
+});
+
 describe('text colour swatches follow the theme', () => {
   test('light theme keeps the dark ink first', () => {
     assert.equal(swatches({ '--node-bg': '#ffffff', '--node-ink': '#23201b' })[0], '#23201b');
