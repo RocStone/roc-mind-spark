@@ -9411,25 +9411,28 @@ function exportMenu(){
   closeAllMenus();
   const pop=document.createElement('div');
   pop.className='export-pop';
-  pop.innerHTML=`
-    <div class="ex-grp">Tools</div>
-    <button data-a="history"><span class="ex-ic">🕘</span><span><b>Version history</b><i>Browse & restore past versions</i></span></button>
-    <button data-a="present"><span class="ex-ic">▶</span><span><b>Presentation mode</b><i>Step through the map one topic at a time</i></span></button>
-    <button data-a="buildprompt"><span class="ex-ic">✨</span><span><b>Compile subtree → prompt</b><i>Assemble the selected branch into a prompt</i></span></button>
-    <div class="ex-grp">Export</div>
-    <button data-a="png"   ><span class="ex-ic">🖼</span><span><b>PNG image</b><i>Themed export, honors map style</i></span></button>
-    <button data-a="prompt"><span class="ex-ic">⚡</span><span><b>Export as prompt</b><i>Fill variables, then copy clean text</i></span></button>
-    <button data-a="mdrich"><span class="ex-ic">📝</span><span><b>Markdown</b><i>Formatting, tasks, tables, code</i></span></button>
-    <button data-a="copy"  ><span class="ex-ic">⎘</span><span><b>Copy as text (clipboard)</b><i>Plain outline, no download</i></span></button>
-    <button data-a="word"  ><span class="ex-ic">📄</span><span><b>Word document (.doc)</b><i>Opens in Word, Google Docs, LibreOffice</i></span></button>
-    <button data-a="mermaid"><span class="ex-ic">🧜</span><span><b>Mermaid diagram</b><i>Renders in GitHub, Notion, Obsidian</i></span></button>
-    <button data-a="refs"><span class="ex-ic">📖</span><span><b>References list</b><i>All citation nodes, formatted</i></span></button>
-    <div class="ex-grp">Manage</div>
-    <button data-a="duplicate"><span class="ex-ic">⎘</span><span><b>Duplicate this map</b><i>Make an editable copy</i></span></button>
-    <button data-a="astemplate"><span class="ex-ic">⭐</span><span><b>Save as template</b><i>Reuse this structure for new maps</i></span></button>
-    <button data-a="json"  ><span class="ex-ic">{}</span><span><b>JSON file</b><i>Full backup, re-importable</i></span></button>
-    <div class="ex-grp">Import</div>
-    <button data-a="import"><span class="ex-ic">↑</span><span><b>Import file</b><i>${escapeHtml(rmsTr('importFileSub','JSON, OPML, Markdown, GitMind (.gmind), MindMeister (.mind)'))}</i></span></button>`;
+  const exGrp=(k,en)=>`<div class="ex-grp">${escapeHtml(rmsTr(k,en))}</div>`;
+  const exBtn=(a,ic,k,en,sen)=>`<button data-a="${a}"><span class="ex-ic">${ic}</span><span><b>${escapeHtml(rmsTr(k,en))}</b><i>${escapeHtml(rmsTr(k+'Sub',sen))}</i></span></button>`;
+  pop.innerHTML=[
+    exGrp('exGrpTools','Tools'),
+    exBtn('history','🕘','exHistory','Version history','Browse & restore past versions'),
+    exBtn('present','▶','exPresent','Presentation mode','Step through the map one topic at a time'),
+    exBtn('buildprompt','✨','exBuildPrompt','Compile subtree → prompt','Assemble the selected branch into a prompt'),
+    exGrp('exGrpExport','Export'),
+    exBtn('png','🖼','exPng','PNG image','Themed export, honors map style'),
+    exBtn('prompt','⚡','exPrompt','Export as prompt','Fill variables, then copy clean text'),
+    exBtn('mdrich','📝','exMd','Markdown','Formatting, tasks, tables, code'),
+    exBtn('copy','⎘','exCopy','Copy as text (clipboard)','Plain outline, no download'),
+    exBtn('word','📄','exWord','Word document (.doc)','Opens in Word, Google Docs, LibreOffice'),
+    exBtn('mermaid','🧜','exMermaid','Mermaid diagram','Renders in GitHub, Notion, Obsidian'),
+    exBtn('refs','📖','exRefs','References list','All citation nodes, formatted'),
+    exGrp('exGrpManage','Manage'),
+    exBtn('duplicate','⎘','exDuplicate','Duplicate this map','Make an editable copy'),
+    exBtn('astemplate','⭐','exAsTemplate','Save as template','Reuse this structure for new maps'),
+    exBtn('json','{}','exJson','JSON file','Full backup, re-importable'),
+    exGrp('exGrpImport','Import'),
+    `<button data-a="import"><span class="ex-ic">↑</span><span><b>${escapeHtml(rmsTr('exImport','Import file'))}</b><i>${escapeHtml(rmsTr('importFileSub','JSON, OPML, Markdown, GitMind (.gmind), MindMeister (.mind)'))}</i></span></button>`,
+  ].join('');
   document.body.appendChild(pop);
   positionPopup(pop, $('#menuExport'), {align:'right'});
   pop.addEventListener('mousedown',e=>e.stopPropagation());
