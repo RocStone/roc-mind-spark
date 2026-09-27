@@ -6652,6 +6652,8 @@ function startEdit(id){
   const textEl=el.querySelector('.node-text')||el;
   const prepared=pendingNodeTyping() && _editFloat.dataset.nodeId===id;
   const raw = map.nodes[id]?.text || '';
+  // ⇧Esc puts these back: the text as it was when editing began.
+  const orig = map.nodes[id] ? { text:map.nodes[id].text, image:map.nodes[id].image, imageAlt:map.nodes[id].imageAlt, updated:map.nodes[id].updated } : null;
   // Preserve any inline formatting (bold/italic/etc.) for the user to edit
   if(INLINE_HTML_RE.test(raw)) textEl.innerHTML = sanitizeInlineHTML(raw);
   else textEl.textContent = raw;
@@ -6775,8 +6777,22 @@ function startEdit(id){
     }
     if(e.key==='Escape'){
       if(!shouldCommitEditOnEscape(e)) return;
-      e.preventDefault();e.stopPropagation();finish(true);host.blur();
+      e.preventDefault();e.stopPropagation();
+      if(e.shiftKey) cancelEdit(); else finish(true);
+      host.blur();
     }
+  };
+  // ⇧Esc: leave the editor and restore the text from before this edit.
+  const cancelEdit=()=>{
+    const n=map.nodes[id];
+    const changed=!!(n && orig && (n.text!==orig.text || n.image!==orig.image));
+    if(n && orig){
+      n.text=orig.text;
+      for(const k of ['image','imageAlt','updated']){ if(orig[k]===undefined) delete n[k]; else n[k]=orig[k]; }
+    }
+    finish(false);
+    opLog('editCancel', {id});
+    if(changed){ syncAutoTitleFromRoot(id); pushHistory(); }
   };
   const onPointer=()=>{ clearEditReplaceAll(); };
   host.addEventListener('mousedown', onPointer);
