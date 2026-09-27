@@ -1319,6 +1319,10 @@
     cursor:pointer; font-size:12px;
   }
   .rms-clear:hover{color:var(--accent)}
+  .rms-clear:disabled{opacity:.35; cursor:default}
+  .rms-clear:disabled:hover{color:var(--ink-soft)}
+  .rms-sec-head{display:flex; align-items:center; justify-content:space-between; gap:10px}
+  .rms-sec-head .rms-clear{font-weight:400}
   .rms-empty{font-size:13px; color:var(--ink-soft)}
   .rms-ctx{
     position:fixed; z-index:7000; min-width:180px;
