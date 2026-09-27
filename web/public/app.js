@@ -5670,8 +5670,34 @@ function chordTitle(nameKey, chordId, fallback){
   const chord=(typeof window!=='undefined' && window.rmsChordLabel && chordId) ? window.rmsChordLabel(chordId) : '';
   return chord ? name+' ('+chord+')' : name;
 }
+// Bottom tips bar: keys come from the current (rebindable) chords.
+function hintBarHtml(){
+  const tpl=rmsTr('hintTpl', '<b>⌘+drag</b> box-select · <b>drag</b> move / nest / reorder · <b>{child}</b> child · <b>{sibling}</b> sibling · <b>↑↓←→</b> navigate · <b>{edit}</b>/dbl-click edit · <b>{link}</b> link · <b>{del}</b> remove · <b>{help}</b> all shortcuts');
+  const kb=(id, def)=>{
+    const label=(typeof window!=='undefined' && window.rmsChordLabel) ? window.rmsChordLabel(id) : '';
+    return escapeHtml(label || def);
+  };
+  let html=tpl
+    .replace('{child}', kb('addChild','Tab'))
+    .replace('{sibling}', kb('addSibling','Enter'))
+    .replace('{edit}', kb('editNode','F2'))
+    .replace('{link}', kb('link','L'))
+    .replace('{del}', kb('deleteNode','Del'))
+    .replace('{help}', kb('help','?').replace(/^⇧ \/$/, '?'));
+  const native=(typeof window!=='undefined' && window.__RMS_NATIVE__) || null;
+  if(native && native.toggleDisplay){
+    html+=rmsTr('hintToggle',' · <b>{toggle}</b> show / hide').replace('{toggle}', escapeHtml(native.toggleDisplay));
+  }
+  return html;
+}
+function renderHintBar(){
+  const box=document.getElementById('hintText');
+  if(box) box.innerHTML=hintBarHtml();
+}
+if(typeof window!=='undefined') window.rmsRenderHint=renderHintBar;
 function refreshLocaleChrome(){
   if(typeof window.rmsApplyI18n==='function') window.rmsApplyI18n();
+  renderHintBar();
   const save=$('#saveText');
   if(save) updateMapSaveStatus();
   if(typeof sel!=='undefined' && sel && typeof positionNodeBar==='function') positionNodeBar();
@@ -12396,7 +12422,19 @@ if(window.matchMedia('(max-width: 720px)').matches){
     }
   });
 }
-$('#hintClose').onclick=()=>$('#hint').style.display='none';
+const HINT_DISMISSED_KEY='rms:hintDismissed';
+(function initHintBar(){
+  const hint=$('#hint');
+  if(!hint) return;
+  let dismissed=false;
+  try{ dismissed=localStorage.getItem(HINT_DISMISSED_KEY)==='1'; }catch(_){}
+  if(dismissed){ hint.style.display='none'; return; }
+  renderHintBar();
+  $('#hintClose').onclick=()=>{
+    hint.style.display='none';
+    try{ localStorage.setItem(HINT_DISMISSED_KEY, '1'); }catch(_){}
+  };
+})();
 
 /* ---------- UI scale (whole-interface zoom, persisted) ---------- */
 // Auto scale by viewport size, continuous rather than stepped: interpolates

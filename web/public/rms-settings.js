@@ -146,6 +146,7 @@
     if(login) login.checked = !!(state && state.login);
     const tog = document.getElementById('rmsToggleChord');
     if(tog && !(listening && listening.kind==='toggle')) tog.textContent = (state && state.toggleDisplay) || 'Caps + Q';
+    if(typeof window.rmsRenderHint==='function') window.rmsRenderHint();
   };
 
   window.__rmsToggleListenDone = function(){
@@ -482,6 +483,7 @@
   }
 
   applyCanvas();
+  if(typeof window.rmsRenderHint==='function') window.rmsRenderHint();
   nativePost({ op:'setLanguage', lang: (window.rmsLang ? window.rmsLang() : 'en') });
   document.getElementById('settingsBtn')?.addEventListener('click', openSettings);
 })();

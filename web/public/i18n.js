@@ -47,7 +47,9 @@
       emptyCreate: '＋ Create a map',
       zoomFit: 'Fit all topics to screen (camera only)',
       minimap: 'Overview — click to jump',
-      hintHtml: '<b>⌘+drag</b> box-select · <b>drag</b> move / nest / reorder · <b>Tab</b> child · <b>Enter</b> sibling · <b>↑↓←→</b> navigate · <b>F2</b>/dbl-click edit · <b>L</b> link · <b>Del</b> remove · <b>?</b> all shortcuts',
+      hintTpl: '<b>⌘+drag</b> box-select · <b>drag</b> move / nest / reorder · <b>{child}</b> child · <b>{sibling}</b> sibling · <b>↑↓←→</b> navigate · <b>{edit}</b>/dbl-click edit · <b>{link}</b> link · <b>{del}</b> remove · <b>{help}</b> all shortcuts',
+      hintToggle: ' · <b>{toggle}</b> show / hide',
+      hintCloseAria: 'Dismiss tips',
       saved: 'Saved',
 
       settings: 'Settings',
@@ -335,7 +337,9 @@
       emptyCreate: '＋ 新建图',
       zoomFit: '缩放到全部可见',
       minimap: '总览 — 点击跳转',
-      hintHtml: '<b>⌘+拖拽</b> 框选 · <b>拖拽</b> 移动 / 嵌套 / 排序 · <b>Tab</b> 子节点 · <b>Enter</b> 同级 · <b>↑↓←→</b> 移动选中 · <b>F2</b>/双击 编辑 · <b>L</b> 连线 · <b>Del</b> 删除 · <b>?</b> 全部快捷键',
+      hintTpl: '<b>⌘+拖拽</b> 框选 · <b>拖拽</b> 移动 / 嵌套 / 排序 · <b>{child}</b> 子节点 · <b>{sibling}</b> 同级 · <b>↑↓←→</b> 移动选中 · <b>{edit}</b>/双击 编辑 · <b>{link}</b> 连线 · <b>{del}</b> 删除 · <b>{help}</b> 全部快捷键',
+      hintToggle: ' · <b>{toggle}</b> 显示 / 隐藏',
+      hintCloseAria: '关闭提示',
       saved: '已保存',
 
       settings: '设置',
