@@ -731,8 +731,9 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
         }
         if op == "setToggle" {
             if let chord = KeyChord.fromWeb(spec) {
-                ShortcutStore.shared.setChord(chord, for: .toggleOverlay)
-                pushNativeState()
+                commitToggleChord(chord)
+            } else {
+                notifyToggleListenDone(ok: false)
             }
             return
         }
@@ -783,13 +784,44 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
             return true
         }
         guard let chord else { return true }
-        if chord == .commandComma { return true }
-        if !chord.hasModifier { return true }
+        // A bare key: keep listening for a real chord.
+        if ShortcutStore.rejection(for: chord, id: .toggleOverlay) == .needsModifier { return true }
         toggleListenArmed = false
         stopToggleListenMonitors()
-        ShortcutStore.shared.setChord(chord, for: .toggleOverlay)
-        notifyToggleListenDone(ok: true)
+        commitToggleChord(chord)
         return true
+    }
+
+    /// Reports failure to the page (which then repaints the previous chord)
+    /// when the chord is reserved or Carbon refuses to register it.
+    private func commitToggleChord(_ chord: KeyChord) {
+        let store = ShortcutStore.shared
+        if !store.setChord(chord, for: .toggleOverlay) {
+            Paths.log("toggle chord \(chord.display) rejected as reserved")
+            // setChord posted nothing; rebind the chord listening unregistered.
+            NotificationCenter.default.post(name: .rmsShortcutsDidChange, object: nil)
+            showPageToast(String(format: L10n.t("hotkey.reserved"), chord.display))
+            notifyToggleListenDone(ok: false)
+            return
+        }
+        // The change notification rebinds synchronously; a failed Carbon
+        // registration has already restored the previous chord in the store.
+        if store.chord(for: .toggleOverlay) != chord {
+            showPageToast(String(format: L10n.t("hotkey.registerFailed"), chord.display))
+            notifyToggleListenDone(ok: false)
+            return
+        }
+        notifyToggleListenDone(ok: true)
+    }
+
+    private func showPageToast(_ message: String) {
+        webView?.evaluateJavaScript("typeof toast==='function'&&toast(\(Self.jsString(message)))")
+    }
+
+    private static func jsString(_ text: String) -> String {
+        guard let data = try? JSONSerialization.data(withJSONObject: [text]),
+              let encoded = String(data: data, encoding: .utf8), encoded.count >= 2 else { return "\"\"" }
+        return String(encoded.dropFirst().dropLast())
     }
 
     private func cancelToggleListen(rebind: Bool) {

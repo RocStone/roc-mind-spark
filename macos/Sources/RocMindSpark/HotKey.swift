@@ -8,6 +8,7 @@ final class HotKeyCenter: @unchecked Sendable {
 
     private var handlers: [UInt32: () -> Void] = [:]
     private var refs: [UInt32: EventHotKeyRef] = [:]
+    private var chords: [UInt32: KeyChord] = [:]
     private var handlerRef: EventHandlerRef?
     private let lock = NSLock()
 
@@ -31,11 +32,24 @@ final class HotKeyCenter: @unchecked Sendable {
         )
     }
 
-    func register(id: UInt32, chord: KeyChord, handler: @escaping () -> Void) {
+    /// Returns the Carbon status. On failure the chord that was registered
+    /// for `id` before this call (if any) is registered again, so a bad
+    /// chord never leaves the app without a working hotkey.
+    @discardableResult
+    func register(id: UInt32, chord: KeyChord, handler: @escaping () -> Void) -> OSStatus {
         lock.lock()
         defer { lock.unlock() }
+        let previous = chords[id].flatMap { chord in handlers[id].map { (chord, $0) } }
         unregisterLocked(id: id)
-        handlers[id] = handler
+        let status = registerLocked(id: id, chord: chord, handler: handler)
+        if status != noErr, let previous {
+            let restored = registerLocked(id: id, chord: previous.0, handler: previous.1)
+            Paths.log("RegisterEventHotKey restore previous id=\(id) status=\(restored) key=\(previous.0.display)")
+        }
+        return status
+    }
+
+    private func registerLocked(id: UInt32, chord: KeyChord, handler: @escaping () -> Void) -> OSStatus {
         var ref: EventHotKeyRef?
         let hotKeyID = EventHotKeyID(signature: 0x524D5350, id: id) // 'RMSP'
         let status = RegisterEventHotKey(
@@ -46,8 +60,12 @@ final class HotKeyCenter: @unchecked Sendable {
             0,
             &ref
         )
-        refs[id] = ref
         Paths.log("RegisterEventHotKey id=\(id) status=\(status) key=\(chord.display)")
+        guard status == noErr, let ref else { return status == noErr ? OSStatus(eventInternalErr) : status }
+        refs[id] = ref
+        handlers[id] = handler
+        chords[id] = chord
+        return noErr
     }
 
     func unregister(id: UInt32) {
@@ -62,6 +80,7 @@ final class HotKeyCenter: @unchecked Sendable {
             refs[id] = nil
         }
         handlers[id] = nil
+        chords[id] = nil
     }
 
     private func handle(_ event: EventRef) {

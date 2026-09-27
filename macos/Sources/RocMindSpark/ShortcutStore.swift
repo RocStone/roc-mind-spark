@@ -26,23 +26,49 @@ final class ShortcutStore {
     /// ⌥⇧⌘Q was a short-lived public default that never matched Caps-as-Hyper
     /// (all four modifiers). ⌘, is reserved for in-overlay settings and was
     /// bindable by accident, which then toggled the whole overlay.
+    /// Runs once per install (`shortcuts.migrated.v1`). Recording and
+    /// `setChord` reject the same chords, so they cannot come back later.
     private func migrateBrokenToggleIfNeeded() {
-        guard let toggle = chords[.toggleOverlay] else { return }
-        guard toggle == .optionShiftCommandQ || toggle == .commandComma else { return }
+        let flag = "shortcuts.migrated.v1"
+        guard !UserDefaults.standard.bool(forKey: flag) else { return }
+        UserDefaults.standard.set(true, forKey: flag)
+        guard let toggle = chords[.toggleOverlay],
+              Self.rejection(for: toggle, id: .toggleOverlay) != nil else { return }
         chords[.toggleOverlay] = .hyperQ
         persist()
+    }
+
+    enum Rejection: Equatable {
+        case needsModifier
+        /// ⌥⇧⌘Q is macOS "Log Out immediately"; ⌘, opens in-overlay settings.
+        case reserved
+    }
+
+    nonisolated static func rejection(for chord: KeyChord, id: ShortcutID) -> Rejection? {
+        if id.isGlobal && !chord.hasModifier { return .needsModifier }
+        if id.isGlobal && (chord == .optionShiftCommandQ || chord == .commandComma) { return .reserved }
+        return nil
     }
 
     func chord(for id: ShortcutID) -> KeyChord {
         chords[id] ?? id.defaultChord
     }
 
-    func setChord(_ chord: KeyChord, for id: ShortcutID) {
-        if id.isGlobal && !chord.hasModifier { return }
-        if id == .toggleOverlay && chord == .commandComma { return }
+    /// False when the chord is not allowed for `id`; nothing changes then.
+    @discardableResult
+    func setChord(_ chord: KeyChord, for id: ShortcutID) -> Bool {
+        if Self.rejection(for: chord, id: id) != nil { return false }
         chords[id] = chord
         persist()
         NotificationCenter.default.post(name: .rmsShortcutsDidChange, object: nil)
+        return true
+    }
+
+    /// Put back a chord that is known to work after registering a new one
+    /// failed. No change notification: the caller rebinds it itself.
+    func restoreChord(_ chord: KeyChord, for id: ShortcutID) {
+        chords[id] = chord
+        persist()
     }
 
     func resetDefaults() {
