@@ -9421,7 +9421,7 @@ function exportMenu(){
     <button data-a="astemplate"><span class="ex-ic">⭐</span><span><b>Save as template</b><i>Reuse this structure for new maps</i></span></button>
     <button data-a="json"  ><span class="ex-ic">{}</span><span><b>JSON file</b><i>Full backup, re-importable</i></span></button>
     <div class="ex-grp">Import</div>
-    <button data-a="import"><span class="ex-ic">↑</span><span><b>Import file</b><i>JSON, OPML, or Markdown outline</i></span></button>`;
+    <button data-a="import"><span class="ex-ic">↑</span><span><b>Import file</b><i>${escapeHtml(rmsTr('importFileSub','JSON, OPML, Markdown, GitMind (.gmind), MindMeister (.mind)'))}</i></span></button>`;
   document.body.appendChild(pop);
   positionPopup(pop, $('#menuExport'), {align:'right'});
   pop.addEventListener('mousedown',e=>e.stopPropagation());
