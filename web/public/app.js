@@ -3607,6 +3607,45 @@ function clearMultiSelect(){
   reparentMode = false;
   updateMultiSelUI();
 }
+// Nodes on screen: everything not hidden under a collapsed ancestor.
+function visibleNodeIds(nodes, rootId){
+  const out=[];
+  if(!nodes || !nodes[rootId]) return out;
+  const kids={};
+  for(const k in nodes){ const p=nodes[k] && nodes[k].parent; if(p!=null) (kids[p]||(kids[p]=[])).push(k); }
+  const walk=id=>{ out.push(id); if(!nodes[id].collapsed) (kids[id]||[]).forEach(walk); };
+  walk(rootId);
+  return out;
+}
+// ⌘A / ⌘⇧A on the canvas (no editor or text field focused).
+function canvasOwnsSelectAll(){
+  if(typeof map==='undefined' || !map || !map.nodes) return false;
+  if(typeof READONLY!=='undefined' && READONLY) return false;
+  if(typeof topModalEl==='function' && topModalEl()) return false;
+  const ae=typeof document!=='undefined' ? document.activeElement : null;
+  if(ae && (ae.tagName==='INPUT' || ae.tagName==='TEXTAREA' || (ae.isContentEditable && !(typeof pendingNodeTyping==='function' && pendingNodeTyping())))) return false;
+  if(ae && ae.closest && ae.closest('#mdPane')) return false;
+  return !document.querySelector('.node.editing');
+}
+function selectNodeSet(ids){
+  ids=(ids||[]).filter(id=>map.nodes[id]);
+  if(!ids.length) return false;
+  multiSel.clear();
+  reparentMode=false;
+  if(ids.length>=2) ids.forEach(id=>multiSel.add(id));
+  if(!sel || !ids.includes(sel)) select(ids[0], false);
+  updateMultiSelUI();
+  return true;
+}
+function selectAllNodesOnCanvas(){
+  if(!canvasOwnsSelectAll()) return false;
+  return selectNodeSet(visibleNodeIds(map.nodes, map.rootId));
+}
+function selectSiblingsOnCanvas(){
+  if(!canvasOwnsSelectAll() || !sel || !map.nodes[sel]) return false;
+  const parent=map.nodes[sel].parent;
+  return selectNodeSet(parent!=null && map.nodes[parent] ? childrenOf(parent) : [sel]);
+}
 function updateMultiSelUI(){
   if(multiSel.size>=2 && pendingNodeTyping()) discardEditOverlay();
   document.querySelectorAll('.node.multi-sel').forEach(n=>n.classList.remove('multi-sel'));
@@ -6183,7 +6222,14 @@ function onEditorClipboardKeydown(e){
   // event; WKWebView then has nowhere to write. The copy/cut listeners
   // write clipboardData, which does not need navigator.clipboard.
   if(act === 'selectAll'){
-    if(!textEl) return;
+    // A prepared-but-untouched WK typing host is not an open editor.
+    if(!textEl || (typeof pendingNodeTyping==='function' && pendingNodeTyping())){
+      if(typeof selectAllNodesOnCanvas==='function' && selectAllNodesOnCanvas()){
+        e.preventDefault();
+        e.stopPropagation();
+      }
+      return;
+    }
     e.preventDefault();
     e.stopPropagation();
     selectEditorContents(textEl);
@@ -6426,7 +6472,7 @@ function rmsClipboardSelectAll(){
     return true;
   }
   const textEl = openClipboardTarget();
-  if(!textEl) return false;
+  if(!textEl) return typeof selectAllNodesOnCanvas==='function' ? selectAllNodesOnCanvas() : false;
   selectEditorContents(textEl);
   return true;
 }
@@ -8002,6 +8048,10 @@ window.addEventListener('keydown',e=>{
     if(multiSel.size){ e.preventDefault(); clearMultiSelect(); return; }
   }
   if(!sel||!map) return;
+  if((e.metaKey||e.ctrlKey) && e.shiftKey && !e.altKey && (e.code==='KeyA' || (e.key||'').toLowerCase()==='a')){
+    if(selectSiblingsOnCanvas()) e.preventDefault();
+    return;
+  }
   if(rms('addChild', e, e.key==='Tab' && !e.metaKey && !e.ctrlKey && !e.altKey)){e.preventDefault();addNode(sel,false);}
   else if(rms('addSibling', e, e.key==='Enter' && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey)
        || rms('addSiblingMod', e, e.key==='Enter' && (e.metaKey||e.ctrlKey) && !e.shiftKey && !e.altKey)){
