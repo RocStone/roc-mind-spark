@@ -2028,11 +2028,19 @@ function mapHasCardOverlap(nodes, opts){
     if(hidden.has(id)) continue;
     if(nodes[id]) ids.push(id);
   }
-  for(let i=0;i<ids.length;i++){
-    for(let j=i+1;j<ids.length;j++){
-      const A=ids[i], B=ids[j];
+  // Sweep by x: once a later box starts past this one's right edge, no later
+  // box can overlap it either. The ancestor walk runs only on overlapping pairs.
+  const boxes=ids.map(id=>({id, b:nodeLayoutBox(nodes[id])}));
+  boxes.sort((p,q)=>(p.b.x||0)-(q.b.x||0));
+  for(let i=0;i<boxes.length;i++){
+    const a=boxes[i].b;
+    for(let j=i+1;j<boxes.length;j++){
+      const b=boxes[j].b;
+      if(b.x>=a.x+a.w) break;
+      if(!boxesOverlap(a, b, 0)) continue;
+      const A=boxes[i].id, B=boxes[j].id;
       if(nodeIsAncestor(nodes, A, B) || nodeIsAncestor(nodes, B, A)) continue;
-      if(boxesOverlap(nodeLayoutBox(nodes[A]), nodeLayoutBox(nodes[B]), 0)) return true;
+      return true;
     }
   }
   return false;
