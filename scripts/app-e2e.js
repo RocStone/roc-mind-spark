@@ -246,6 +246,18 @@ await sleep(80);
 const focusChild=sel;
 check(Object.keys(map.nodes).length===nodeCountBefore+1 && map.nodes[focusChild]?.parent==='a' && !!document.querySelector('.node[data-id="'+focusChild+'"]'),'adding a child inside the focused branch works and stays visible');
 commitOpenEdit();
+// Find inside branch focus: hits are limited to the branch; a hit only
+// outside it shows "0 · N outside focus", and Enter leaves branch focus
+// (immersive mode stays) and lands on it.
+openSearch(false);
+const searchBox=document.querySelector('#search');
+const outsideQuery=String(map.nodes.b.text||'').trim();
+searchBox.value=outsideQuery; searchBox.dispatchEvent(new Event('input',{bubbles:true}));
+check(searchMatches.length===0 && searchOutsideMatches.includes('b') && /^0 · \d+/.test(document.querySelector('#searchCount').textContent),'find in branch focus counts only the branch and reports hits outside it');
+searchBox.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));
+await sleep(80);
+check(_focusRootId===null && document.body.classList.contains('focus-mode') && sel==='b' && !!document.querySelector('.node[data-id="b"]'),'Enter on an outside-focus hit leaves branch focus, keeps immersive mode and selects the hit');
+closeSearch();
 window.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));
 check(!document.body.classList.contains('focus-mode') && _focusRootId===null && !!document.querySelector('.node[data-id="b"]'),'Esc leaves focus mode and every branch returns');
 check(!Object.values(map.nodes).some(n=>n.collapsed) && !('focusRootId' in map),'branch focus writes no collapsed flag or saved state');

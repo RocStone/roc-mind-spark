@@ -85,7 +85,7 @@ describe('buildMapFromSpec — builds a valid map', () => {
     assert.equal(Object.keys(m.nodes).length, 2);
     assert.equal(m.nodes.r.parent, null, 'root must have a null parent');
     assert.equal(m.nodes.r.side, 'root');
-    assert.equal(m.nodes.a.side, null, 'the canvas assigns sides when it lays the map out');
+    assert.equal(m.nodes.a.side, 'right', 'root children are pre-balanced (the only one goes right)');
     assert.equal(m.titleAuto, false);
     assert.equal(m._import, true);
     assert.equal(typeof m.updated, 'number');
@@ -145,6 +145,115 @@ describe('buildMapFromSpec — builds a valid map', () => {
     });
     assert.equal(m.nodes.r.citation.doi, 'arXiv:2401.00001');
     assert.equal(m.nodes.r.citation.source, 'arXiv');
+  });
+});
+
+describe('buildMapFromSpec — formatting, sides, layoutConfig', () => {
+  test('balances root children — first half right, second half left', () => {
+    const nodes = [{ id: 'r', text: 'r', parent: null }];
+    for (let i = 0; i < 5; i++) nodes.push({ id: 'c' + i, text: 'c', parent: 'r' });
+    const m = buildMapFromSpec({ rootId: 'r', nodes });
+    const sides = ['c0', 'c1', 'c2', 'c3', 'c4'].map(id => m.nodes[id].side);
+    assert.deepEqual(sides, ['right', 'right', 'right', 'left', 'left']);
+  });
+
+  test('carries through optional formatting without inventing values', () => {
+    const m = buildMapFromSpec({
+      rootId: 'r',
+      nodes: [
+        { id: 'r', text: 'r', parent: null },
+        { id: 'a', text: 'a', parent: 'r', bold: true, italic: true, highlight: true, task: 'done', listType: 'ul', align: 'right' },
+        { id: 'b', text: 'b', parent: 'r' },
+        { id: 'c', text: 'c', parent: 'r', listType: 'ol', task: 'doing' },
+      ],
+    });
+    assert.equal(m.nodes.a.bold, true);
+    assert.equal(m.nodes.a.italic, true);
+    assert.equal(m.nodes.a.highlight, true);
+    assert.equal(m.nodes.a.task, 'done');
+    assert.equal(m.nodes.a.listType, 'ul');
+    assert.equal(m.nodes.a.align, 'right', 'an explicit align wins over the list default');
+    assert.equal(m.nodes.c.align, 'left', 'a list defaults to left alignment');
+    assert.equal(m.nodes.c.task, 'doing');
+    for (const k of ['bold', 'italic', 'highlight', 'task', 'listType', 'align', 'marker']) {
+      assert.equal(m.nodes.b[k], undefined, `${k} must not be set on a node that did not ask for it`);
+    }
+  });
+
+  test('ignores invalid formatting values rather than storing them', () => {
+    const m = buildMapFromSpec({
+      rootId: 'r',
+      nodes: [{ id: 'r', text: 'r', parent: null },
+              { id: 'a', text: 'a', parent: 'r', task: 'bogus', bold: 'yes', listType: 'dl', align: 'justify' }],
+    });
+    assert.equal(m.nodes.a.task, undefined);
+    assert.equal(m.nodes.a.bold, undefined);
+    assert.equal(m.nodes.a.listType, undefined);
+    assert.equal(m.nodes.a.align, undefined);
+  });
+
+  test('keeps a citation source (venue) and does not overwrite it for arXiv', () => {
+    const m = buildMapFromSpec({
+      nodes: [{ id: 'r', text: 'r', parent: null, citation: { source: 'NeurIPS', arxiv: '2401.00001' } }],
+    });
+    assert.equal(m.nodes.r.citation.source, 'NeurIPS');
+    assert.equal(m.nodes.r.citation.doi, 'arXiv:2401.00001');
+  });
+
+  test('layoutConfig: supplied knobs are clamped, rounded and kept; junk is dropped', () => {
+    const m = buildMapFromSpec(spec({
+      layoutConfig: {
+        timeline: { gap: 9999, stem: -5, indent: 12.6, alternate: false, start: 'below', extra: 1 },
+        balanced: { hGap: '90', vGap: 30 },
+        radial: { ring: NaN },
+        bogus: { gap: 10 },
+      },
+    }));
+    assert.deepEqual(m.layoutConfig, {
+      timeline: { gap: 400, stem: 0, indent: 13, alternate: false, start: 'below' },
+      balanced: { vGap: 30 },
+    });
+  });
+
+  test('layoutConfig is omitted when missing, not an object, or yields nothing', () => {
+    assert.equal(buildMapFromSpec(spec()).layoutConfig, undefined);
+    assert.equal(buildMapFromSpec(spec({ layoutConfig: [1, 2] })).layoutConfig, undefined);
+    assert.equal(buildMapFromSpec(spec({ layoutConfig: { timeline: { start: 'sideways' } } })).layoutConfig, undefined);
+  });
+});
+
+describe('buildMapFromSpec — markers', () => {
+  const mspec = markerValue => ({
+    nodes: [
+      { id: 'r', text: 'Root', parent: null },
+      { id: 'a', text: 'Child', parent: 'r', marker: markerValue },
+    ],
+  });
+
+  test('a valid marker survives import', () => {
+    assert.equal(buildMapFromSpec(mspec('⭐')).nodes.a.marker, '⭐');
+  });
+
+  test('an astral-plane emoji survives (two UTF-16 units, one character)', () => {
+    assert.equal(buildMapFromSpec(mspec('\u{1F6A9}')).nodes.a.marker, '\u{1F6A9}');
+  });
+
+  test('surrounding whitespace is trimmed', () => {
+    assert.equal(buildMapFromSpec(mspec('  ⭐  ')).nodes.a.marker, '⭐');
+  });
+
+  test('a long string is rejected rather than becoming a second text field', () => {
+    assert.equal(buildMapFromSpec(mspec('not a marker at all')).nodes.a.marker, undefined);
+  });
+
+  test('an empty or whitespace-only marker is dropped', () => {
+    assert.equal(buildMapFromSpec(mspec('')).nodes.a.marker, undefined);
+    assert.equal(buildMapFromSpec(mspec('   ')).nodes.a.marker, undefined);
+  });
+
+  test('a non-string marker is ignored rather than coerced', () => {
+    assert.equal(buildMapFromSpec(mspec(42)).nodes.a.marker, undefined);
+    assert.equal(buildMapFromSpec(mspec({ c: '⭐' })).nodes.a.marker, undefined);
   });
 });
 
