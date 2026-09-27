@@ -78,6 +78,24 @@ describe('searchAllMaps — cache, concurrency, stale abort', () => {
   });
 });
 
+describe('nodeSearchText — per-node plain-text cache', () => {
+  test('strips HTML once per text version', () => {
+    let strips = 0;
+    const { nodeSearchText } = loadFns(['nodeSearchText'], {
+      hasInlineMarkup: t => /</.test(t),
+      nodeTextPlain: t => { strips++; return t.replace(/<[^>]*>/g, ''); },
+      _searchTextCache: new WeakMap(),
+    });
+    const n = { text: '<b>alpha</b>' };
+    assert.equal(nodeSearchText(n), 'alpha');
+    assert.equal(nodeSearchText(n), 'alpha');
+    assert.equal(strips, 1);
+    n.text = '<i>beta</i>';
+    assert.equal(nodeSearchText(n), 'beta');
+    assert.equal(strips, 2);
+  });
+});
+
 describe('splitPipeRow — escaped pipes', () => {
   const fns = loadFns([
     'splitPipeRow', 'isGfmSepLine', 'normalizeTableGrid', 'parseGfmAligns',

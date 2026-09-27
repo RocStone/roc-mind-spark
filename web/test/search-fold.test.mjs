@@ -43,6 +43,7 @@ function makeMap() {
       childrenOf,
       hasInlineMarkup: () => false,
       nodeTextPlain: t => t,
+      _searchTextCache: new WeakMap(),
     }
   );
   return { map, childrenOf, ...fns };

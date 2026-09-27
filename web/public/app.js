@@ -7928,11 +7928,18 @@ let searchMatches=[], searchPos=-1;
 let searchReveal=null;
 let searchAutoExpanded=new Set();
 
+// node -> {raw, plain}. The raw text is the validity key: an edited node
+// misses and is re-stripped; untouched nodes skip the HTML parse per keystroke.
+const _searchTextCache=new WeakMap();
 function nodeSearchText(n){
   if(!n) return '';
   const raw = n.text || '';
   if(typeof hasInlineMarkup==='function' && hasInlineMarkup(raw) && typeof nodeTextPlain==='function'){
-    return nodeTextPlain(raw);
+    const hit=_searchTextCache.get(n);
+    if(hit && hit.raw===raw) return hit.plain;
+    const plain=nodeTextPlain(raw);
+    _searchTextCache.set(n, {raw, plain});
+    return plain;
   }
   return raw;
 }
@@ -8062,7 +8069,12 @@ $('#searchBtn').onclick=()=>{
   if(w.classList.contains('open')) closeSearch(); else openSearch(false);
 };
 $('#replaceToggle').onclick=()=>{ $('#searchWrap').classList.toggle('replace-mode'); $('#replace').focus(); };
-$('#search').addEventListener('input',e=>{ if(globalSearchMode) runGlobalSearch(e.target.value); else doSearch(e.target.value); });
+$('#search').addEventListener('input',e=>{
+  if(globalSearchMode){ runGlobalSearch(e.target.value); return; }
+  // Debounce: a fast typist should not rescan the whole map per keystroke.
+  clearTimeout(_searchInputT);
+  _searchInputT=setTimeout(()=>{ _searchInputT=0; doSearch(); }, 80);
+});
 $('#search').addEventListener('keydown',e=>{
   if(e.key==='Escape'){ e.preventDefault(); closeSearch(); }
   if(e.key==='Enter'){ e.preventDefault(); focusNextMatch(); }
@@ -8140,7 +8152,9 @@ function keepSearchFocus(){
   if(!input || !wrap || !wrap.classList.contains('open')) return;
   if(document.activeElement!==input) input.focus({preventScroll:true});
 }
+let _searchInputT=0;   // pending debounced doSearch from typing
 function doSearch(q){
+  if(_searchInputT){ clearTimeout(_searchInputT); _searchInputT=0; }
   const raw=q==null ? ($('#search')?.value||'') : q;
   searchMatches=collectSearchMatches(raw);
   searchPos=-1;
@@ -8150,6 +8164,7 @@ function doSearch(q){
   if(cnt) cnt.textContent = needle ? (searchMatches.length ? rmsTr('searchFound','%s found').replace('%s', searchMatches.length) : rmsTr('searchNone','none')) : '';
 }
 function focusNextMatch(){
+  if(_searchInputT) doSearch();   // Enter right after typing: use the current query
   if(!searchMatches.length){ keepSearchFocus(); return; }
   if(typeof flushOpenEditToModel==='function') flushOpenEditToModel();
   const nextPos=(searchPos+1)%searchMatches.length;
@@ -8944,8 +8959,14 @@ $('#mapTitle').addEventListener('input',e=>{
   if(!map || READONLY) return;
   map.title=e.target.value;
   map.titleAuto=false;          // user took control — stop mirroring the root text
-  scheduleSave(); refreshList();
+  scheduleSave();
+  // Per keystroke only retitle the active sidebar row; the full list rebuild
+  // (Store.list + re-sort) waits for change/blur below.
+  const nm=document.querySelector('#mapList .map-item.active .nm');
+  if(nm) nm.textContent=map.title||rmsTr('untitled','Untitled');
+  else refreshList();
 });
+$('#mapTitle').addEventListener('change',()=>{ if(map && !READONLY) refreshList(); });
 
 /* ---------- autosave ---------- */
 const _mapSaveStates=new Map(), _saveErrorNotified=new Set();
