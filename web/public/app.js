@@ -546,6 +546,7 @@ function render(){
     }
     // Reference/citation nodes get a distinct class
     if(n.ref) el.classList.add('ref-node');
+    if(isFocusAncestor(id)) el.classList.add('focus-ancestor');
     if(n.url) el.classList.add('href-node');
     // Attached image renders as a thumbnail above the text (node goes column)
     if(n.image || n.imagePending){
@@ -1683,16 +1684,55 @@ function computeRollups(){
   }
   return {desc,tdone,ttot};
 }
+// Focus root for branch focus (see toggleFocusMode). Session-only view state:
+// never saved, never written into node flags.
+let _focusRootId=null;
+function isFocusAncestor(id){
+  if(!_focusRootId || !map || !map.nodes[_focusRootId] || id===_focusRootId) return false;
+  for(let p=map.nodes[_focusRootId].parent, guard=0; p && guard<100000; p=map.nodes[p]?.parent, guard++){
+    if(p===id) return true;
+  }
+  return false;
+}
+// Branch focus: while focus mode has a focus root, only that node's subtree
+// and its ancestor chain are shown. Returns null when there is nothing to
+// narrow (no focus id, the id is the root, or the node is gone). Pure — reads
+// the tree, never writes `collapsed` or anything else that gets saved.
+function focusBranchSets(focusId, rootId, nodes, idx){
+  if(!focusId || focusId===rootId || !nodes[focusId]) return null;
+  const ancestors=new Set();
+  for(let p=nodes[focusId].parent, guard=0; p && nodes[p] && guard<100000; p=nodes[p].parent, guard++){
+    if(ancestors.has(p)) break;
+    ancestors.add(p);
+  }
+  if(!ancestors.has(rootId)) return null;   // detached node — don't blank the map
+  const branch=new Set();
+  const stack=[focusId];
+  while(stack.length){
+    const id=stack.pop(); if(branch.has(id)) continue;
+    branch.add(id);
+    const kids=idx[id]; if(kids) for(const c of kids) stack.push(c);
+  }
+  return { ancestors, branch };
+}
 function hiddenSet(){
   const h=new Set();
   // Use the active index if we're inside a render/layout scope; otherwise build
   // one locally so this is always O(n), never O(n²) (it's also called by
   // fit/recenter/exportPNG/minimap, which run outside the render scope).
   const idx=_ci || buildChildIndex();
+  // Branch focus hides every node off the focus path. Ancestors on that path
+  // stay visible even if the user folded one of them, otherwise the focused
+  // branch itself would vanish.
+  const fb=(typeof _focusRootId!=='undefined') ? focusBranchSets(_focusRootId, map.rootId, map.nodes, idx) : null;
   const walk=(id, hide)=>{
-    const newHide = hide || !!map.nodes[id]?.collapsed;
+    const newHide = hide || (!!map.nodes[id]?.collapsed && !(fb && fb.ancestors.has(id)));
     const kids=idx[id]; if(!kids) return;
-    for(const c of kids){ if(newHide) h.add(c); walk(c, newHide); }
+    for(const c of kids){
+      const off = !!fb && !fb.ancestors.has(c) && !fb.branch.has(c);
+      if(newHide || off) h.add(c);
+      walk(c, newHide || off);
+    }
   };
   walk(map.rootId,false);
   return h;
@@ -3499,6 +3539,7 @@ function insertChildNode(parent, extra){
 function addNode(parentId,asSibling){
   if(READONLY) return;
   if(!map.nodes[parentId]) parentId=map.rootId;
+  if(!focusAllowsAdd(parentId, asSibling)){ toast(rmsTr('focusAddOutside','Outside the focused branch — exit focus to add here')); return; }
   let parent=parentId;
   if(asSibling){ const p=map.nodes[parentId]; parent=p.parent||map.rootId; if(parentId===map.rootId) parent=map.rootId; }
   const id=insertChildNode(parent);
@@ -13173,10 +13214,39 @@ try{ applyLook(localStorage.getItem('mindspark:look') || 'office'); }catch(e){}
 
 applyView();
 
-// ===== Focus mode — hide all chrome, show only the canvas =====
+// ===== Focus mode — hide all chrome; with a topic selected, also narrow the
+// canvas to that topic's branch =====
+// Entering with a non-root topic selected sets _focusRootId: hiddenSet() then
+// hides every node off the focus path, ancestors render dimmed
+// (.focus-ancestor), and the view fits the visible set. Entering with nothing
+// or the root selected just hides chrome (immersive). Nothing here touches
+// node `collapsed` flags or gets saved. Esc / the exit button leave focus mode
+// entirely.
+function isInFocusBranch(id){
+  if(!_focusRootId || !map || !map.nodes[_focusRootId]) return true;
+  for(let p=id, guard=0; p && guard<100000; p=map.nodes[p]?.parent, guard++){
+    if(p===_focusRootId) return true;
+  }
+  return false;
+}
+// Where would a new node land? A child goes under `nodeId`, a sibling under its
+// parent (the root's "sibling" is a root child). Only allow it when that parent
+// is inside the focused branch, so a new topic never appears hidden.
+function focusAllowsAdd(nodeId, asSibling){
+  if(!_focusRootId || !map || !map.nodes[_focusRootId]) return true;
+  let parent=nodeId;
+  if(asSibling) parent = nodeId===map.rootId ? map.rootId : (map.nodes[nodeId]?.parent || map.rootId);
+  return isInFocusBranch(parent);
+}
+function focusModeFocusTarget(){
+  if(!map || !sel || sel===map.rootId || !map.nodes[sel]) return null;
+  return sel;
+}
 function toggleFocusMode(){
   const on = !document.body.classList.contains('focus-mode');
   document.body.classList.toggle('focus-mode', on);
+  _focusRootId = on ? focusModeFocusTarget() : null;
+  document.body.classList.toggle('focus-branch', !!_focusRootId);
   let exit = $('#focusExit');
   if(on){
     if(!exit){
@@ -13187,14 +13257,21 @@ function toggleFocusMode(){
       exit.onclick = toggleFocusMode;
       document.body.appendChild(exit);
     }
-    toast(rmsTr('focusToast','Focus mode — Esc to exit'));
+    toast(_focusRootId
+      ? rmsTr('focusBranchToast','Focusing on this branch — Esc to exit')
+      : rmsTr('focusToast','Focus mode — Esc to exit'));
   } else {
     exit?.remove();
   }
+  if(map){
+    if(_focusRootId && typeof multiSel!=='undefined' && multiSel.size && typeof clearMultiSelect==='function') clearMultiSelect();
+    render();
+  }
   // The viewport size changes when chrome is shown/hidden — wait for the layout
-  // to settle, then smoothly animate the map back to centred (keeping zoom) so it
-  // doesn't just jump sideways.
-  requestAnimationFrame(()=>requestAnimationFrame(()=>animateViewTo(computeRecenterView(), 220)));
+  // to settle, then smoothly animate. Branch focus fits the visible branch;
+  // otherwise re-centre (keeping zoom) so the map doesn't jump sideways.
+  const branch=!!_focusRootId;
+  requestAnimationFrame(()=>requestAnimationFrame(()=>animateViewTo(branch ? computeFitView() : computeRecenterView(), 220)));
 }
 $('#focusBtn')?.addEventListener('click', toggleFocusMode);
 

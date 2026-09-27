@@ -231,5 +231,24 @@ releaseVersion(); await preview;
 Store.version=realVersion;
 check(map.id==='eval-b' && !_historyPreview,'late history response cannot replace the active map');
 
+// Branch focus: only the selected branch plus its dimmed ancestor chain.
+select('a',false);
+const nodeCountBefore=Object.keys(map.nodes).length;
+toggleFocusMode();
+check(document.body.classList.contains('focus-mode') && _focusRootId==='a','focus mode with a selected topic focuses its branch');
+check(!document.querySelector('.node[data-id="b"]') && !!document.querySelector('.node[data-id="a"]'),'branch focus hides other branches');
+check(document.querySelector('.node[data-id="root"]')?.classList.contains('focus-ancestor'),'ancestor chain stays visible and dimmed');
+window.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));
+check(Object.keys(map.nodes).length===nodeCountBefore,'adding a sibling outside the focused branch is refused');
+select('a',false);
+window.dispatchEvent(new KeyboardEvent('keydown',{key:'Tab',bubbles:true,cancelable:true}));
+await sleep(80);
+const focusChild=sel;
+check(Object.keys(map.nodes).length===nodeCountBefore+1 && map.nodes[focusChild]?.parent==='a' && !!document.querySelector('.node[data-id="'+focusChild+'"]'),'adding a child inside the focused branch works and stays visible');
+commitOpenEdit();
+window.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));
+check(!document.body.classList.contains('focus-mode') && _focusRootId===null && !!document.querySelector('.node[data-id="b"]'),'Esc leaves focus mode and every branch returns');
+check(!Object.values(map.nodes).some(n=>n.collapsed) && !('focusRootId' in map),'branch focus writes no collapsed flag or saved state');
+
 await window.rmsFlushPendingEdits();
 return JSON.stringify({environment:'WKWebView + production app + isolated Node/SQLite',passed:results.length,checks:results},null,2);
