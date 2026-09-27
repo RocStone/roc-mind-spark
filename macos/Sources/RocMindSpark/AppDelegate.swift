@@ -79,8 +79,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 alert.messageText = L10n.t("error.saveQuit")
                 alert.informativeText = error.localizedDescription
                 alert.alertStyle = .warning
+                alert.addButton(withTitle: L10n.t("quit.keepOpen"))
+                alert.addButton(withTitle: L10n.t("quit.anyway"))
                 alert.window.level = NSWindow.Level(rawValue: OverlayPanel.coverLevel.rawValue + 2)
-                alert.runModal()
+                if alert.runModal() == .alertSecondButtonReturn {
+                    Paths.log("quit: user chose to quit without saving")
+                    self.readyToTerminate = true
+                    sender.terminate(nil)
+                }
             }
         }
         // terminateLater enters AppKit's nested wait while a signal handler is
