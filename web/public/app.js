@@ -1291,8 +1291,21 @@ function isTableNode(n){
   if(n.table) return true;
   return !!(n.html && /<table[\s>]/i.test(n.html));
 }
+// Split a GFM row on UNESCAPED pipes. htmlTableToMarkdown writes a literal
+// pipe inside a cell as \|, so honour that here and unescape it in the cell.
 function splitPipeRow(line){
-  return String(line||'').replace(/^\s*\|/, '').replace(/\|\s*$/, '').split('|').map(c => c.trim());
+  let s=String(line||'').replace(/^\s*\|/, '').replace(/\s+$/, '');
+  if(s.endsWith('|') && !s.endsWith('\\|')) s=s.slice(0, -1);
+  const cells=[];
+  let cur='';
+  for(let i=0;i<s.length;i++){
+    const ch=s[i];
+    if(ch==='\\' && s[i+1]==='|'){ cur+='|'; i++; continue; }
+    if(ch==='|'){ cells.push(cur.trim()); cur=''; continue; }
+    cur+=ch;
+  }
+  cells.push(cur.trim());
+  return cells;
 }
 function isGfmSepLine(line){
   if(!line || line.indexOf('-')<0) return false;
