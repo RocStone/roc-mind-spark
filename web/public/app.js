@@ -660,7 +660,9 @@ function render(){
     const decos=[]; if(n.underline) decos.push('underline'); if(n.strike) decos.push('line-through');
     if(decos.length) t.style.textDecoration=decos.join(' ');
     if(n.textColor) t.style.color=n.textColor;
-    if(n.highlight){ t.style.background=n.highlight; t.style.padding='0 4px'; t.style.borderRadius='3px'; t.style.boxDecorationBreak='clone'; t.style.webkitBoxDecorationBreak='clone'; }
+    // Highlights are light pastels: on a dark theme the default ink would be
+    // light-on-light, so highlighted text falls back to dark ink.
+    if(n.highlight){ t.style.color=n.textColor || '#23201b'; t.style.background=n.highlight; t.style.padding='0 4px'; t.style.borderRadius='3px'; t.style.boxDecorationBreak='clone'; t.style.webkitBoxDecorationBreak='clone'; }
     // Text alignment
     if(n.align && n.align!=='center'){
       t.style.textAlign=n.align;
@@ -3753,7 +3755,7 @@ function showBulkSizePicker(anchorBtn){
 function showBulkColorPicker(anchorBtn, kind){
   document.querySelectorAll('.picker').forEach(p=>p.remove());
   let colors, prop, allowNone=false;
-  if(kind==='text'){ colors = TEXT_COLORS; prop='textColor'; }
+  if(kind==='text'){ colors = textColorSwatches(); prop='textColor'; }
   else if(kind==='highlight'){ colors = HILITES; prop='highlight'; allowNone=true; }
   else { colors = ['#fff','#ffd9c2','#ffe9a8','#d6f0c8','#c5e8e4','#cfe0f5','#e6d4f2','#f5d0dd','#e0e0e0']; prop='color'; }
   const pk = document.createElement('div');
@@ -6902,6 +6904,20 @@ function startEdit(id){
 const FONT_SIZES = [12,14,15,16,18,20,24,28,32];
 const TEXT_COLORS = ['#23201b','#5b5447','#b8451f','#c98a1a','#5a7d3a','#2f6f6a','#3a6ea5','#9b4f96'];
 const HILITES = ['#fff59d','#ffcdd2','#c8e6c9','#b3e5fc','#e1bee7','#ffe0b2'];
+function themeCssColor(name){
+  try{ return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }catch(_){ return ''; }
+}
+// Dark theme = the node card background is dark (#23201b ink would vanish on it).
+function isDarkNodeTheme(){
+  const bg=themeCssColor('--node-bg');
+  return /^#[0-9a-f]{6}$/i.test(bg) && pickContrast(bg)==='#ffffff';
+}
+// On dark themes the first ("ink") swatch is the theme's own node ink.
+function textColorSwatches(){
+  if(!isDarkNodeTheme()) return TEXT_COLORS;
+  const ink=safeColor(themeCssColor('--node-ink'));
+  return ink ? [ink].concat(TEXT_COLORS.slice(1)) : TEXT_COLORS;
+}
 let activePicker = null;
 
 function showPicker(anchor, kind, current, onPick){
@@ -6926,7 +6942,7 @@ function showPicker(anchor, kind, current, onPick){
     p.innerHTML=opts.map(o=>
       `<button data-v="${o.v}" class="${o.v===current?'on':''}" title="${o.t}"><span class="align-icon align-${o.v}">${o.ic}</span></button>`).join('');
   }else{
-    const list = kind==='text' ? TEXT_COLORS : HILITES;
+    const list = kind==='text' ? textColorSwatches() : HILITES;
     const label = kind==='text' ? rmsTr('actDefault','Default') : rmsTr('actNone','None');
     p.innerHTML =
       `<button class="p-default" data-v="">${label}</button>`+
@@ -7048,8 +7064,9 @@ function positionNodeBar(){
   const isRoot=sel===map.rootId;
   const hasKids=childrenOf(sel).length>0;
   const fs = n.fontSize || (isRoot?19:15);
-  const tc = safeColor(n.textColor) || (isRoot?'#ffffff':'#23201b');
+  const tc = safeColor(n.textColor) || (isRoot?'#ffffff':'var(--node-ink)');
   const hl = safeColor(n.highlight) || 'transparent';
+  const hlInk = hl==='transparent' ? 'inherit' : (safeColor(n.textColor) || '#23201b');
 
   const bar=document.createElement('div'); bar.className='nodebar'; bar.id='nodebar';
   bar.innerHTML=`
@@ -7078,7 +7095,7 @@ function positionNodeBar(){
       <button data-a="ol" class="${n.listType==='ol'?'on':''}" title="${rmsTr('actOl','Numbered list')}">1≡</button>
       <button data-a="align" class="fmt-btn align-btn" title="${rmsTr('actAlign','Text alignment')}"><span class="align-icon align-${n.align||'center'}">≡</span><span class="caret">▾</span></button>
       <button data-a="textColor" class="fmt-btn color-btn" title="${rmsTr('actTextColor','Text color')}"><span class="A-mark" style="border-bottom:3px solid ${tc}">A</span><span class="caret">▾</span></button>
-      <button data-a="highlight" class="fmt-btn color-btn" title="${rmsTr('actHighlight','Highlight')}"><span class="A-mark" style="background:${hl};padding:0 2px;border-radius:2px">A</span><span class="caret">▾</span></button>
+      <button data-a="highlight" class="fmt-btn color-btn" title="${rmsTr('actHighlight','Highlight')}"><span class="A-mark" style="background:${hl};color:${hlInk};padding:0 2px;border-radius:2px">A</span><span class="caret">▾</span></button>
     </div>
     <div class="nb-div"></div>
     <span class="swatches" title="${rmsTr('actCardColor','Card color')}">${(isRoot?PALETTE:NODE_COLORS).map(c=>`<span class="sw" data-c="${c}" style="background:${c};${c==='#ffffff'?'border-color:var(--line)':''}"></span>`).join('')}</span>`;
