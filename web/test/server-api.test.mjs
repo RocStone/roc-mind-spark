@@ -45,3 +45,50 @@ describe('request body decoding', () => {
     assert.equal(res.status, 400);
   });
 });
+
+describe('CSRF guards on writes', () => {
+  const body = () => [JSON.stringify(sampleMap('csrf'))];
+
+  test('a write with a foreign Origin is refused', async () => {
+    const res = await rawRequest(srv.port, { method: 'PUT', path: '/api/maps/csrf', headers: { ...JSON_HEADERS, Origin: 'https://evil.example' }, chunks: body() });
+    assert.equal(res.status, 403);
+    assert.equal((await rawRequest(srv.port, { path: '/api/maps/csrf' })).status, 404);
+  });
+
+  test('Origin "null" (file:// or sandboxed frame) is refused, DELETE included', async () => {
+    const res = await rawRequest(srv.port, { method: 'DELETE', path: '/api/maps/csrf', headers: { Origin: 'null' } });
+    assert.equal(res.status, 403);
+  });
+
+  test('the allowed origin and an Origin-less native request are accepted', async () => {
+    const a = await rawRequest(srv.port, { method: 'PUT', path: '/api/maps/csrf', headers: { ...JSON_HEADERS, Origin: srv.origin }, chunks: body() });
+    assert.equal(a.status, 200);
+    const b = await rawRequest(srv.port, { method: 'PUT', path: '/api/maps/csrf', headers: { 'Content-Type': 'application/json; charset=utf-8' }, chunks: body() });
+    assert.equal(b.status, 200);
+  });
+
+  test('GET with a foreign Origin still reads (no CORS headers are granted)', async () => {
+    const res = await rawRequest(srv.port, { path: '/api/maps', headers: { Origin: 'https://evil.example' } });
+    assert.equal(res.status, 200);
+    assert.equal(res.headers['access-control-allow-origin'], undefined);
+  });
+
+  for (const [method, path] of [
+    ['PUT', '/api/maps/ct'],
+    ['POST', '/api/maps'],
+    ['POST', '/api/import'],
+    ['POST', '/api/ops-log'],
+    ['POST', '/api/maps/ct/images/duplicate'],
+  ]) {
+    test(`${method} ${path} rejects a text/plain body with 415`, async () => {
+      const res = await rawRequest(srv.port, { method, path, headers: { 'Content-Type': 'text/plain' }, chunks: [JSON.stringify(sampleMap('ct'))] });
+      assert.equal(res.status, 415);
+    });
+  }
+
+  test('image upload keeps accepting a binary Content-Type', async () => {
+    const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64');
+    const res = await rawRequest(srv.port, { method: 'POST', path: '/api/maps/csrf/images', headers: { 'Content-Type': 'image/png' }, chunks: [png] });
+    assert.equal(res.status, 201);
+  });
+});

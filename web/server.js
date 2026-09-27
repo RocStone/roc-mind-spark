@@ -177,7 +177,12 @@ const readRaw = (req, limit) => new Promise((resolve, reject) => {
   req.on('end', () => { if (!done) { done = true; resolve(Buffer.concat(chunks)); } });
   req.on('error', e => { if (!done) { done = true; reject(e); } });
 });
+// JSON write endpoints demand application/json. HTML forms can only send
+// urlencoded, multipart, or text/plain without a CORS preflight, so this
+// closes the "simple request" CSRF path even if Origin were missing.
+const isJsonRequest = (req) => /^application\/json\s*(;|$)/i.test(String(req.headers['content-type'] || '').trim());
 const readBody = async (req) => {
+  if (!isJsonRequest(req)) throw httpError(415, 'Content-Type must be application/json');
   const d = (await readRaw(req, MAX_JSON_BYTES)).toString('utf8');
   if (!d) return {};
   try { return JSON.parse(d); }
@@ -207,6 +212,13 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (!isAllowedHost(req.headers.host, boundPort)) {
+    return send(res, 403, { error: 'forbidden' });
+  }
+
+  // CSRF: a browser always attaches Origin to cross-origin writes (including
+  // "null" from file:// or sandboxed pages). Same-origin WKWebView requests
+  // carry the allowed origin, native URLSession requests carry none.
+  if (req.method !== 'GET' && req.method !== 'HEAD' && origin !== undefined && !isAllowedOrigin(origin, boundPort)) {
     return send(res, 403, { error: 'forbidden' });
   }
 
