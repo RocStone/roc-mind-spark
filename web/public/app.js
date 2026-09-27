@@ -7751,6 +7751,47 @@ function navTarget(id, key){
   return null;
 }
 
+// ---- Modal keyboard isolation ----
+// While a dialog-like surface is open the canvas takes no keys: Backspace,
+// Tab or a letter would otherwise edit the map hidden behind it.
+function topModalEl(){
+  if(typeof document==='undefined' || !document.querySelectorAll) return null;
+  const all=document.querySelectorAll('.var-form, .kb-help, .hist-panel');
+  if(!all.length) return null;
+  return document.querySelector('.var-form.rms-dialog') || all[all.length-1];
+}
+function closeModalOnEscape(m){
+  if(!m) return false;
+  // rms-settings.js owns Escape there (it also cancels shortcut recording).
+  if(m.classList.contains('rms-settings')) return false;
+  if(m.classList.contains('hist-panel')){
+    const x=m.querySelector('.hist-x');
+    if(x) x.click(); else m.remove();
+    return true;
+  }
+  const btn=m.querySelector('.vf-cancel, .vf-close, .kb-close')
+    || (m.classList.contains('rms-dialog') ? m.querySelector('.vf-go') : null);
+  if(btn) btn.click(); else m.remove();
+  return true;
+}
+// Esc closes the topmost transient surface: context/row menus, pickers,
+// template/export/theme menus, then the diff panel. True if it closed one.
+function closeTransientOnEscape(){
+  const menuSel='.rms-ctx, .tpl-pop, .export-pop, .row-pop, .picker';
+  const hasMenu=!!document.querySelector(menuSel)
+    || (typeof themePanel!=='undefined' && !!themePanel);
+  if(hasMenu){
+    closeAllMenus();
+    if(typeof closeNodeHrefMenu==='function') closeNodeHrefMenu();
+    if(typeof closeTextEditContextMenu==='function') closeTextEditContextMenu();
+    document.querySelectorAll(menuSel).forEach(p=>p.remove());
+    return true;
+  }
+  const diff=document.querySelector('.diff-panel');
+  if(diff){ diff.remove(); return true; }
+  return false;
+}
+
 // Reorder must run in capture: Option/Alt+arrows are often swallowed by the OS,
 // Raycast, or the browser before bubble listeners see e.key === 'ArrowDown'.
 // e.code is the physical key, which stays ArrowUp/Down even when Option remaps e.key.
@@ -7758,6 +7799,7 @@ function navTarget(id, key){
 window.addEventListener('keydown', e=>{
   if(clipboardEditAction(e)) return;
   if(isImeEvent(e)) return;
+  if(topModalEl()) return;
   if(document.querySelector('.node.editing')) return;
   if(e.target && e.target.isContentEditable && !pendingNodeTyping()) return;
   if(e.target && e.target.closest && e.target.closest('#mdPane')) return;
@@ -7784,6 +7826,15 @@ window.addEventListener('keydown',e=>{
     return;
   }
   if(clipboardEditAction(e)) return;
+  const modal=topModalEl();
+  if(modal){
+    // Only Escape, and only to close something; nothing reaches the canvas.
+    // rms-settings.js handles its own Escape (settings and shortcut recording).
+    if(e.key==='Escape' && !e.defaultPrevented && !isImeEvent(e) && !modal.classList.contains('rms-settings')){
+      if(closeTransientOnEscape() || closeModalOnEscape(modal)) e.preventDefault();
+    }
+    return;
+  }
   if(['INPUT','TEXTAREA'].includes(e.target.tagName)||(e.target.isContentEditable && !pendingNodeTyping())||document.querySelector('.node.editing')) return;
   if(isImeEvent(e)){
     if(sel && map && !READONLY && !e.metaKey && !e.ctrlKey && !e.altKey) startEdit(sel);
@@ -7792,6 +7843,7 @@ window.addEventListener('keydown',e=>{
   if(rms('undo', e, (e.ctrlKey||e.metaKey)&&!e.shiftKey&&e.key.toLowerCase()==='z')){e.preventDefault();performHistoryChord('undo');return;}
   if(rms('redo', e, (e.ctrlKey||e.metaKey)&&e.shiftKey&&e.key.toLowerCase()==='z') || ((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='y')){e.preventDefault();performHistoryChord('redo');return;}
   if(e.key==='Escape'){
+    if(closeTransientOnEscape()){ e.preventDefault(); return; }
     if(marquee){ e.preventDefault(); endMarquee(true); return; }
     if(linkMode){ e.preventDefault(); cancelLinkMode(); return; }
     if(multiSel.size){ e.preventDefault(); clearMultiSelect(); return; }
@@ -12683,6 +12735,8 @@ function showKeyboardHelp(){
   m.querySelector('.kb-close').onclick = close;
   m.querySelector('.kb-backdrop').onclick = close;
   m.addEventListener('keydown', e=>{ if(e.key==='Escape'){ e.preventDefault(); close(); } });
+  // Focus inside the dialog so its own Escape handler sees the key.
+  m.querySelector('.kb-close').focus();
 }
 window.addEventListener('keydown', e=>{
   if(!rms('help', e, e.key === '?')) return;
@@ -12699,6 +12753,7 @@ window.addEventListener('keydown', e=>{
   if(e.key!=='Escape') return;
   if(!document.body.classList.contains('focus-mode')) return;
   // Don't fight with editing/notes/login overlay — they handle Esc themselves
+  if(topModalEl()) return;
   if(document.querySelector('.node.editing')) return;
   if(document.querySelector('.notes-popup')) return;
   if($('#loginOverlay') && $('#loginOverlay').style.display==='flex') return;
