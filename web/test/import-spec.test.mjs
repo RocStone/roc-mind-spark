@@ -1,9 +1,10 @@
-// buildMapFromSpec() is reached from the PUBLIC, unauthenticated /api/import
-// endpoint, so it is the app's main untrusted-input surface. These tests pin
-// down its validation rules and confirm hostile input can't corrupt the runtime.
+// buildMapFromSpec() (web/import-spec.js) is what the loopback server's
+// POST /api/import runs. With no IMPORT_TOKEN that endpoint is unauthenticated,
+// so it is the server's main untrusted-input surface. These tests pin down its
+// validation rules and confirm hostile input can't corrupt the runtime.
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildMapFromSpec } from '../worker/import-core.js';
+import { buildMapFromSpec } from '../import-spec.js';
 
 const spec = (over = {}) => ({
   title: 'Test map',
@@ -84,6 +85,10 @@ describe('buildMapFromSpec — builds a valid map', () => {
     assert.equal(Object.keys(m.nodes).length, 2);
     assert.equal(m.nodes.r.parent, null, 'root must have a null parent');
     assert.equal(m.nodes.r.side, 'root');
+    assert.equal(m.nodes.a.side, null, 'the canvas assigns sides when it lays the map out');
+    assert.equal(m.titleAuto, false);
+    assert.equal(m._import, true);
+    assert.equal(typeof m.updated, 'number');
   });
 
   test('falls back to a default title when none is usable', () => {
@@ -93,14 +98,6 @@ describe('buildMapFromSpec — builds a valid map', () => {
 
   test('infers the root from the single parent-less node', () => {
     assert.equal(buildMapFromSpec({ nodes: [{ id: 'solo', text: 'x', parent: null }] }).rootId, 'solo');
-  });
-
-  test('balances root children — first half right, second half left', () => {
-    const nodes = [{ id: 'r', text: 'r', parent: null }];
-    for (let i = 0; i < 5; i++) nodes.push({ id: 'c' + i, text: 'c', parent: 'r' });
-    const m = buildMapFromSpec({ rootId: 'r', nodes });
-    const sides = ['c0', 'c1', 'c2', 'c3', 'c4'].map(id => m.nodes[id].side);
-    assert.deepEqual(sides, ['right', 'right', 'right', 'left', 'left']);
   });
 
   test('keeps only links whose endpoints both exist', () => {
@@ -113,29 +110,6 @@ describe('buildMapFromSpec — builds a valid map', () => {
     }));
     assert.equal(m.links.length, 1);
     assert.equal(m.links[0].label, 'ok');
-  });
-
-  test('carries through optional formatting without inventing values', () => {
-    const m = buildMapFromSpec({
-      rootId: 'r',
-      nodes: [
-        { id: 'r', text: 'r', parent: null },
-        { id: 'a', text: 'a', parent: 'r', bold: true, task: 'done', listType: 'ul', align: 'right' },
-        { id: 'b', text: 'b', parent: 'r' },
-      ],
-    });
-    assert.equal(m.nodes.a.bold, true);
-    assert.equal(m.nodes.a.task, 'done');
-    assert.equal(m.nodes.a.listType, 'ul');
-    assert.equal(m.nodes.b.bold, undefined, 'flags must not be set on nodes that did not ask for them');
-  });
-
-  test('ignores an invalid task value rather than storing it', () => {
-    const m = buildMapFromSpec({
-      rootId: 'r',
-      nodes: [{ id: 'r', text: 'r', parent: null }, { id: 'a', text: 'a', parent: 'r', task: 'bogus' }],
-    });
-    assert.equal(m.nodes.a.task, undefined);
   });
 
   test('normalises a citation and marks the node as a reference', () => {

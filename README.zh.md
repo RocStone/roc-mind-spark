@@ -178,7 +178,6 @@ Roc Mind Spark 是本机浮层。它 **不是**“完全离线”，也 **不会
 | `web/server.js` | 只监听回环的 Node + SQLite 服务 |
 | `scripts/` | 打包和安装 `.app` |
 | `web/test/` | 画布单测 |
-| `web/worker/` | 测试会用到的 inherited/internal 代码，**不是**受支持的部署面 |
 | `docs/FEATURES.md` | 产品功能清单（英文） |
 | `docs/FEATURES.zh.md` | 产品功能清单（中文） |
 | `docs/RELEASING.md` | 维护者发布清单 |

@@ -178,7 +178,6 @@ First launch enables **Launch at login**. Turn it off in Settings. Details: [PRI
 | `web/server.js` | Loopback Node + SQLite server (`127.0.0.1`) |
 | `scripts/` | Package and install the `.app` |
 | `web/test/` | Canvas unit tests |
-| `web/worker/` | Inherited internal modules used by tests — **not** a supported deploy |
 | `docs/FEATURES.md` | Product feature list (English) |
 | `docs/FEATURES.zh.md` | Product feature list (中文) |
 | `docs/RELEASING.md` | Maintainer release checklist |

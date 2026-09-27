@@ -47,8 +47,6 @@ Add coverage next to the behavior you change. Loopback bind, exact CORS origin, 
 | Canvas strings | `web/public/i18n.js` |
 | Menu-bar strings | `macos/Sources/RocMindSpark/L10n.swift` |
 
-`web/worker/` is inherited internal code used by unit tests. It is not a deploy target.
-
 ## Pull requests
 
 - Keep the diff on the bug or feature. No drive-by UI rewrites.

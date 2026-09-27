@@ -78,7 +78,7 @@ Launch at login starts the menu-bar extra and warms the canvas. It does not by i
 - Not “completely offline”
 - Not “never uploads”
 - Not a hosted account product
-- Not a multi-user cloud in this fork (inherited worker files are test-only internal code)
+- Not a multi-user cloud
 
 ## See also
 

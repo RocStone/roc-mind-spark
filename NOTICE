@@ -7,9 +7,8 @@ mind-mapping editor by Prasad Patil and contributors:
     https://github.com/prasadpatil25/MindSpark
 
 The canvas (`web/public/`), local Node server (`web/server.js`), templates,
-and most of the editing UI come from that project. A few worker modules under
-`web/worker/` are inherited internal code used by unit tests. They are not a
-supported Cloudflare, Pages, or collaboration deploy of Roc Mind Spark.
+and most of the editing UI come from that project. The upstream Cloudflare
+worker modules are not part of Roc Mind Spark.
 
 Roc Mind Spark adds a native macOS shell (Swift / AppKit / WKWebView) so the
 map can be summoned over any Space with a global hotkey.
