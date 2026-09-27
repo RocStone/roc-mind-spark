@@ -10951,7 +10951,10 @@ function mathToImgTag(tex, fontPx, color){
     const w=Math.max(1,Math.ceil(lay.w+pad*2)), h=Math.max(1,Math.ceil(lay.asc+lay.desc+pad*2));
     const cv=document.createElement('canvas'); cv.width=w*scale; cv.height=h*scale;
     const ctx=cv.getContext('2d'); ctx.scale(scale,scale);
-    lay.draw(pad, pad+lay.asc);
+    // The layout's draw closures are bound to the context it was built with, so
+    // lay.draw() would paint onto the throwaway measuring canvas and leave `cv`
+    // blank. Lay out again against the real output context and draw that.
+    _layoutMath(ctx, mathEl, fontPx, 'serif', color).draw(pad, pad+lay.asc);
     // CSS height stays at the UNSCALED size — scale only adds pixel density, not display size.
     return `<img src="${cv.toDataURL('image/png')}" style="vertical-align:middle;height:${h}px" alt="${escapeHtml(tex)}">`;
   }catch(e){ return null; }
