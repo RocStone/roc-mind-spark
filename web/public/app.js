@@ -8227,7 +8227,9 @@ function openRowMenu(btn, m){
     try{ await _mapSaves.remove(m.id,id=>Store.remove(id)); }
     catch(e){ toast(rmsTr('deleteMapFailed','Could not delete the map. Please retry.')); return; }
     _mapSaveStates.delete(m.id); _saveErrorNotified.delete(m.id);
-    if(map && map.id===m.id){
+    if((map && map.id===m.id) || (_historyPreview && _historyPreview.original && _historyPreview.original.id===m.id)){
+      // Drop a history preview first, or "Back to current" would resurrect the deleted map.
+      cancelHistoryPreview(); document.querySelectorAll('.hist-panel,.diff-panel').forEach(p=>p.remove());
       mdClearDragSel(); clearTimeout(_mdTimer); _mdTimer=0;
       map=null; render();
       const ed=document.getElementById('mdEditor'); if(ed) ed.value='';
@@ -8563,6 +8565,7 @@ function showNotesEditor(nodeId, opts){
 async function createMapFromTemplate(templateId){
   ++_mapLoadGeneration;
   if(!leaveLiveForSwitch()) return;
+  exitSharedMode();
   const tpl = TEMPLATES[templateId];
   if(!tpl){ createMap(); return; }
   const id = uid();
