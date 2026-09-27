@@ -9608,7 +9608,9 @@ function importFile(){
       }
       m.id=uid();
       await saveMapNow(m);
-      await loadMap(m.id);
+      // Saved but not opened (switch refused, superseded, or read failed):
+      // don't lay out / toast over whatever map is showing now.
+      if(!(await loadMap(m.id))){ refreshList(); return; }
       // Imported nodes have no positions (all at 0,0) — lay them out into a
       // proper tree, then frame the result.
       autoLayout(); fit();
