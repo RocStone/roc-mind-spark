@@ -160,7 +160,10 @@
   function isReservedToggleSpec(spec){
     if(!spec) return false;
     const comma = spec.code==='Comma' || spec.key===',';
-    return !!(comma && spec.meta && !spec.ctrl && !spec.alt && !spec.shift);
+    if(comma && spec.meta && !spec.ctrl && !spec.alt && !spec.shift) return true;
+    // ⌥⇧⌘Q is macOS "Log Out immediately"; native setChord rejects it too.
+    const q = spec.code==='KeyQ' || String(spec.key||'').toLowerCase()==='q';
+    return !!(q && spec.meta && spec.alt && spec.shift && !spec.ctrl);
   }
 
   function buttonId(el){

@@ -39,6 +39,11 @@ enum L10n {
     }
 
     private static let en: [String: String] = [
+        "dialog.ok": "OK",
+        "dialog.cancel": "Cancel",
+        "error.saveTimeout": "Saving did not finish within 7 seconds.",
+        "hotkey.reserved": "%@ is reserved (macOS Log Out or in-overlay Settings). The previous shortcut is kept.",
+        "hotkey.registerFailed": "Could not register %@ as the global shortcut; another app may be using it. The previous shortcut is kept.",
         "error.saveQuit": "Changes could not be saved. The app stayed open so you can retry.",
         "error.serverStopped": "The local map service stopped. Retry to reconnect; your open edits are still in this window.",
         "menu.toggle": "Show / Hide",
@@ -86,12 +91,18 @@ enum L10n {
         "error.starting": "Starting the canvas…",
         "error.retry": "Retry",
         "error.node": "Could not find node. Roc Mind Spark needs Node.js 22.13.0 or later to run the local canvas server.\n\nInstall Node.js 22.13.0+, then tap Retry.",
+        "error.nodeTooOld": "Node.js %@ was found at %@, but Roc Mind Spark needs Node.js 22.13.0 or later.\n\nInstall Node.js 22.13.0+ (or set ROC_MINDSPARK_NODE to a newer node), then tap Retry.",
         "error.server": "Could not find server.js: %@\n\nThen tap Retry.",
         "error.timeout": "The canvas server did not become ready. See %@\n\nThen tap Retry.",
         "error.port": "Port %d is already in use by another process (pid %d: %@).\n\nRoc Mind Spark will not take it over or stop that process.\n\nFree the port, then tap Retry.",
     ]
 
     private static let zh: [String: String] = [
+        "dialog.ok": "好",
+        "dialog.cancel": "取消",
+        "error.saveTimeout": "7 秒内没有保存完成。",
+        "hotkey.reserved": "%@ 是保留组合（macOS 立即注销，或浮层内的设置），已保留原来的快捷键。",
+        "hotkey.registerFailed": "无法把 %@ 注册为全局快捷键，可能被其他 App 占用，已保留原来的快捷键。",
         "error.saveQuit": "未能保存更改。应用已保持打开，请重试。",
         "error.serverStopped": "本机导图服务已停止。请重试连接；当前编辑内容仍保留在窗口中。",
         "menu.toggle": "显示 / 隐藏",
@@ -139,6 +150,7 @@ enum L10n {
         "error.starting": "正在启动画布…",
         "error.retry": "重试",
         "error.node": "找不到 node。需要 Node.js 22.13.0 或更高版本，用来运行画布服务。\n\n装好 Node.js 22.13.0+ 后点重试。",
+        "error.nodeTooOld": "找到了 Node.js %@（%@），但需要 Node.js 22.13.0 或更高版本。\n\n装好 Node.js 22.13.0+（或把 ROC_MINDSPARK_NODE 指向更新的 node）后点重试。",
         "error.server": "找不到 server.js：%@\n\n然后点重试。",
         "error.timeout": "服务启动超时。看 %@\n\n然后点重试。",
         "error.port": "端口 %d 已被其他进程占用（pid %d：%@）。\n\nRoc Mind Spark 不会接管或结束那个进程。\n\n释放端口后点重试。",

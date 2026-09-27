@@ -8842,6 +8842,8 @@ const _mapSaves=createMapSaveQueue({
     _mapSaveStates.set(id,state);
     if(state==='saved') _saveErrorNotified.delete(id);
     if(map && map.id===id) updateMapSaveStatus();
+    // Native quit skips the save round-trip when nothing is pending.
+    try{ window.webkit.messageHandlers.rmsNative.postMessage({op:'saveState',dirty:[..._mapSaveStates.values()].some(s=>s!=='saved')}); }catch(_){}
     // A terminal refusal is not retried, so it always gets its own warning
     // even if a retryable failure was already announced for this map.
     if(state==='failed-terminal'){

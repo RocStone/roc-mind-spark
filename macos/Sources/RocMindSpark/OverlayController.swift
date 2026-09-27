@@ -3,7 +3,7 @@ import CoreGraphics
 import WebKit
 
 @MainActor
-final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
+final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler, WKDownloadDelegate {
     private let panel = OverlayPanel()
     private var webView: WKWebView!
     private var selectionDiagnostics: SelectionDiagnostics?
@@ -40,6 +40,19 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
     private var boot = CanvasBootCoordinator()
     private var statusView: CanvasStatusView?
     private var lastBootError: Error?
+    /// WKDownload is not retained by WebKit once it hands it to us.
+    private var activeDownloads: Set<WKDownload> = []
+    /// Save panels and JS dialogs are sheets on the overlay. While one is up,
+    /// clicks and app switches it causes must not hide the overlay.
+    private var nativeModalDepth = 0
+    /// Mirrors the page's save queue (`{op:'saveState'}`): true while any map
+    /// has an edit that has not reached the server yet.
+    private(set) var pageDirty = false
+    /// WebContent crashed; the page (and anything unsaved in it) is gone
+    /// until the reload finishes.
+    private var webProcessCrashed = false
+    private var powerOffFlushInFlight = false
+    private var powerOffFlushedAt: Date?
 
     private(set) var isVisible = false
 
@@ -72,6 +85,12 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
             self,
             selector: #selector(languageDidChange),
             name: .rmsLanguageDidChange,
+            object: nil
+        )
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(willPowerOff),
+            name: NSWorkspace.willPowerOffNotification,
             object: nil
         )
     }
@@ -169,8 +188,42 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
 
     /// Normal application quit waits for the page's model and save queue.
     /// The page is kept alive if persistence fails, so drafts remain editable.
+    /// False means quitting now cannot lose anything: the page never loaded,
+    /// its process is dead, or its save queue is idle and the overlay is
+    /// parked (hiding already committed any open editor). A visible overlay
+    /// may hold an uncommitted node or note editor, so it still flushes unless
+    /// the logout/power-off pre-flush just did that.
+    var needsFlushBeforeQuit: Bool {
+        guard webView != nil, didStartLoad, !webProcessCrashed else { return false }
+        if pageDirty || powerOffFlushInFlight { return true }
+        if isVisible {
+            if let at = powerOffFlushedAt, Date().timeIntervalSince(at) < 60 { return false }
+            return true
+        }
+        return false
+    }
+
+    /// Logout / restart / shutdown: save before AppKit asks us to quit, so
+    /// the later `applicationShouldTerminate` can usually answer terminateNow.
+    @objc private func willPowerOff() {
+        guard needsFlushBeforeQuit, !powerOffFlushInFlight else { return }
+        Paths.log("willPowerOff: flushing early")
+        powerOffFlushInFlight = true
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                try await QuitFlush.run(timeout: .seconds(7)) { try await self.flushBeforeQuit() }
+                self.powerOffFlushedAt = Date()
+                Paths.log("willPowerOff: flush done")
+            } catch {
+                Paths.log("willPowerOff: flush failed \(error.localizedDescription)")
+            }
+            self.powerOffFlushInFlight = false
+        }
+    }
+
     func flushBeforeQuit() async throws {
-        guard let webView, didStartLoad else { return }
+        guard let webView, didStartLoad, !webProcessCrashed else { return }
         let result = try await webView.callAsyncJavaScript("""
             if (!window.rmsFlushPendingEdits) return {ok:true};
             let timer;
@@ -220,21 +273,6 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
         guard let data = try? JSONSerialization.data(withJSONObject: payload),
               let json = String(data: data, encoding: .utf8) else { return }
         webView.evaluateJavaScript("window.__rmsNativeState&&window.__rmsNativeState(\(json))")
-    }
-
-    /// WKWebView's default data store keeps disk cache across launches.
-    /// That pinned overlay users to a stale styles.css so a rebuilt app
-    /// still showed the closed search-wrap sliver. Keep localStorage.
-    private func purgeStaleWebCache() async {
-        let keep: Set<String> = [
-            WKWebsiteDataTypeLocalStorage,
-            WKWebsiteDataTypeSessionStorage,
-            WKWebsiteDataTypeCookies,
-            WKWebsiteDataTypeIndexedDBDatabases,
-        ]
-        let types = WKWebsiteDataStore.allWebsiteDataTypes().subtracting(keep)
-        await WKWebsiteDataStore.default().removeData(ofTypes: types, modifiedSince: .distantPast)
-        Paths.log("purged webview cache")
     }
 
     private func attachStatusView(to root: NSView) {
@@ -460,7 +498,7 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
     }
 
     private func hideIfClickOutside(_: NSEvent) {
-        guard isVisible, !pickingOpenPanel, !SelectionDiagnostics.keepVisible else { return }
+        guard isVisible, !pickingOpenPanel, nativeModalDepth == 0, !SelectionDiagnostics.keepVisible else { return }
         if Self.isScreenshotApp(NSWorkspace.shared.frontmostApplication) { return }
         let point = NSEvent.mouseLocation
         if !panel.frame.contains(point) {
@@ -504,7 +542,7 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
     }
 
     @objc private func anotherAppActivated(_ note: Notification) {
-        guard isVisible, !pickingOpenPanel, !SelectionDiagnostics.keepVisible else { return }
+        guard isVisible, !pickingOpenPanel, nativeModalDepth == 0, !SelectionDiagnostics.keepVisible else { return }
         let app = (note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication)
             ?? NSWorkspace.shared.frontmostApplication
         let shouldHide = Self.shouldHideOnActivation(
@@ -630,6 +668,12 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
             return
         }
         if message.name == "rmsNative" {
+            let origin = message.frameInfo.securityOrigin
+            guard message.frameInfo.isMainFrame,
+                  WebPolicy.isServerOrigin(host: origin.host, port: origin.port) else {
+                Paths.log("rmsNative ignored from \(origin.protocol)://\(origin.host):\(origin.port) main=\(message.frameInfo.isMainFrame)")
+                return
+            }
             handleNative(message.body)
         }
     }
@@ -643,6 +687,10 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
         }
         if op == "getState" {
             pushNativeState()
+            return
+        }
+        if op == "saveState" {
+            pageDirty = bool(spec["dirty"])
             return
         }
         if op == "setLogin" {
@@ -668,8 +716,9 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
         }
         if op == "setToggle" {
             if let chord = KeyChord.fromWeb(spec) {
-                ShortcutStore.shared.setChord(chord, for: .toggleOverlay)
-                pushNativeState()
+                commitToggleChord(chord)
+            } else {
+                notifyToggleListenDone(ok: false)
             }
             return
         }
@@ -720,13 +769,44 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
             return true
         }
         guard let chord else { return true }
-        if chord == .commandComma { return true }
-        if !chord.hasModifier { return true }
+        // A bare key: keep listening for a real chord.
+        if ShortcutStore.rejection(for: chord, id: .toggleOverlay) == .needsModifier { return true }
         toggleListenArmed = false
         stopToggleListenMonitors()
-        ShortcutStore.shared.setChord(chord, for: .toggleOverlay)
-        notifyToggleListenDone(ok: true)
+        commitToggleChord(chord)
         return true
+    }
+
+    /// Reports failure to the page (which then repaints the previous chord)
+    /// when the chord is reserved or Carbon refuses to register it.
+    private func commitToggleChord(_ chord: KeyChord) {
+        let store = ShortcutStore.shared
+        if !store.setChord(chord, for: .toggleOverlay) {
+            Paths.log("toggle chord \(chord.display) rejected as reserved")
+            // setChord posted nothing; rebind the chord listening unregistered.
+            NotificationCenter.default.post(name: .rmsShortcutsDidChange, object: nil)
+            showPageToast(String(format: L10n.t("hotkey.reserved"), chord.display))
+            notifyToggleListenDone(ok: false)
+            return
+        }
+        // The change notification rebinds synchronously; a failed Carbon
+        // registration has already restored the previous chord in the store.
+        if store.chord(for: .toggleOverlay) != chord {
+            showPageToast(String(format: L10n.t("hotkey.registerFailed"), chord.display))
+            notifyToggleListenDone(ok: false)
+            return
+        }
+        notifyToggleListenDone(ok: true)
+    }
+
+    private func showPageToast(_ message: String) {
+        webView?.evaluateJavaScript("typeof toast==='function'&&toast(\(Self.jsString(message)))")
+    }
+
+    private static func jsString(_ text: String) -> String {
+        guard let data = try? JSONSerialization.data(withJSONObject: [text]),
+              let encoded = String(data: data, encoding: .utf8), encoded.count >= 2 else { return "\"\"" }
+        return String(encoded.dropFirst().dropLast())
     }
 
     private func cancelToggleListen(rebind: Bool) {
@@ -764,8 +844,20 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
         return false
     }
 
+    /// WebContent crashed or was killed (memory pressure, GPU reset). The
+    /// view goes blank and every evaluateJavaScript fails until we reload.
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        Paths.log("webview content process terminated; reloading")
+        webProcessCrashed = true
+        pageDirty = false
+        isWarm = false
+        didStartLoad = false
+        startLoadIfNeeded()
+    }
+
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         Paths.log("webview didFinish")
+        webProcessCrashed = false
         webView.evaluateJavaScript("document.documentElement.classList.add('rms-wk')")
         webView.evaluateJavaScript(
             "typeof window.__rmsSignalReady+' ready='+window.__RMS_READY__+' nodes='+document.querySelectorAll('.node').length+' map='+!!window.map"
@@ -819,11 +911,121 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
         _ webView: WKWebView,
         decidePolicyFor navigationAction: WKNavigationAction
     ) async -> WKNavigationActionPolicy {
-        guard let url = navigationAction.request.url else { return .cancel }
-        if url.host == "127.0.0.1" || url.host == "localhost" { return .allow }
-        if url.scheme == "about" { return .allow }
-        openExternal(url)
-        return .cancel
+        let url = navigationAction.request.url
+        let decision = WebPolicy.navigation(url: url, shouldPerformDownload: navigationAction.shouldPerformDownload)
+        switch decision {
+        case .allow: return .allow
+        case .download: return .download
+        case .openExternal:
+            if let url { openExternal(url) }
+            return .cancel
+        case .cancel:
+            Paths.log("navigation blocked \(url?.absoluteString ?? "nil")")
+            return .cancel
+        }
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        decidePolicyFor navigationResponse: WKNavigationResponse
+    ) async -> WKNavigationResponsePolicy {
+        navigationResponse.canShowMIMEType ? .allow : .download
+    }
+
+    func webView(_ webView: WKWebView, navigationAction: WKNavigationAction, didBecome download: WKDownload) {
+        adoptDownload(download)
+    }
+
+    func webView(_ webView: WKWebView, navigationResponse: WKNavigationResponse, didBecome download: WKDownload) {
+        adoptDownload(download)
+    }
+
+    private func adoptDownload(_ download: WKDownload) {
+        download.delegate = self
+        activeDownloads.insert(download)
+        Paths.log("download started \(download.originalRequest?.url?.absoluteString.prefix(80) ?? "?")")
+    }
+
+    func download(
+        _ download: WKDownload,
+        decideDestinationUsing response: URLResponse,
+        suggestedFilename: String
+    ) async -> URL? {
+        let save = NSSavePanel()
+        save.nameFieldStringValue = suggestedFilename
+        save.directoryURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+        save.canCreateDirectories = true
+        save.isExtensionHidden = false
+        let result = await presentSavePanel(save)
+        guard result == .OK, let url = save.url else {
+            Paths.log("download cancelled by user")
+            activeDownloads.remove(download)
+            return nil
+        }
+        // NSSavePanel already asked about replacing. WKDownload refuses to
+        // write over an existing file, so remove it now.
+        if FileManager.default.fileExists(atPath: url.path) {
+            do {
+                try FileManager.default.removeItem(at: url)
+            } catch {
+                Paths.log("download could not replace \(url.path): \(error.localizedDescription)")
+                activeDownloads.remove(download)
+                return nil
+            }
+        }
+        Paths.log("download destination \(url.path)")
+        return url
+    }
+
+    func downloadDidFinish(_ download: WKDownload) {
+        Paths.log("download finished")
+        activeDownloads.remove(download)
+    }
+
+    func download(_ download: WKDownload, didFailWithError error: Error, resumeData: Data?) {
+        Paths.log("download failed \(error.localizedDescription)")
+        activeDownloads.remove(download)
+    }
+
+    /// A sheet attached to the overlay stays above its cover level. When the
+    /// overlay is parked, fall back to a free-standing panel above it.
+    private func presentSavePanel(_ save: NSSavePanel) async -> NSApplication.ModalResponse {
+        beginNativeModal()
+        defer { endNativeModal() }
+        if isVisible {
+            return await withCheckedContinuation { continuation in
+                save.beginSheetModal(for: panel) { continuation.resume(returning: $0) }
+            }
+        }
+        save.level = NSWindow.Level(rawValue: OverlayPanel.coverLevel.rawValue + 2)
+        return await withCheckedContinuation { continuation in
+            save.begin { continuation.resume(returning: $0) }
+        }
+    }
+
+    private func presentAlert(_ alert: NSAlert) async -> NSApplication.ModalResponse {
+        beginNativeModal()
+        defer { endNativeModal() }
+        if isVisible {
+            return await withCheckedContinuation { continuation in
+                alert.beginSheetModal(for: panel) { continuation.resume(returning: $0) }
+            }
+        }
+        alert.window.level = NSWindow.Level(rawValue: OverlayPanel.coverLevel.rawValue + 2)
+        return alert.runModal()
+    }
+
+    private func beginNativeModal() {
+        nativeModalDepth += 1
+        NSApp.activate()
+        if isVisible { panel.makeKey() }
+    }
+
+    private func endNativeModal() {
+        nativeModalDepth = max(0, nativeModalDepth - 1)
+        guard nativeModalDepth == 0, isVisible else { return }
+        panel.makeKey()
+        panel.makeFirstResponder(webView)
     }
 
     func webView(
@@ -839,11 +1041,75 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
     }
 
     private func openExternal(_ url: URL) {
+        guard WebPolicy.canOpenExternally(url) else {
+            Paths.log("openExternal refused scheme \(url.scheme ?? "nil")")
+            return
+        }
         if let last = lastExternalOpen, last.url == url, Date().timeIntervalSince(last.at) < 0.8 {
             return
         }
         lastExternalOpen = (url, Date())
         NSWorkspace.shared.open(url)
+    }
+
+    /// WKWebView drops alert/confirm/prompt unless the UI delegate shows them.
+    func webView(
+        _ webView: WKWebView,
+        runJavaScriptAlertPanelWithMessage message: String,
+        initiatedByFrame frame: WKFrameInfo,
+        completionHandler: @escaping @MainActor @Sendable () -> Void
+    ) {
+        let alert = makeDialog(message)
+        alert.addButton(withTitle: L10n.t("dialog.ok"))
+        Task { @MainActor in
+            _ = await self.presentAlert(alert)
+            completionHandler()
+        }
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        runJavaScriptConfirmPanelWithMessage message: String,
+        initiatedByFrame frame: WKFrameInfo,
+        completionHandler: @escaping @MainActor @Sendable (Bool) -> Void
+    ) {
+        let alert = makeDialog(message)
+        alert.addButton(withTitle: L10n.t("dialog.ok"))
+        alert.addButton(withTitle: L10n.t("dialog.cancel"))
+        Task { @MainActor in
+            let response = await self.presentAlert(alert)
+            completionHandler(response == .alertFirstButtonReturn)
+        }
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        runJavaScriptTextInputPanelWithPrompt prompt: String,
+        defaultText: String?,
+        initiatedByFrame frame: WKFrameInfo,
+        completionHandler: @escaping @MainActor @Sendable (String?) -> Void
+    ) {
+        let alert = makeDialog(prompt)
+        alert.addButton(withTitle: L10n.t("dialog.ok"))
+        alert.addButton(withTitle: L10n.t("dialog.cancel"))
+        let field = NSTextField(string: defaultText ?? "")
+        field.frame = NSRect(x: 0, y: 0, width: 320, height: 24)
+        field.usesSingleLineMode = true
+        field.lineBreakMode = .byTruncatingTail
+        alert.accessoryView = field
+        alert.window.initialFirstResponder = field
+        Task { @MainActor in
+            let response = await self.presentAlert(alert)
+            completionHandler(response == .alertFirstButtonReturn ? field.stringValue : nil)
+        }
+    }
+
+    private func makeDialog(_ text: String) -> NSAlert {
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = text
+        alert.informativeText = ""
+        return alert
     }
 
     /// Without this, `<input type=file>` (Attach image / Import) is a no-op
@@ -1063,9 +1329,12 @@ private final class MapWebView: WKWebView {
             return
         }
         Task { @MainActor in
+            // Fetch first: clearing before the await would leave the
+            // pasteboard empty (and other apps seeing that) meanwhile.
+            let data = await self.imageData(from: image)
             let board = NSPasteboard.general
             board.clearContents()
-            if let data = await self.imageData(from: image) {
+            if let data {
                 let jpeg = image.lowercased().contains(".jpg") || image.lowercased().contains("image/jpeg")
                 board.setData(data, forType: jpeg ? Self.jpegType : .png)
             }
@@ -1100,103 +1369,27 @@ private final class MapWebView: WKWebView {
                 self.evaluateJavaScript("window.__rmsClipboardPaste&&window.__rmsClipboardPaste(\(Self.jsonString(text)))")
                 return
             }
-            if let payload = self.pasteboardImagePayload() {
-                self.pasteImage(payload)
-                return
+            Task { @MainActor in
+                if let payload = await self.pasteboardImagePayload() {
+                    self.pasteImage(payload)
+                    return
+                }
+                guard !text.isEmpty else { return }
+                _ = try? await self.evaluateJavaScript("window.__rmsClipboardPaste&&window.__rmsClipboardPaste(\(Self.jsonString(text)))")
             }
-            guard !text.isEmpty else { return }
-            self.evaluateJavaScript("window.__rmsClipboardPaste&&window.__rmsClipboardPaste(\(Self.jsonString(text)))")
         }
     }
 
-    private struct PasteImage {
-        let data: Data
-        let mime: String
-    }
+    private typealias PasteImage = PasteboardImageDecoder.Image
 
     private static let jpegType = NSPasteboard.PasteboardType("public.jpeg")
-    private static let gifType = NSPasteboard.PasteboardType("public.gif")
-    private static let webpType = NSPasteboard.PasteboardType("public.webp")
 
-    private static let imageFileExtensions: Set<String> = [
-        "png", "jpg", "jpeg", "gif", "webp", "heic", "heif", "tif", "tiff", "bmp",
-    ]
-
-    private func pasteboardImagePayload() -> PasteImage? {
-        let board = NSPasteboard.general
-        var best: (data: Data, mime: String, pixels: Int)?
-
-        func consider(_ data: Data?, mime: String) {
-            guard let data, data.count > 32 else { return }
-            let pixels: Int
-            if let rep = NSBitmapImageRep(data: data) {
-                pixels = max(0, rep.pixelsWide * rep.pixelsHigh)
-            } else {
-                pixels = 0
-            }
-            if pixels > (best?.pixels ?? -1) || (pixels == (best?.pixels ?? -1) && data.count > (best?.data.count ?? 0)) {
-                best = (data, mime, pixels)
-            }
-        }
-
-        consider(board.data(forType: .png), mime: "image/png")
-        consider(board.data(forType: Self.jpegType), mime: "image/jpeg")
-        consider(board.data(forType: Self.gifType), mime: "image/gif")
-        consider(board.data(forType: Self.webpType), mime: "image/webp")
-        if let tiff = board.data(forType: .tiff), let png = Self.pngData(from: tiff) {
-            consider(png, mime: "image/png")
-        }
-        if let image = NSImage(pasteboard: board) {
-            for rep in image.representations {
-                guard let bitmap = rep as? NSBitmapImageRep,
-                      let png = bitmap.representation(using: .png, properties: [:]) else { continue }
-                consider(png, mime: "image/png")
-            }
-        }
-        if let urls = board.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) {
-            for case let url as URL in urls {
-                let ext = url.pathExtension.lowercased()
-                guard Self.imageFileExtensions.contains(ext) else { continue }
-                if ["heic", "heif", "tif", "tiff", "bmp"].contains(ext) {
-                    if let data = try? Data(contentsOf: url), let png = Self.pngData(from: data) {
-                        consider(png, mime: "image/png")
-                    } else if let image = NSImage(contentsOf: url), let png = Self.pngData(from: image) {
-                        consider(png, mime: "image/png")
-                    }
-                    continue
-                }
-                consider(try? Data(contentsOf: url), mime: Self.mime(for: ext))
-            }
-        }
-        guard let best else { return nil }
-        return PasteImage(data: best.data, mime: best.mime)
-    }
-
-    private static func mime(for ext: String) -> String {
-        switch ext {
-        case "jpg", "jpeg": return "image/jpeg"
-        case "gif": return "image/gif"
-        case "webp": return "image/webp"
-        default: return "image/png"
-        }
-    }
-
-    private static func pngData(from image: NSImage) -> Data? {
-        var best: NSBitmapImageRep?
-        for rep in image.representations {
-            guard let bitmap = rep as? NSBitmapImageRep else { continue }
-            if best == nil || bitmap.pixelsWide * bitmap.pixelsHigh > best!.pixelsWide * best!.pixelsHigh {
-                best = bitmap
-            }
-        }
-        if let best, let png = best.representation(using: .png, properties: [:]) { return png }
-        guard let tiff = image.tiffRepresentation else { return nil }
-        return pngData(from: tiff)
-    }
-
-    private static func pngData(from data: Data) -> Data? {
-        guard let rep = NSBitmapImageRep(data: data) else { return nil }
-        return rep.representation(using: .png, properties: [:])
+    /// PNG/JPEG already on the pasteboard is used as-is. Anything that needs
+    /// decoding (TIFF, PDF, HEIC files, …) is converted off the main actor.
+    private func pasteboardImagePayload() async -> PasteImage? {
+        let snapshot = PasteboardImageDecoder.Snapshot(board: NSPasteboard.general)
+        if let direct = snapshot.directImage { return direct }
+        return await Task.detached(priority: .userInitiated) { snapshot.decode() }.value
     }
 
     private func pasteImage(_ payload: PasteImage) {

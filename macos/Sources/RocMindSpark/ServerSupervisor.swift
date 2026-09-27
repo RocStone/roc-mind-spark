@@ -208,44 +208,15 @@ final class ServerSupervisor {
         return url
     }
 
+    /// Also checks nvm and node@22 kegs, and requires Node >= 22.13.0.
     private nonisolated static func findNode() throws -> URL {
-        if let fromEnv = ProcessInfo.processInfo.environment["ROC_MINDSPARK_NODE"] {
-            let url = URL(fileURLWithPath: fromEnv)
-            if FileManager.default.isExecutableFile(atPath: url.path) { return url }
-        }
-        let extras = [
-            "/opt/homebrew/bin/node",
-            "/usr/local/bin/node",
-            "\(NSHomeDirectory())/.volta/bin/node",
-            "\(NSHomeDirectory())/.fnm/current/bin/node",
-            "\(NSHomeDirectory())/.proto/shims/node",
-        ]
-        for path in extras where FileManager.default.isExecutableFile(atPath: path) {
-            return URL(fileURLWithPath: path)
-        }
-        let which = Process()
-        which.executableURL = URL(fileURLWithPath: "/usr/bin/which")
-        which.arguments = ["node"]
-        let pipe = Pipe()
-        which.standardOutput = pipe
-        which.standardError = FileHandle.nullDevice
-        var env = ProcessInfo.processInfo.environment
-        let path = env["PATH"] ?? ""
-        env["PATH"] = "/opt/homebrew/bin:/usr/local/bin:\(path)"
-        which.environment = env
-        try which.run()
-        which.waitUntilExit()
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        let found = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        if !found.isEmpty, FileManager.default.isExecutableFile(atPath: found) {
-            return URL(fileURLWithPath: found)
-        }
-        throw ServerError.nodeNotFound
+        try NodeLocator.find()
     }
 }
 
 enum ServerError: LocalizedError {
     case nodeNotFound
+    case nodeTooOld(version: String, path: String)
     case missingServer(String)
     case didNotBecomeHealthy
     case stoppedUnexpectedly
@@ -255,6 +226,8 @@ enum ServerError: LocalizedError {
         switch self {
         case .nodeNotFound:
             return L10n.t("error.node")
+        case .nodeTooOld(let version, let path):
+            return String(format: L10n.t("error.nodeTooOld"), version, path)
         case .missingServer(let path):
             return String(format: L10n.t("error.server"), path)
         case .stoppedUnexpectedly:

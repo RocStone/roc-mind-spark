@@ -8,6 +8,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private var waitingForSave = false
     private var readyToTerminate = false
+    /// Last toggle chord Carbon accepted; restored when a new one fails.
+    private var boundToggleChord: KeyChord?
     /// Retained for the process lifetime. Turns POSIX SIGTERM into a normal
     /// `NSApp.terminate(nil)` on the main queue.
     private var terminationBridge: POSIXTerminationBridge?
@@ -54,14 +56,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard overlay != nil, !readyToTerminate else { return .terminateNow }
         if waitingForSave { return .terminateCancel }
+        // Nothing pending (or no live page): quit immediately so logout,
+        // restart and shutdown are not interrupted.
+        if !overlay.needsFlushBeforeQuit {
+            Paths.log("quit: nothing to save, terminating now")
+            server.stopIfLaunched()
+            return .terminateNow
+        }
         waitingForSave = true
         Task { [weak self] in
             guard let self else { return }
             do {
-                try await self.overlay.flushBeforeQuit()
+                try await QuitFlush.run(timeout: .seconds(7)) { try await self.overlay.flushBeforeQuit() }
                 self.readyToTerminate = true
                 sender.terminate(nil)
             } catch {
+                Paths.log("quit: flush failed \(error.localizedDescription)")
                 self.waitingForSave = false
                 self.terminationBridge?.resetAfterCancelledTermination()
                 self.overlay.show()
@@ -69,6 +79,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 alert.messageText = L10n.t("error.saveQuit")
                 alert.informativeText = error.localizedDescription
                 alert.alertStyle = .warning
+                alert.window.level = NSWindow.Level(rawValue: OverlayPanel.coverLevel.rawValue + 2)
                 alert.runModal()
             }
         }
@@ -144,9 +155,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func bindGlobalHotKeys() {
         let center = HotKeyCenter.shared
         center.unregister(id: ShortcutID.openSettings.carbonHotKeyID)
-        center.register(id: ShortcutID.toggleOverlay.carbonHotKeyID, chord: store.chord(for: .toggleOverlay)) { [weak self] in
+        let id = ShortcutID.toggleOverlay.carbonHotKeyID
+        let chord = store.chord(for: .toggleOverlay)
+        let handler: () -> Void = { [weak self] in
             Self.onMain { self?.overlay.toggle() }
         }
+        let status = center.register(id: id, chord: chord, handler: handler)
+        if status == noErr {
+            boundToggleChord = chord
+            return
+        }
+        // Recording unregisters the old chord first, so the center cannot
+        // restore it by itself. Put back the last chord that worked.
+        Paths.log("toggle hotkey \(chord.display) failed status=\(status); previous=\(boundToggleChord?.display ?? "none")")
+        guard let previous = boundToggleChord, previous != chord else { return }
+        store.restoreChord(previous, for: .toggleOverlay)
+        let restored = center.register(id: id, chord: previous, handler: handler)
+        Paths.log("toggle hotkey restored \(previous.display) status=\(restored)")
     }
 
     private func shortcutsDidChange() {
