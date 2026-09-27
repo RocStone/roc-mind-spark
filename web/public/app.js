@@ -4082,14 +4082,28 @@ function clientBoxFromGbr(r){
 // Box is painted in clientX. After dropping whole-app zoom/transform, GBR is
 // already in that space.
 function nodesInMarqueeEls(nodeEls, clientRect){
-  const hit=[];
-  if(!nodeEls || !clientRect || !(clientRect.w>0) || !(clientRect.h>0)) return hit;
+  if(!nodeEls || !clientRect || !(clientRect.w>0) || !(clientRect.h>0)) return [];
+  return nodesInMarqueeRects(marqueeRectsFromEls(nodeEls), clientRect);
+}
+// One layout read per node, done once when a marquee starts (or the camera
+// moves), so each mousemove afterwards is pure math with no forced reflow.
+function marqueeRectsFromEls(nodeEls){
+  const out=[];
+  if(!nodeEls) return out;
   for(let i=0;i<nodeEls.length;i++){
     const el=nodeEls[i];
     const id=el && el.dataset && el.dataset.id;
     if(!id || typeof el.getBoundingClientRect!=='function') continue;
     const box=clientBoxFromGbr(el.getBoundingClientRect());
-    if(box && box.w>0 && box.h>0 && rectsIntersect(box, clientRect)) hit.push(id);
+    if(box && box.w>0 && box.h>0) out.push({id, box});
+  }
+  return out;
+}
+function nodesInMarqueeRects(rects, clientRect){
+  const hit=[];
+  if(!rects || !clientRect || !(clientRect.w>0) || !(clientRect.h>0)) return hit;
+  for(let i=0;i<rects.length;i++){
+    if(rectsIntersect(rects[i].box, clientRect)) hit.push(rects[i].id);
   }
   return hit;
 }
@@ -7133,11 +7147,33 @@ function updateMarqueeEl(m){
   el.style.height=Math.abs(m.y1-m.y0)+'px';
   return el;
 }
+// Runs at most once per frame while ⌘-dragging a marquee. Node rects are
+// cached on the marquee and re-read only when the camera has moved.
+let _marqueeRAF=0;
+function applyMarqueeFrame(){
+  _marqueeRAF=0;
+  const m=marquee;
+  if(!m || !m.moved || !map) return;
+  const camKey=view.x+','+view.y+','+view.k;
+  if(!m.rects || m.rectsCam!==camKey){
+    m.rects=marqueeRectsFromEls(viewport.querySelectorAll('.node'));   // reads first…
+    m.rectsCam=camKey;
+  }
+  updateMarqueeEl(m);                                                 // …then writes
+  const hits=nodesInMarqueeRects(m.rects, mapRectFromCorners(m.x0, m.y0, m.x1, m.y1));
+  const key=hits.join('\n');
+  m.hits=hits;
+  if(key!==m.hitsKey){ m.hitsKey=key; paintMarqueeHits(hits); }
+}
 function paintMarqueeHits(ids){
   const set=new Set(ids||[]);
   viewport.querySelectorAll('.node').forEach(n=>n.classList.toggle('marquee-hit', set.has(n.dataset.id)));
 }
 function endMarquee(cancel){
+  if(_marqueeRAF){
+    cancelAnimationFrame(_marqueeRAF); _marqueeRAF=0;
+    if(!cancel) applyMarqueeFrame();   // commit the final pointer position's hits
+  }
   document.body.classList.remove('marquee-selecting');
   $('#marquee')?.remove();
   document.querySelectorAll('.node.marquee-hit').forEach(n=>n.classList.remove('marquee-hit'));
@@ -7366,15 +7402,7 @@ window.addEventListener('mousemove',e=>{
     e.preventDefault();
     marquee.x1=e.clientX; marquee.y1=e.clientY;
     if(Math.abs(marquee.x1-marquee.x0)+Math.abs(marquee.y1-marquee.y0)>4) marquee.moved=true;
-    if(marquee.moved && map){
-      updateMarqueeEl(marquee);
-      const hits=nodesInMarqueeEls(
-        viewport.querySelectorAll('.node'),
-        mapRectFromCorners(marquee.x0, marquee.y0, marquee.x1, marquee.y1)
-      );
-      marquee.hits=hits;
-      paintMarqueeHits(hits);
-    }
+    if(marquee.moved && map && !_marqueeRAF) _marqueeRAF=requestAnimationFrame(applyMarqueeFrame);
     return;
   }
   if(panning){
