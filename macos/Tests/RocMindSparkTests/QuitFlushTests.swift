@@ -3,6 +3,21 @@ import XCTest
 
 @MainActor
 final class QuitFlushTests: XCTestCase {
+    func testCleanLoadedPageQuitsWithoutFlush() {
+        // Visible overlay with an untouched editor reports dirty:false.
+        XCTAssertFalse(QuitFlush.needsFlush(pageLoaded: true, webProcessCrashed: false, pageDirty: false))
+    }
+
+    func testDirtyLoadedPageFlushes() {
+        XCTAssertTrue(QuitFlush.needsFlush(pageLoaded: true, webProcessCrashed: false, pageDirty: true))
+    }
+
+    func testNoLivePageNeverFlushes() {
+        XCTAssertFalse(QuitFlush.needsFlush(pageLoaded: false, webProcessCrashed: false, pageDirty: true))
+        XCTAssertFalse(QuitFlush.needsFlush(pageLoaded: true, webProcessCrashed: true, pageDirty: true))
+        XCTAssertFalse(QuitFlush.needsFlush(pageLoaded: false, webProcessCrashed: true, pageDirty: false))
+    }
+
     func testFastOperationSucceeds() async throws {
         var ran = false
         try await QuitFlush.run(timeout: .seconds(2)) { ran = true }

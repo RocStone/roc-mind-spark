@@ -5,6 +5,14 @@ import Foundation
 /// a hung page. This races an unstructured operation against a timer instead;
 /// whichever finishes first resumes the caller exactly once.
 enum QuitFlush {
+    /// Whether `applicationShouldTerminate` must run the page flush before
+    /// quitting. Only a live, loaded page that reports unsaved work (save
+    /// queue or an open editor's draft) needs it; everything else answers
+    /// `.terminateNow` so logout and shutdown are not interrupted.
+    static func needsFlush(pageLoaded: Bool, webProcessCrashed: Bool, pageDirty: Bool) -> Bool {
+        pageDirty && pageLoaded && !webProcessCrashed
+    }
+
     struct TimedOut: LocalizedError {
         var errorDescription: String? { L10n.t("error.saveTimeout") }
     }

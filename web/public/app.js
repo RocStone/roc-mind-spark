@@ -9409,6 +9409,8 @@ function scheduleSaveStatePost(){
 if(typeof document!=='undefined' && document.addEventListener){
   for(const type of ['input','focusin','focusout','compositionstart','compositionend','keydown','pointerdown'])
     document.addEventListener(type, scheduleSaveStatePost, true);
+  // A reloaded page (e.g. after a WebContent crash) resets the shell's copy.
+  scheduleSaveStatePost();
 }
 function scheduleSave(){
   if(!map || READONLY || _historyPreview) return;

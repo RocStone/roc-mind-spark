@@ -45,14 +45,15 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
     /// Save panels and JS dialogs are sheets on the overlay. While one is up,
     /// clicks and app switches it causes must not hide the overlay.
     private var nativeModalDepth = 0
-    /// Mirrors the page's save queue (`{op:'saveState'}`): true while any map
-    /// has an edit that has not reached the server yet.
+    /// Mirrors the page's `{op:'saveState'}` (`rmsPageIsDirty()` in app.js):
+    /// true while any map has an edit that has not reached the server yet,
+    /// including drafts still in an open node editor, notes popup or
+    /// Markdown pane.
     private(set) var pageDirty = false
     /// WebContent crashed; the page (and anything unsaved in it) is gone
     /// until the reload finishes.
     private var webProcessCrashed = false
     private var powerOffFlushInFlight = false
-    private var powerOffFlushedAt: Date?
 
     private(set) var isVisible = false
 
@@ -189,18 +190,14 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
     /// Normal application quit waits for the page's model and save queue.
     /// The page is kept alive if persistence fails, so drafts remain editable.
     /// False means quitting now cannot lose anything: the page never loaded,
-    /// its process is dead, or its save queue is idle and the overlay is
-    /// parked (hiding already committed any open editor). A visible overlay
-    /// may hold an uncommitted node or note editor, so it still flushes unless
-    /// the logout/power-off pre-flush just did that.
+    /// its process is dead, or the page reports nothing unsaved. The page's
+    /// flag covers open editors too, so overlay visibility does not matter.
     var needsFlushBeforeQuit: Bool {
-        guard webView != nil, didStartLoad, !webProcessCrashed else { return false }
-        if pageDirty || powerOffFlushInFlight { return true }
-        if isVisible {
-            if let at = powerOffFlushedAt, Date().timeIntervalSince(at) < 60 { return false }
-            return true
-        }
-        return false
+        QuitFlush.needsFlush(
+            pageLoaded: webView != nil && didStartLoad,
+            webProcessCrashed: webProcessCrashed,
+            pageDirty: pageDirty
+        )
     }
 
     /// Logout / restart / shutdown: save before AppKit asks us to quit, so
@@ -213,7 +210,6 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
             guard let self else { return }
             do {
                 try await QuitFlush.run(timeout: .seconds(7)) { try await self.flushBeforeQuit() }
-                self.powerOffFlushedAt = Date()
                 Paths.log("willPowerOff: flush done")
             } catch {
                 Paths.log("willPowerOff: flush failed \(error.localizedDescription)")
