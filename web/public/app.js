@@ -9467,11 +9467,11 @@ let _historyRequestGeneration=0;
 let _historyPreview = null;   // {original} while previewing a past version
 function relTime(ts){
   const s=Math.floor((Date.now()-ts)/1000);
-  if(s<60) return 'just now';
-  if(s<3600) return Math.floor(s/60)+' min ago';
-  if(s<86400) return Math.floor(s/3600)+' h ago';
+  if(s<60) return rmsTr('relJustNow','just now');
+  if(s<3600) return rmsTf('relMinAgo','%s min ago', Math.floor(s/60));
+  if(s<86400) return rmsTf('relHourAgo','%s h ago', Math.floor(s/3600));
   const d=Math.floor(s/86400);
-  if(d<30) return d+' day'+(d===1?'':'s')+' ago';
+  if(d<30) return d===1 ? rmsTr('relDayAgo','1 day ago') : rmsTf('relDaysAgo','%s days ago', d);
   return new Date(ts).toLocaleDateString();
 }
 async function showVersionHistory(){
@@ -9480,8 +9480,8 @@ async function showVersionHistory(){
   document.querySelectorAll('.hist-panel,.export-pop').forEach(p=>p.remove());
   const panel=document.createElement('div');
   panel.className='hist-panel';
-  panel.innerHTML=`<div class="hist-head"><b>Version history</b><button class="hist-x" title="Close">×</button></div>
-    <div class="hist-list"><div class="hist-status">Loading…</div></div>`;
+  panel.innerHTML=`<div class="hist-head"><b>${escapeHtml(rmsTr('exHistory','Version history'))}</b><button class="hist-x" title="${escapeHtml(rmsTr('close','Close'))}">×</button></div>
+    <div class="hist-list"><div class="hist-status">${escapeHtml(rmsTr('layoutPresetsLoading','Loading…'))}</div></div>`;
   document.body.appendChild(panel);
   panel.addEventListener('mousedown',e=>e.stopPropagation());
   panel.querySelector('.hist-x').onclick=()=>{ cancelHistoryPreview(); panel.remove(); };
@@ -9492,16 +9492,16 @@ async function showVersionHistory(){
   catch(e){ list.textContent=rmsTr('storageUnavailable','Could not load your maps.'); return; }
   if(!panel.isConnected || !map || map.id!==mapId) return;
   if(!versions || !versions.length){
-    list.innerHTML=`<div class="hist-status">No earlier versions yet.<br><span class="hist-sub">Versions are recorded each time the map changes. Make an edit, then check back.</span></div>`;
+    list.innerHTML=`<div class="hist-status">${escapeHtml(rmsTr('histEmpty','No earlier versions yet.'))}<br><span class="hist-sub">${escapeHtml(rmsTr('histEmptySub','Versions are recorded each time the map changes. Make an edit, then check back.'))}</span></div>`;
     return;
   }
   list.innerHTML = versions.map((v,i)=>`
     <div class="hist-row" data-ref="${escapeHtml(String(v.ref!=null?v.ref:v.ts))}">
-      <div class="hist-when"><b>${i===0?'Latest':relTime(v.ts)}</b><i>${new Date(v.ts).toLocaleString()}</i></div>
+      <div class="hist-when"><b>${escapeHtml(i===0?rmsTr('histLatest','Latest'):relTime(v.ts))}</b><i>${new Date(v.ts).toLocaleString()}</i></div>
       <div class="hist-actions">
-        <button class="hist-prev">Preview</button>
-        <button class="hist-diff">Diff</button>
-        <button class="hist-restore${i===0?' disabled':''}"${i===0?' disabled':''}>Restore</button>
+        <button class="hist-prev">${escapeHtml(rmsTr('histPreview','Preview'))}</button>
+        <button class="hist-diff">${escapeHtml(rmsTr('histDiff','Diff'))}</button>
+        <button class="hist-restore${i===0?' disabled':''}"${i===0?' disabled':''}>${escapeHtml(rmsTr('histRestore','Restore'))}</button>
       </div>
     </div>`).join('');
   list.querySelectorAll('.hist-row').forEach(row=>{
@@ -9545,17 +9545,18 @@ async function diffVersion(mapId, ref){
 function showDiffPanel(d){
   document.querySelectorAll('.diff-panel').forEach(p=>p.remove());
   const e=escapeHtml;
+  const empty=rmsTr('diffEmptyText','(empty)');
   const sec=(title,items,cls)=> !items.length ? '' :
-    `<div class="diff-sec"><div class="diff-h ${cls}">${title} (${items.length})</div>`+
+    `<div class="diff-sec"><div class="diff-h ${cls}">${e(title)} (${items.length})</div>`+
     items.map(it=> typeof it==='string'
-      ? `<div class="diff-row ${cls}">${e(it||'(empty)')}</div>`
-      : `<div class="diff-row chg"><span class="d-from">${e(it.from||'(empty)')}</span><span class="d-arrow">\u2192</span><span class="d-to">${e(it.to||'(empty)')}</span></div>`
+      ? `<div class="diff-row ${cls}">${e(it||empty)}</div>`
+      : `<div class="diff-row chg"><span class="d-from">${e(it.from||empty)}</span><span class="d-arrow">\u2192</span><span class="d-to">${e(it.to||empty)}</span></div>`
     ).join('')+`</div>`;
   const total=d.added.length+d.removed.length+d.changed.length;
   const panel=document.createElement('div'); panel.className='diff-panel';
-  panel.innerHTML=`<div class="diff-head"><b>Changes since this version</b><button class="diff-x" title="Close">\u00d7</button></div>`+
-    (total ? sec('Added',d.added,'add')+sec('Removed',d.removed,'del')+sec('Edited',d.changed,'chg')
-           : `<div class="diff-empty">No differences \u2014 identical to the current map.</div>`);
+  panel.innerHTML=`<div class="diff-head"><b>${e(rmsTr('diffTitle','Changes since this version'))}</b><button class="diff-x" title="${e(rmsTr('close','Close'))}">\u00d7</button></div>`+
+    (total ? sec(rmsTr('diffAdded','Added'),d.added,'add')+sec(rmsTr('diffRemoved','Removed'),d.removed,'del')+sec(rmsTr('diffEdited','Edited'),d.changed,'chg')
+           : `<div class="diff-empty">${e(rmsTr('diffNone','No differences — identical to the current map.'))}</div>`);
   document.body.appendChild(panel);
   panel.querySelector('.diff-x').onclick=()=>panel.remove();
 }
@@ -9576,9 +9577,9 @@ function showPreviewBanner(mapId, ref){
   document.querySelectorAll('.hist-banner').forEach(b=>b.remove());
   const b=document.createElement('div');
   b.className='hist-banner';
-  b.innerHTML=`<span>👁 Previewing an earlier version (read-only)</span>
-    <button class="hb-restore">Restore this version</button>
-    <button class="hb-cancel">Back to current</button>`;
+  b.innerHTML=`<span>👁 ${escapeHtml(rmsTr('histBanner','Previewing an earlier version (read-only)'))}</span>
+    <button class="hb-restore">${escapeHtml(rmsTr('histRestoreThis','Restore this version'))}</button>
+    <button class="hb-cancel">${escapeHtml(rmsTr('histBackCurrent','Back to current'))}</button>`;
   document.body.appendChild(b);
   b.querySelector('.hb-restore').onclick=()=>restoreVersion(mapId, ref);
   b.querySelector('.hb-cancel').onclick=()=>{ cancelHistoryPreview(); };
@@ -9680,23 +9681,23 @@ function showBuildPrompt(nodeId){
   const panel=document.createElement('div');
   panel.className='bp-panel';
   panel.innerHTML=`
-    <div class="bp-head"><b>Build prompt from “${escapeHtml(nodeTextPlain(map.nodes[nodeId].text||'').slice(0,40)||'branch')}”</b><button class="bp-x" title="Close">×</button></div>
+    <div class="bp-head"><b>${escapeHtml(rmsTf('bpTitle','Build prompt from “%s”', nodeTextPlain(map.nodes[nodeId].text||'').slice(0,40)||rmsTr('bpBranch','branch')))}</b><button class="bp-x" title="${escapeHtml(rmsTr('close','Close'))}">×</button></div>
     <textarea class="bp-text" spellcheck="false">${escapeHtml(prompt)}</textarea>
-    <div class="bp-meta"><span class="bp-tok">~${tok} tokens</span></div>
+    <div class="bp-meta"><span class="bp-tok">${escapeHtml(rmsTf('bpTokens','~%s tokens', tok))}</span></div>
     <div class="bp-row">
-      <button class="bp-copy primary">Copy prompt</button>
-      <button class="bp-toggle">Run with API ▾</button>
+      <button class="bp-copy primary">${escapeHtml(rmsTr('bpCopy','Copy prompt'))}</button>
+      <button class="bp-toggle">${escapeHtml(rmsTr('bpRunApi','Run with API'))} ▾</button>
     </div>
     <div class="bp-run" style="display:none">
       <div class="bp-run-row">
         <select class="bp-provider">
           ${Object.entries(LLM_PROVIDERS).map(([k,v])=>`<option value="${k}"${k===provider?' selected':''}>${v.label}</option>`).join('')}
         </select>
-        <input class="bp-model" placeholder="model" value="${escapeHtml(model)}">
+        <input class="bp-model" placeholder="${escapeHtml(rmsTr('bpModel','model'))}" value="${escapeHtml(model)}">
       </div>
-      <input class="bp-key" type="password" placeholder="API key (stored only in this browser)" value="${escapeHtml(localStorage.getItem('mindspark:llm:key:'+provider)||'')}">
-      <div class="bp-warn">⚠ Your key is stored in this browser's localStorage and sent directly to the provider. Use a scoped key; don't use this on a shared machine.</div>
-      <button class="bp-send primary">Send →</button>
+      <input class="bp-key" type="password" placeholder="${escapeHtml(rmsTr('bpKeyPh','API key (stored only in this browser)'))}" value="${escapeHtml(localStorage.getItem('mindspark:llm:key:'+provider)||'')}">
+      <div class="bp-warn">⚠ ${escapeHtml(rmsTr('bpWarn','Your key is stored in this browser’s localStorage and sent directly to the provider. Use a scoped key; don’t use this on a shared machine.'))}</div>
+      <button class="bp-send primary">${escapeHtml(rmsTr('bpSend','Send'))} →</button>
       <div class="bp-result" style="display:none"></div>
     </div>`;
   document.body.appendChild(panel);
@@ -9715,25 +9716,25 @@ function showBuildPrompt(nodeId){
     localStorage.setItem('mindspark:llm:provider',pv);
     localStorage.setItem('mindspark:llm:model:'+pv,mdl);
     localStorage.setItem('mindspark:llm:key:'+pv,key);
-    const res=$$('.bp-result'); res.style.display='block'; res.textContent='Running…';
+    const res=$$('.bp-result'); res.style.display='block'; res.textContent=rmsTr('bpRunning','Running…');
     const send=$$('.bp-send'); send.disabled=true;
     try{
       const cfg=LLM_PROVIDERS[pv];
       const r=await fetch(cfg.url,{method:'POST',headers:cfg.headers(key),body:cfg.body(mdl,$$('.bp-text').value)});
       if(!r.ok){ const t=await r.text(); throw new Error('HTTP '+r.status+' — '+t.slice(0,200)); }
       const data=await r.json();
-      const answer=cfg.extract(data)||'(empty response)';
+      const answer=cfg.extract(data)||rmsTr('bpEmptyResp','(empty response)');
       res.innerHTML='';
       const pre=document.createElement('div'); pre.className='bp-answer'; pre.textContent=answer;
       const acts=document.createElement('div'); acts.className='bp-answer-acts';
-      const cp=document.createElement('button'); cp.textContent='Copy answer';
+      const cp=document.createElement('button'); cp.textContent=rmsTr('bpCopyAnswer','Copy answer');
       cp.onclick=()=>navigator.clipboard?.writeText(answer).then(()=>toast(rmsTr('tAnswerCopied','Answer copied')));
-      const add=document.createElement('button'); add.className='primary'; add.textContent='Add as child nodes';
+      const add=document.createElement('button'); add.className='primary'; add.textContent=rmsTr('bpAddChildren','Add as child nodes');
       add.onclick=()=>{ addResponseAsNodes(nodeId, answer); panel.remove(); toast(rmsTr('tAddedToMap','Added to map')); };
       acts.appendChild(cp); acts.appendChild(add);
       res.appendChild(pre); res.appendChild(acts);
     }catch(e){
-      res.textContent='Error: '+e.message;
+      res.textContent=rmsTf('bpError','Error: %s', e.message);
     } finally { send.disabled=false; }
   };
 }
