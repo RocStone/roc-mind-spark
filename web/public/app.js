@@ -734,20 +734,24 @@ function nodeOutsideRect(n, r){
   const w=n.w||120, h=n.h||40;
   return n.x+w<r.x0 || n.x>r.x1 || n.y+h<r.y0 || n.y>r.y1;
 }
+// [{el,id}] for every rendered .node, rebuilt at the end of render() so the
+// per-frame cull does not query the DOM. null = rebuild lazily from the DOM.
+let _cullPairs=null;
 function cullOffscreenNodes(){
   if(!viewport || !map || !map.nodes) return;
-  const els=viewport.querySelectorAll('.node');
-  const nEls=els.length;
+  if(!_cullPairs) _cullPairs=Array.from(viewport.querySelectorAll('.node'), el=>({el, id:el.dataset.id}));
+  const pairs=_cullPairs;
+  const nEls=pairs.length;
   if(nEls<80){
-    for(let i=0;i<nEls;i++) els[i].classList.remove('offscreen');
+    for(let i=0;i<nEls;i++) pairs[i].el.classList.remove('offscreen');
     return;
   }
   const {w:SW,h:SH}=(_prevStage && _prevStage.w>1 && _prevStage.h>1) ? _prevStage : _stageSize();
   const pad=Math.max(120, 280/(view.k||1));
   const r=mapViewRect(view, SW, SH, pad);
   for(let i=0;i<nEls;i++){
-    const el=els[i];
-    const id=el.dataset.id;
+    const {el, id}=pairs[i];
+    if(!el.isConnected){ _cullPairs=null; continue; }   // DOM changed outside render()
     if(el.classList.contains('editing') || id===sel){
       if(el.classList.contains('offscreen')) el.classList.remove('offscreen');
       continue;
@@ -803,6 +807,7 @@ function render(){
   // (pushHistory, cycleTask, setMarker) flush first.
   if(typeof discardEditOverlay==='function') discardEditOverlay();
   clearNodes(); edges.innerHTML='';
+  _cullPairs=null;
   clearFormulaCache();
   if(!map){
     $('#empty').style.display='grid';
@@ -1080,6 +1085,7 @@ function render(){
   if(typeof multiSel !== 'undefined' && multiSel.size){
     multiSel.forEach(id=>document.querySelector(`.node[data-id="${id}"]`)?.classList.add('multi-sel'));
   }
+  _cullPairs=toMeasure.map(({el})=>({el, id:el.dataset.id}));
   cullOffscreenNodes();
   } finally { _ci=_prevCI; }
 }
@@ -2823,6 +2829,8 @@ function paintPositions(hidden){
   });
   drawEdges(hidden);
   repositionNodeBar();
+  // Nodes shifted into view by the live relayout must stop being culled.
+  cullOffscreenNodes();
 }
 // Re-measure the node being edited, recompute the tidy layout, and paint it.
 // Keeps the map neat as the node grows while typing (the way GitMind reflows).
