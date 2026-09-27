@@ -46,6 +46,19 @@ describe('request body decoding', () => {
   });
 });
 
+describe('map list', () => {
+  test('includes a boolean pinned flag for every map, open or not', async () => {
+    const put = (m) => rawRequest(srv.port, { method: 'PUT', path: '/api/maps/' + m.id, headers: JSON_HEADERS, chunks: [JSON.stringify(m)] });
+    assert.equal((await put(sampleMap('pinYes', { pinned: true }))).status, 200);
+    assert.equal((await put(sampleMap('pinNo'))).status, 200);
+    const list = (await rawRequest(srv.port, { path: '/api/maps' })).json;
+    const byId = Object.fromEntries(list.map(m => [m.id, m]));
+    assert.equal(byId.pinYes.pinned, true);
+    assert.equal(byId.pinNo.pinned, false);
+    assert.equal('data' in byId.pinYes, false, 'list stays a lightweight index');
+  });
+});
+
 describe('CSRF guards on writes', () => {
   const body = () => [JSON.stringify(sampleMap('csrf'))];
 

@@ -55,7 +55,7 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_versions_id ON map_versions (id, ts DESC);
 `);
 const Q = {
-  list:   db.prepare('SELECT id, title, color, updated FROM maps ORDER BY updated DESC'),
+  list:   db.prepare("SELECT id, title, color, updated, COALESCE(json_extract(data,'$.pinned'),0) AS pinned FROM maps ORDER BY updated DESC"),
   get:    db.prepare('SELECT data FROM maps WHERE id = ?'),
   insert: db.prepare('INSERT INTO maps (id,title,color,data,updated) VALUES (?,?,?,?,?)'),
   update: db.prepare('UPDATE maps SET title=?, color=?, data=?, updated=? WHERE id=?'),
@@ -243,7 +243,9 @@ const server = http.createServer(async (req, res) => {
 
   try {
     // ----- API -----
-    if (p === '/api/maps' && req.method === 'GET') return send(res, 200, Q.list.all());
+    if (p === '/api/maps' && req.method === 'GET') {
+      return send(res, 200, Q.list.all().map(r => ({ ...r, pinned: !!r.pinned })));
+    }
 
     if (p === '/api/maps' && req.method === 'POST') {
       const m = await readBody(req);

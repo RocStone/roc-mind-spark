@@ -8252,10 +8252,12 @@ async function refreshList(){
   // (don't wait for the debounced save to hit the database). Shared maps (_cloudView)
   // are NOT owned — they belong in "Shared with me", never in "Your maps".
   if(map && !map._cloudView){
-    const local={id:map.id, title:map.title, color:map.color, updated:map.updated||Date.now(), pinned:map.pinned||undefined};
+    // Pin state comes from the server list for every row (togglePin saves
+    // before refreshing); only a not-yet-saved map uses its in-memory flag.
+    const local={id:map.id, title:map.title, color:map.color, updated:map.updated||Date.now()};
     const at=idx.findIndex(m=>m.id===map.id);
     if(at>=0) idx[at]={...idx[at], ...local};
-    else idx.unshift(local);
+    else idx.unshift({...local, pinned:!!map.pinned});
   }
   // Pinned maps first, then most-recently-updated.
   idx.sort((a,b)=> (b.pinned?1:0)-(a.pinned?1:0) || (b.updated||0)-(a.updated||0));
