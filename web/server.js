@@ -153,23 +153,36 @@ const send = (res, code, body, type='application/json') => {
   res.writeHead(code);
   res.end(typeof body === 'string' || Buffer.isBuffer(body) ? body : JSON.stringify(body));
 };
-const readBody = (req) => new Promise((resolve, reject) => {
-  let d = '';
-  req.on('data', c => { d += c; if (d.length > 8e6) { req.destroy(); reject(new Error('payload too large')); } });
-  req.on('end', () => { try { resolve(d ? JSON.parse(d) : {}); } catch (e) { reject(e); } });
-  req.on('error', reject);
-});
+const httpError = (status, message) => Object.assign(new Error(message), { status });
+const MAX_JSON_BYTES = 8e6;
+// Collect raw Buffers and decode once: decoding per chunk turns a multi-byte
+// UTF-8 character split across two chunks into U+FFFD. The limit is in bytes.
+// On overflow, stop buffering and reject with 413; the handler answers first
+// and only then closes the connection, so the client sees the status.
 const readRaw = (req, limit) => new Promise((resolve, reject) => {
-  const chunks = [];
+  let chunks = [];
   let n = 0;
+  let done = false;
   req.on('data', c => {
+    if (done) return;
     n += c.length;
-    if (n > limit) { req.destroy(); reject(new Error('payload too large')); return; }
+    if (n > limit) {
+      done = true; chunks = null;
+      req.pause();
+      reject(httpError(413, 'payload too large'));
+      return;
+    }
     chunks.push(c);
   });
-  req.on('end', () => resolve(Buffer.concat(chunks)));
-  req.on('error', reject);
+  req.on('end', () => { if (!done) { done = true; resolve(Buffer.concat(chunks)); } });
+  req.on('error', e => { if (!done) { done = true; reject(e); } });
 });
+const readBody = async (req) => {
+  const d = (await readRaw(req, MAX_JSON_BYTES)).toString('utf8');
+  if (!d) return {};
+  try { return JSON.parse(d); }
+  catch (e) { throw httpError(400, 'invalid JSON: ' + (e && e.message || e)); }
+};
 
 // ---- server --------------------------------------------------------------
 const server = http.createServer(async (req, res) => {
@@ -341,7 +354,15 @@ const server = http.createServer(async (req, res) => {
     }
     send(res, 404, { error: 'not found' });
   } catch (e) {
-    send(res, 500, { error: String(e && e.message || e) });
+    const status = e && Number.isInteger(e.status) && e.status >= 400 && e.status < 600 ? e.status : 500;
+    if (status === 413) {
+      // The unread remainder of an oversized body is not worth draining.
+      // Close the connection once the 413 has been written.
+      res.setHeader('Connection', 'close');
+      res.on('finish', () => req.destroy());
+    }
+    if (res.headersSent) { res.end(); return; }
+    send(res, status, { error: String(e && e.message || e) });
   }
 });
 
