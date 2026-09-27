@@ -6865,7 +6865,10 @@ function positionNodeBar(){
       else if(a==='href'){ showHrefPicker(b, sel); return; }
       else if(a==='image'){
         if(map.nodes[sel].image){
-          if(confirm('Remove this image?')) detachImageFromNode(sel);
+          const imgId=sel;
+          rmsConfirm(rmsTr('confirmRemoveImage','Remove this image?'),
+                     { okLabel:rmsTr('dlgRemove','Remove'), danger:true })
+            .then(ok=>{ if(ok && map && map.nodes[imgId] && map.nodes[imgId].image) detachImageFromNode(imgId); });
         } else attachImageToNode(sel);
       }
       else if(a==='mdtable'){ showMdTablePicker(b, sel); return; }
@@ -8271,7 +8274,7 @@ function openRowMenu(btn, m){
   pop.querySelector('[data-a="pin"]').onclick=ev=>{ ev.stopPropagation(); closeRowMenu(); togglePin(m.id); };
   pop.querySelector('[data-a="dup"]').onclick=ev=>{ ev.stopPropagation(); closeRowMenu(); duplicateMap(m.id); };
   pop.querySelector('[data-a="del"]').onclick=async ev=>{ ev.stopPropagation(); closeRowMenu();
-    if(!confirm(rmsTr('confirmDeleteMap','Delete “%s”?').replace('%s', m.title||rmsTr('untitled','Untitled')))) return;
+    if(!(await rmsConfirm(rmsTr('confirmDeleteMap','Delete “%s”?').replace('%s', m.title||rmsTr('untitled','Untitled')), { okLabel:rmsTr('dlgDelete','Delete'), danger:true }))) return;
     ++_mapLoadGeneration;
     try{ await _mapSaves.remove(m.id,id=>Store.remove(id)); }
     catch(e){ toast(rmsTr('deleteMapFailed','Could not delete the map. Please retry.')); return; }
@@ -8574,7 +8577,16 @@ function showNotesEditor(nodeId, opts){
       const c=btn.dataset.c;
       if(c==='h1'||c==='h2'){ execCmd('formatBlock', '<'+c+'>'); }
       else if(c==='createLink'){
-        const url=prompt(rmsTr('enterUrl','Enter URL (https://…):')); if(url) execCmd('createLink',url);
+        // The dialog takes focus; remember the selection to link and put it back.
+        const s=getSelection();
+        const range=s.rangeCount && editor.contains(s.anchorNode) ? s.getRangeAt(0).cloneRange() : null;
+        rmsPrompt(rmsTr('enterUrl','Enter URL (https://…):')).then(url=>{
+          if(!editor.isConnected) return;
+          editor.focus();
+          if(range){ const s2=getSelection(); s2.removeAllRanges(); s2.addRange(range); }
+          if(url) execCmd('createLink',url);
+        });
+        return;
       }
       else { execCmd(c); }
       editor.focus();
@@ -8690,10 +8702,10 @@ async function duplicateMap(id){
 }
 
 // ===== Save current map as a reusable template =====
-function saveAsTemplate(){
+async function saveAsTemplate(){
   if(!map){ return; }
-  const name = (prompt('Name this template:', map.title||'My template')||'').trim();
-  if(!name) return;
+  const name = ((await rmsPrompt(rmsTr('templateNamePrompt','Name this template:'), map.title||'My template'))||'').trim();
+  if(!name || !map) return;
   const idToK = {}; let i=0;
   Object.keys(map.nodes).forEach(nid=>{ idToK[nid] = (nid===map.rootId) ? 'root' : ('n'+(i++)); });
   const nodes = Object.values(map.nodes).map(n=>{
@@ -8800,10 +8812,17 @@ function showTemplatesMenu(){
     pop.querySelectorAll('.tpl-item[data-id]').forEach(b => b.onclick = (e) => {
       if(e.target.classList.contains('tpl-del')){
         e.stopPropagation();
-        deleteUserTemplate(e.target.dataset.del);
-        // Refresh; back to root if the category is now gone.
-        if(TEMPLATE_CATEGORIES.some(c=>c.id===catId)) renderCategory(catId);
-        else renderRoot();
+        const tid=e.target.dataset.del;
+        const tname=(TEMPLATES[tid] && TEMPLATES[tid].name) || '';
+        rmsConfirm(rmsTr('confirmDeleteTemplate','Delete template “%s”?').replace('%s', tname),
+                   { okLabel:rmsTr('dlgDelete','Delete'), danger:true }).then(ok=>{
+          if(!ok) return;
+          deleteUserTemplate(tid);
+          if(!pop.isConnected) return;
+          // Refresh; back to root if the category is now gone.
+          if(TEMPLATE_CATEGORIES.some(c=>c.id===catId)) renderCategory(catId);
+          else renderRoot();
+        });
         return;
       }
       close(); createMapFromTemplate(b.dataset.id);
@@ -9616,7 +9635,7 @@ function importFile(){
       autoLayout(); fit();
       refreshList();
       toast('Imported '+f.name + (preserveState?'':' (collapsed — click ＋ to expand)'));
-    }catch(e){ console.error(e); alert('Could not import this file:\n'+e.message); }
+    }catch(e){ console.error(e); rmsAlert(rmsTr('importFailed','Could not import this file:\n%s').replace('%s', e.message)); }
   };
   inp.click();
 }
@@ -10656,6 +10675,78 @@ function buildPrompt(startId, values){
   walk(root, 0);
   return out.join('\n').replace(/\n{3,}/g, '\n\n').trim() + '\n';
 }
+
+/* ---------- In-page dialogs ----------
+   WKWebView has no UI delegate for window.confirm/prompt/alert, so those
+   return false/null silently. These themed modals replace them and resolve a
+   Promise: rmsConfirm → true/false, rmsPrompt → string/null, rmsAlert → undefined.
+   They use .var-form, so the canvas keydown handler already treats them as modal. */
+function rmsDialog(message, opts){
+  const o=opts||{};
+  const kind=o.kind||'confirm';                 // 'confirm' | 'prompt' | 'alert'
+  return new Promise(resolve=>{
+    const prevFocus=document.activeElement;
+    const m=document.createElement('div');
+    m.className='var-form rms-dialog';
+    m.setAttribute('role', kind==='alert' ? 'alertdialog' : 'dialog');
+    m.setAttribute('aria-modal','true');
+    m.innerHTML=`
+      <div class="vf-backdrop"></div>
+      <div class="vf-card">
+        <p class="vf-sub rms-dialog-msg"></p>
+        ${kind==='prompt' ? '<div class="vf-fields"><input class="vf-input rms-dialog-input" type="text" spellcheck="false"></div>' : ''}
+        <div class="vf-actions">
+          ${kind==='alert' ? '' : '<button class="vf-cancel"></button>'}
+          <button class="vf-go primary${o.danger ? ' danger' : ''}"></button>
+        </div>
+      </div>`;
+    m.querySelector('.rms-dialog-msg').textContent=String(message==null ? '' : message);
+    const okBtn=m.querySelector('.vf-go');
+    const cancelBtn=m.querySelector('.vf-cancel');
+    const input=m.querySelector('.rms-dialog-input');
+    okBtn.textContent=o.okLabel || rmsTr('ok','OK');
+    if(cancelBtn) cancelBtn.textContent=o.cancelLabel || rmsTr('cancel','Cancel');
+    if(input) input.value=o.defaultValue==null ? '' : String(o.defaultValue);
+    let done=false;
+    const finish=value=>{
+      if(done) return;
+      done=true;
+      m.remove();
+      try{ if(prevFocus && prevFocus.isConnected && prevFocus.focus) prevFocus.focus({preventScroll:true}); }catch(_){}
+      resolve(value);
+    };
+    const ok=()=>finish(kind==='prompt' ? input.value : (kind==='alert' ? undefined : true));
+    const cancel=()=>finish(kind==='prompt' ? null : (kind==='alert' ? undefined : false));
+    okBtn.onclick=ok;
+    if(cancelBtn) cancelBtn.onclick=cancel;
+    m.querySelector('.vf-backdrop').onclick=cancel;
+    // Nothing inside may reach the canvas (mousedown clears selection,
+    // keydown would edit the map underneath).
+    m.addEventListener('mousedown',e=>e.stopPropagation());
+    m.addEventListener('click',e=>e.stopPropagation());
+    m.addEventListener('keydown',e=>{
+      e.stopPropagation();
+      if(isImeEvent(e)) return;
+      if(e.key==='Escape'){ e.preventDefault(); cancel(); }
+      else if(e.key==='Enter' && !e.shiftKey && !e.altKey){
+        e.preventDefault();
+        if(e.target===cancelBtn) cancel(); else ok();
+      }
+      else if(e.key==='Tab'){
+        // Keep focus inside the dialog.
+        const f=[input, cancelBtn, okBtn].filter(Boolean);
+        const i=f.indexOf(document.activeElement);
+        e.preventDefault();
+        f[(i + (e.shiftKey ? f.length-1 : 1)) % f.length].focus();
+      }
+    });
+    document.body.appendChild(m);
+    if(input){ input.focus(); input.select(); } else okBtn.focus();
+  });
+}
+function rmsConfirm(message, opts){ return rmsDialog(message, { ...(opts||{}), kind:'confirm' }); }
+function rmsPrompt(message, defaultValue){ return rmsDialog(message, { kind:'prompt', defaultValue }); }
+function rmsAlert(message){ return rmsDialog(message, { kind:'alert' }); }
 
 // Show a small modal listing each detected variable with an input field.
 // On submit, calls `done(values)` with the user-entered substitutions.
