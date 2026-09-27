@@ -24,6 +24,12 @@ Versions follow the macOS bundle `CFBundleShortVersionString` and the matching G
 
 ### Added (2026-09-28)
 
+- Focus mode now focuses a branch: with a topic selected it shows only that subtree plus a dimmed ancestor chain, without touching fold state; Escape restores the full map.
+- Built-in templates open fully in 中文 when the interface language is 中文 (names, descriptions, topics and notes; 50 templates).
+- Unreferenced image files older than a day are removed on startup and daily, after checking every map and every stored version.
+- The export Save panel remembers the last folder.
+- Quit and logout skip the save round-trip whenever the page reports nothing dirty, including open node, notes and Markdown editors.
+- The operations log no longer records topic text. Removed the inherited `web/worker/` modules; the import endpoint's map builder lives in `web/import-spec.js`.
 - ⌘V with a topic selected pastes the copied subtree (or a multi-line outline) as children; ⌘C copies the subtree outline. ⌘A selects all visible topics, ⌘⇧A selects siblings, ⇧Esc cancels an edit.
 - Right-click menu on a topic (add child/sibling, edit, notes, marker, copy as Markdown, duplicate subtree, fold, delete).
 - Layout presets shipped in `web/public/layouts/` appear in the look panel; the JSON import dialog has an entry point again.
