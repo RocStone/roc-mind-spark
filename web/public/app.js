@@ -8294,6 +8294,9 @@ stage.addEventListener('scroll',()=>{ if(stage.scrollLeft||stage.scrollTop){ sta
 let searchMatches=[], searchPos=-1;
 let searchReveal=null;
 let searchAutoExpanded=new Set();
+// Hits outside the focused branch, kept only while the branch has none:
+// the count reads "0 · N outside focus" and Enter leaves branch focus.
+let searchOutsideMatches=[];
 
 // node -> {raw, plain}. The raw text is the validity key: an edited node
 // misses and is re-stripped; untouched nodes skip the HTML parse per keystroke.
@@ -8310,7 +8313,7 @@ function nodeSearchText(n){
   }
   return raw;
 }
-function searchWalkIds(){
+function searchWalkIds(startId){
   const ids=[];
   if(!map || !map.rootId || !map.nodes) return ids;
   const walk=id=>{
@@ -8319,20 +8322,50 @@ function searchWalkIds(){
     const kids = typeof childrenOf==='function' ? childrenOf(id) : [];
     for(let i=0;i<kids.length;i++) walk(kids[i]);
   };
-  walk(map.rootId);
+  walk(startId || map.rootId);
   return ids;
 }
-function collectSearchMatches(q){
+// The subtree search is limited to: the branch-focus root while branch focus
+// actually narrows the canvas, otherwise null (whole map). Mirrors
+// focusBranchSets(): the map root or a node detached from the root does not
+// narrow anything, so it does not narrow search either.
+function searchFocusScope(){
+  const f=(typeof _focusRootId!=='undefined') ? _focusRootId : null;
+  if(!f || !map || !map.nodes || !map.nodes[f] || f===map.rootId) return null;
+  const seen=new Set();
+  for(let p=map.nodes[f].parent; p && map.nodes[p] && !seen.has(p); p=map.nodes[p].parent){
+    if(p===map.rootId) return f;
+    seen.add(p);
+  }
+  return null;
+}
+// scope: a node id limits hits to that node and its descendants; null searches
+// the whole map; omitted uses the current branch focus (searchFocusScope).
+function collectSearchMatches(q, scope){
   q=String(q||'').trim().toLowerCase();
   if(!q || !map || !map.nodes) return [];
+  if(scope===undefined) scope=searchFocusScope();
   const hits=[];
-  const ids=searchWalkIds();
+  const ids=searchWalkIds(scope || null);
   for(let i=0;i<ids.length;i++){
     const id=ids[i];
     const plain=nodeSearchText(map.nodes[id]);
     if(String(plain).toLowerCase().includes(q)) hits.push(id);
   }
   return hits;
+}
+// Hits the focused branch hides. Only computed when the branch itself has no
+// hit — that is the only case the count and Enter use it.
+function searchOutsideFocusMatches(q, insideHits, scope){
+  if(scope===undefined) scope=searchFocusScope();
+  if(!scope || (insideHits && insideHits.length)) return [];
+  return collectSearchMatches(q, null);
+}
+function searchCountText(needle, matches, outside){
+  if(!needle) return '';
+  if(matches.length) return rmsTr('searchFound','%s found').replace('%s', matches.length);
+  if(outside && outside.length) return rmsTf('searchOutsideFocus','0 · %s outside focus', outside.length);
+  return rmsTr('searchNone','none');
 }
 function searchCollapsedAncestors(id){
   const out=[];
@@ -8414,6 +8447,7 @@ function closeSearch(){
   w.classList.remove('open','replace-mode','all-mode');
   $('#search').value=''; $('#replace').value='';
   $('#searchCount').textContent='';
+  searchOutsideMatches=[];
   $('#allMapsToggle')?.classList.remove('on');
   globalSearchMode=false;
   hideGlobalResults();
@@ -8529,14 +8563,22 @@ function doSearch(q){
   if(_searchInputT){ clearTimeout(_searchInputT); _searchInputT=0; }
   const raw=q==null ? ($('#search')?.value||'') : q;
   searchMatches=collectSearchMatches(raw);
+  searchOutsideMatches=searchOutsideFocusMatches(raw, searchMatches);
   searchPos=-1;
   paintSearchHits();
   const cnt=$('#searchCount');
   const needle=String(raw||'').trim();
-  if(cnt) cnt.textContent = needle ? (searchMatches.length ? rmsTr('searchFound','%s found').replace('%s', searchMatches.length) : rmsTr('searchNone','none')) : '';
+  if(cnt) cnt.textContent = searchCountText(needle, searchMatches, searchOutsideMatches);
 }
 function focusNextMatch(dir=1){
   if(_searchInputT) doSearch();   // Enter right after typing: use the current query
+  if(!searchMatches.length && searchOutsideMatches.length){
+    // Nothing in the focused branch but hits elsewhere: drop branch focus
+    // (immersive focus mode stays) and carry on to the hit.
+    exitBranchFocusKeepImmersive();
+    toast(rmsTr('focusExitedForSearch','Left branch focus to show the match'));
+    doSearch();
+  }
   if(!searchMatches.length){ keepSearchFocus(); return; }
   if(typeof flushOpenEditToModel==='function') flushOpenEditToModel();
   const len=searchMatches.length;
@@ -13366,11 +13408,21 @@ function toggleFocusMode(){
     if(_focusRootId && typeof multiSel!=='undefined' && multiSel.size && typeof clearMultiSelect==='function') clearMultiSelect();
     render();
   }
+  // Find results depend on the branch scope — refresh them if find is open.
+  if($('#searchWrap')?.classList.contains('open') && !globalSearchMode) doSearch();
   // The viewport size changes when chrome is shown/hidden — wait for the layout
   // to settle, then smoothly animate. Branch focus fits the visible branch;
   // otherwise re-centre (keeping zoom) so the map doesn't jump sideways.
   const branch=!!_focusRootId;
   requestAnimationFrame(()=>requestAnimationFrame(()=>animateViewTo(branch ? computeFitView() : computeRecenterView(), 220)));
+}
+// Leave branch focus but stay in focus mode (chrome hidden). Used when find
+// needs a node the focused branch hides.
+function exitBranchFocusKeepImmersive(){
+  if(!_focusRootId) return;
+  _focusRootId=null;
+  document.body.classList.remove('focus-branch');
+  if(map) render();
 }
 $('#focusBtn')?.addEventListener('click', toggleFocusMode);
 

@@ -10,7 +10,7 @@ const appSrc = readFileSync(
   'utf8'
 );
 
-function makeMap() {
+function makeMap(focusRootId = null) {
   const map = {
     rootId: 'root',
     nodes: {
@@ -29,7 +29,10 @@ function makeMap() {
     [
       'nodeSearchText',
       'searchWalkIds',
+      'searchFocusScope',
       'collectSearchMatches',
+      'searchOutsideFocusMatches',
+      'searchCountText',
       'searchCollapsedAncestors',
       'searchExpandAncestors',
       'searchIsDescendantOf',
@@ -44,6 +47,7 @@ function makeMap() {
       hasInlineMarkup: () => false,
       nodeTextPlain: t => t,
       _searchTextCache: new WeakMap(),
+      _focusRootId: focusRootId,
     }
   );
   return { map, childrenOf, ...fns };
@@ -136,6 +140,58 @@ describe('search expand / restore of the ancestor chain', () => {
   });
 });
 
+describe('find inside branch focus', () => {
+  test('no branch focus: the whole map is searched', () => {
+    const { searchFocusScope, collectSearchMatches } = makeMap(null);
+    assert.equal(searchFocusScope(), null);
+    assert.deepEqual(collectSearchMatches('linux'), ['kernel', 'distro', 'mint']);
+  });
+
+  test('branch focus limits hits to the focus root and its descendants', () => {
+    const { searchFocusScope, collectSearchMatches } = makeMap('tools');
+    assert.equal(searchFocusScope(), 'tools');
+    assert.deepEqual(collectSearchMatches('linux'), ['kernel']);
+    assert.deepEqual(collectSearchMatches('tools'), ['tools'], 'the focus root itself is searchable');
+    assert.deepEqual(collectSearchMatches('mind'), [], 'ancestors of the focus root are out of scope');
+  });
+
+  test('an explicit null scope searches the whole map even while focused', () => {
+    const { collectSearchMatches } = makeMap('tools');
+    assert.deepEqual(collectSearchMatches('linux', null), ['kernel', 'distro', 'mint']);
+  });
+
+  test('focus on the map root, a missing node or a detached node does not narrow', () => {
+    assert.equal(makeMap('root').searchFocusScope(), null);
+    assert.equal(makeMap('ghost').searchFocusScope(), null);
+    const m = makeMap('lost');
+    m.map.nodes.lost = { id: 'lost', parent: 'nowhere', text: 'linux lost' };
+    assert.equal(m.searchFocusScope(), null);
+  });
+
+  test('outside hits are reported only when the branch has none', () => {
+    const { collectSearchMatches, searchOutsideFocusMatches } = makeMap('tools');
+    const inDistro = collectSearchMatches('distro');
+    assert.deepEqual(inDistro, []);
+    assert.deepEqual(searchOutsideFocusMatches('distro', inDistro), ['distro']);
+    const inLinux = collectSearchMatches('linux');
+    assert.deepEqual(searchOutsideFocusMatches('linux', inLinux), [], 'branch has a hit: no outside list');
+    assert.deepEqual(searchOutsideFocusMatches('zzz', []), []);
+  });
+
+  test('outside hits are empty without branch focus', () => {
+    const { searchOutsideFocusMatches } = makeMap(null);
+    assert.deepEqual(searchOutsideFocusMatches('linux', []), []);
+  });
+
+  test('count text: found / outside focus / none / empty', () => {
+    const { searchCountText } = makeMap(null);
+    assert.equal(searchCountText('linux', ['a', 'b'], []), '2 found');
+    assert.equal(searchCountText('distro', [], ['x', 'y', 'z']), '0 · 3 outside focus');
+    assert.equal(searchCountText('zzz', [], []), 'none');
+    assert.equal(searchCountText('', [], ['x']), '');
+  });
+});
+
 describe('⌘F chord', () => {
   test('second press closes find; replace chord stays open', () => {
     const { findChordShouldClose } = makeMap();
@@ -158,6 +214,14 @@ describe('shipped wiring — these names are what the UI actually calls', () => 
     assert.match(body, /searchEnterExpand/);
     assert.match(body, /keepSearchFocus/);
     assert.match(body, /persist:\s*false/);
+  });
+
+  test('Enter with only outside-focus hits leaves branch focus, then navigates', () => {
+    const body = extractFunction('focusNextMatch');
+    assert.match(body, /searchOutsideMatches\.length[\s\S]*exitBranchFocusKeepImmersive\(\)[\s\S]*focusExitedForSearch[\s\S]*doSearch\(\)/);
+    const exit = extractFunction('exitBranchFocusKeepImmersive');
+    assert.match(exit, /_focusRootId=null/);
+    assert.doesNotMatch(exit, /focus-mode/, 'immersive focus mode must stay on');
   });
 
   test('⌘F uses findChordShouldClose so a second press closes the box', () => {
