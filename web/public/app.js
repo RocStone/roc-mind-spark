@@ -3249,7 +3249,7 @@ function mdCommitVisibleEdit(){
     const freshView=mdBuildView(); _mdView=freshView;
     const freshVis=mdVisibleText(freshView);
     ed.value=freshVis; _mdPrevVisible=freshVis;
-    if(changed) toast('Expanded a folded section — try that edit again');
+    if(changed) toast(rmsTr('tExpandedFold','Expanded a folded section — try that edit again'));
     return;
   }
   const newFullLines=newLines.slice(p,newEnd);
@@ -3739,7 +3739,7 @@ function bulkCycleAlign(){
   const next = order[(order.indexOf(cur)+1) % order.length];
   ids.forEach(id => { map.nodes[id].align = next; });
   pushHistory(); render(); updateMultiSelUI();
-  toast('Aligned '+next);
+  toast(rmsTf('tAligned','Aligned %s', rmsTr('align_'+next, next)));
 }
 function showBulkSizePicker(anchorBtn){
   document.querySelectorAll('.picker').forEach(p=>p.remove());
@@ -3780,7 +3780,7 @@ function showBulkColorPicker(anchorBtn, kind){
 function bulkDelete(){
   if(READONLY) return;
   const targets = [...multiSel].filter(id => id !== map.rootId);
-  if(!targets.length){ toast('Can’t delete the root'); return; }
+  if(!targets.length){ toast(rmsTr('tCantDeleteRoot','Can’t delete the root')); return; }
   const removed = new Set();
   targets.forEach(id=>{
     if(!map.nodes[id]) return;
@@ -3792,7 +3792,7 @@ function bulkDelete(){
   clearMultiSelect();
   opLog('bulkDel', {text:String(removed.size)});
   pushHistory(); autoLayout();
-  toast(`Deleted ${removed.size} node${removed.size===1?'':'s'}`);
+  toast(removed.size===1 ? rmsTr('tDeletedOne','Deleted 1 node') : rmsTf('tDeletedN','Deleted %s nodes', removed.size));
 }
 function startBulkReparent(){
   reparentMode = true;
@@ -3813,7 +3813,7 @@ function copySelectionAsMarkdown(){
   if(typeof navigator!=='undefined' && navigator.clipboard && navigator.clipboard.writeText){
     navigator.clipboard.writeText(md).then(
       ()=>toast(rmsTr('copiedAsMd','Copied as Markdown')),
-      ()=>toast('Copy failed')
+      ()=>toast(rmsTr('tCopyFailed','Copy failed'))
     );
     return true;
   }
@@ -3826,7 +3826,7 @@ function bulkReparent(targetId){
   reparentMode = false;
   if(did) clearMultiSelect();
   else updateMultiSelUI();
-  toast(did ? `Moved ${roots.length} node${roots.length===1?'':'s'}` : 'Nothing moved');
+  toast(did ? (roots.length===1 ? rmsTr('tMovedOne','Moved 1 node') : rmsTf('tMovedN','Moved %s nodes', roots.length)) : rmsTr('tNothingMoved','Nothing moved'));
 }
 
 // Axis-aligned boxes. Used by ⌘-marquee hit-testing.
@@ -4219,7 +4219,7 @@ function startLinkMode(sourceId){
   if(READONLY || !sourceId){ return; }
   linkMode = true; linkSource = sourceId;
   document.querySelector(`.node[data-id="${sourceId}"]`)?.classList.add('link-source');
-  toast('Link mode — click another node (Esc to cancel)');
+  toast(rmsTr('tLinkMode','Link mode — click another node (Esc to cancel)'));
 }
 function cancelLinkMode(){
   linkMode = false; linkSource = null;
@@ -4236,10 +4236,10 @@ function completeLink(targetId){
     (l.from===from && l.to===targetId) || (l.from===targetId && l.to===from));
   if(existsIdx >= 0){
     map.links.splice(existsIdx, 1);
-    toast('Cross-link removed');
+    toast(rmsTr('tLinkRemoved','Cross-link removed'));
   } else {
     map.links.push({ from, to: targetId });
-    toast('Cross-link added');
+    toast(rmsTr('tLinkAdded','Cross-link added'));
   }
   pushHistory(); render(); scheduleSave();
 }
@@ -4547,7 +4547,7 @@ function openExternalUrl(url){
 function openNodeUrl(id){
   const n=map.nodes[id]; if(!n) return;
   const url=normalizeNodeUrl(n.url);
-  if(!url){ toast('No valid URL on this node'); return; }
+  if(!url){ toast(rmsTr('tNoUrl','No valid URL on this node')); return; }
   openExternalUrl(url);
 }
 function setNodeUrl(id, raw){
@@ -4555,7 +4555,7 @@ function setNodeUrl(id, raw){
   flushOpenEditToModel();
   const trimmed=String(raw==null?'':raw).trim();
   const url=normalizeNodeUrl(trimmed);
-  if(trimmed && !url){ toast('Need a valid http(s) URL'); return false; }
+  if(trimmed && !url){ toast(rmsTr('tNeedUrl','Need a valid http(s) URL')); return false; }
   if(url) n.url=url; else delete n.url;
   n.updated=Date.now();
   pushHistory(); render(); autoLayout();
@@ -4849,14 +4849,14 @@ function showLayoutImportForm(){
     const res = importLayoutPreset(parsed);
     if(res.error) return fail(res.error);
     const preset = res.preset;
-    close(); toast(`Layout \u201c${preset.name}\u201d imported`);
+    close(); toast(rmsTf('tLayoutImported','Layout “%s” imported', preset.name));
     try{ $('#themeBtn').click(); }catch(_){}   // reopen so the new entry is visible
   };
   m.querySelectorAll('[data-del]').forEach(b=> b.onclick=()=>{
     const id=b.dataset.del;
     saveCustomLayouts(loadCustomLayouts().filter(c=>c.id!==id));
     // A map already using it keeps working: engine and options live on the map.
-    close(); toast('Layout removed');
+    close(); toast(rmsTr('tLayoutRemoved','Layout removed'));
     try{ $('#themeBtn').click(); }catch(_){}
   });
   m.querySelector('.vf-cancel').onclick=close;
@@ -4907,7 +4907,7 @@ function showLayoutConfigForm(){
     // config and the node positions it produced.
     render(); autoLayout(); pushHistory();
     try{ scheduleSave(); }catch(e){ console.warn('saving layout settings failed:', e.message); }
-    close(); toast('Layout settings saved');
+    close(); toast(rmsTr('tLayoutSaved','Layout settings saved'));
   };
   m.querySelector('.vf-go').onclick=()=>{
     let parsed;
@@ -4960,7 +4960,7 @@ function showCitationForm(id){
   const setField=(f,val)=>{ const ta=m.querySelector(`.vf-input[data-f="${f}"]`); if(ta && val){ ta.value=val; ta.dispatchEvent(new Event('input')); } };
   const fetchDoi=async()=>{
     let doi=(doiIn.value||'').trim();
-    if(!doi){ toast('Paste a DOI first'); return; }
+    if(!doi){ toast(rmsTr('tPasteDoi','Paste a DOI first')); return; }
     doi=doi.replace(/^https?:\/\/(dx\.)?doi\.org\//i,'').replace(/^doi:/i,'').trim();
     doiGo.disabled=true; const old=doiGo.textContent; doiGo.textContent='…';
     try{
@@ -4976,8 +4976,8 @@ function showCitationForm(id){
       if(yr) setField('year',String(yr));
       if(source) setField('source',source);
       setField('doi', msg.DOI ? 'https://doi.org/'+msg.DOI : doi);
-      toast('Citation autofilled');
-    }catch(e){ toast('DOI lookup failed — check the DOI or fill manually'); }
+      toast(rmsTr('tCiteFilled','Citation autofilled'));
+    }catch(e){ toast(rmsTr('tDoiFailed','DOI lookup failed — check the DOI or fill manually')); }
     finally{ doiGo.disabled=false; doiGo.textContent=old; }
   };
   doiGo.onclick=fetchDoi;
@@ -4987,9 +4987,9 @@ function showCitationForm(id){
     n.citation=cit; n.ref=true;
     const formatted=formatCitation(cit);
     if(formatted) n.text=formatted;
-    pushHistory(); render(); close(); toast('Reference saved');
+    pushHistory(); render(); close(); toast(rmsTr('tRefSaved','Reference saved'));
   };
-  m.querySelector('.vf-unref')?.addEventListener('click',()=>{ delete n.ref; delete n.citation; pushHistory(); render(); close(); toast('Reference removed'); });
+  m.querySelector('.vf-unref')?.addEventListener('click',()=>{ delete n.ref; delete n.citation; pushHistory(); render(); close(); toast(rmsTr('tRefRemoved','Reference removed')); });
   m.querySelector('.vf-cancel').onclick=close;
   m.querySelector('.vf-close').onclick=close;
   m.querySelector('.vf-backdrop').onclick=close;
@@ -4999,13 +4999,13 @@ function showCitationForm(id){
 function exportReferences(){
   if(!map) return;
   const refs=Object.values(map.nodes).filter(n=>n.ref).map(n=>formatCitation(n.citation)||nodeTextPlain(n.text));
-  if(!refs.length){ toast('No reference nodes yet — mark a node with 📖'); return; }
+  if(!refs.length){ toast(rmsTr('tNoRefs','No reference nodes yet — mark a node with 📖')); return; }
   refs.sort((a,b)=>a.localeCompare(b));
   const text='References\n\n'+refs.map((r,i)=>`[${i+1}] ${r}`).join('\n')+'\n';
   if(navigator.clipboard?.writeText){
-    navigator.clipboard.writeText(text).then(()=>toast(`${refs.length} references copied`),
-      ()=>{ download(new Blob([text],{type:'text/plain'}),(map.title||'references')+'.txt'); toast('Downloaded references'); });
-  } else { download(new Blob([text],{type:'text/plain'}),(map.title||'references')+'.txt'); toast('Downloaded references'); }
+    navigator.clipboard.writeText(text).then(()=>toast(rmsTf('tRefsCopied','%s references copied', refs.length)),
+      ()=>{ download(new Blob([text],{type:'text/plain'}),(map.title||'references')+'.txt'); toast(rmsTr('tRefsDownloaded','Downloaded references')); });
+  } else { download(new Blob([text],{type:'text/plain'}),(map.title||'references')+'.txt'); toast(rmsTr('tRefsDownloaded','Downloaded references')); }
 }
 
 /* ============================================================
@@ -5065,7 +5065,7 @@ function detachImageFromNode(id){
   return true;
 }
 function failImageAttach(id){
-  toast('Could not read image');
+  toast(rmsTr('tImgReadFail','Could not read image'));
   const n=map && map.nodes && map.nodes[id];
   if(!n || n.image) return;
   if(n.text && !n.imagePending) return;
@@ -5097,7 +5097,7 @@ async function uploadMapImage(blob, mime){
   return j.name;
 }
 function readImageFile(file,id){
-  if(!file || !file.type || !file.type.startsWith('image/')){ toast('Not an image file'); return; }
+  if(!file || !file.type || !file.type.startsWith('image/')){ toast(rmsTr('tNotImage','Not an image file')); return; }
   Promise.resolve(uploadMapImage(file, file.type)).then(
     name => commitImageData(id, name),
     () => failImageAttach(id)
@@ -5143,7 +5143,7 @@ function pasteImageAsChild(file, dataUrl, fileName){
   if(typeof document!=='undefined' && typeof isAppTextField==='function' && isAppTextField(document.activeElement)
      && !(typeof openClipboardTarget==='function' && openClipboardTarget())) return false;
   const parentId=resolveImagePasteParentId();
-  if(!parentId){ toast('Select a topic first, then paste the image'); return false; }
+  if(!parentId){ toast(rmsTr('tSelectForImage','Select a topic first, then paste the image')); return false; }
   const id=beginImagePasteAsChild(parentId);
   if(!id) return false;
   if(fileName) commitImageData(id, fileName);
@@ -5224,10 +5224,10 @@ if(stage){
     e.preventDefault();
     setFileDropTarget(null);
     const id = nodeIdAtPoint(e.clientX, e.clientY);
-    if(!id){ toast('Drop an image onto a topic card to attach it'); return; }
+    if(!id){ toast(rmsTr('tDropOnCard','Drop an image onto a topic card to attach it')); return; }
     const file = firstImageFile(e.dataTransfer);
-    if(!file){ toast('Only image files can be attached'); return; }
-    if(e.dataTransfer.files && e.dataTransfer.files.length > 1) toast('Attaching the first image only');
+    if(!file){ toast(rmsTr('tOnlyImages','Only image files can be attached')); return; }
+    if(e.dataTransfer.files && e.dataTransfer.files.length > 1) toast(rmsTr('tFirstImageOnly','Attaching the first image only'));
     // Same commit-first reasoning as the paste handler below.
     const editingEl = document.querySelector('.node.editing');
     if(editingEl){
@@ -5736,6 +5736,12 @@ function rmsTr(key, fallback){
     if(s && s!==key) return s;
   }
   return fallback!=null ? fallback : key;
+}
+// rmsTr + fill each %s in order. A replacer function keeps `$&` etc. literal.
+function rmsTf(key, fallback, ...args){
+  let s=rmsTr(key, fallback);
+  for(const a of args) s=s.replace('%s', ()=>String(a));
+  return s;
 }
 function chordTitle(nameKey, chordId, fallback){
   const name=rmsTr(nameKey, fallback);
@@ -7363,7 +7369,7 @@ function moveSibling(id, dir){
 // Re-parent a node and propagate the new side down its subtree
 function reparent(childId, newParentId){
   const did=applySelectionMove([childId], newParentId, 'on');
-  if(did) toast('Re-parented to "'+(map.nodes[newParentId].text||'…')+'"');
+  if(did) toast(rmsTf('tReparented','Moved under “%s”', nodeTextPlain(map.nodes[newParentId].text)||'…'));
   return did;
 }
 function applySelectionMove(dragIds, targetId, mode){
@@ -7503,8 +7509,8 @@ function finishNodeDrop(){
     did=applySelectionMove(roots, dropTarget.id, dropTarget.mode);
     if(!did && moved) autoLayout();
     if(did){
-      if(roots.length>1) toast(`Moved ${roots.length} topics`);
-      else if(dropTarget.mode==='on') toast('Re-parented to "'+(map.nodes[dropTarget.id].text||'…')+'"');
+      if(roots.length>1) toast(rmsTf('tMovedTopics','Moved %s topics', roots.length));
+      else if(dropTarget.mode==='on') toast(rmsTf('tReparented','Moved under “%s”', nodeTextPlain(map.nodes[dropTarget.id].text)||'…'));
     }
   } else if(moved){
     autoLayout();
@@ -8536,7 +8542,7 @@ function replaceNext(){
   if(searchPos<0) searchPos=0;
   const id=searchMatches[searchPos] || searchMatches[0];
   const c=replaceInNode(id, find, repl);
-  if(c){ pushHistory(); render(); toast(`Replaced ${c} in 1 node`); }
+  if(c){ pushHistory(); render(); toast(rmsTf('tReplacedOne','Replaced %s in 1 node', c)); }
   else toast(rmsTr('replaceNone','Nothing to replace'));
   doSearch(find);            // refresh matches (node may no longer match)
 }
@@ -8547,7 +8553,7 @@ function replaceAll(){
   let total=0, nodes=0;
   // Only the nodes the search found — the same set the user sees highlighted.
   [...searchMatches].forEach(id=>{ const c=replaceInNode(id, find, repl); if(c){ total+=c; nodes++; } });
-  if(total){ pushHistory(); render(); toast(`Replaced ${total} occurrence${total>1?'s':''} in ${nodes} node${nodes>1?'s':''}`); }
+  if(total){ pushHistory(); render(); toast(rmsTf('tReplacedN','Replaced %s occurrence(s) in %s node(s)', total, nodes)); }
   else toast(rmsTr('replaceNone','Nothing to replace'));
   doSearch(find);
 }
@@ -8739,7 +8745,7 @@ async function togglePin(id){
   const now = !target.pinned;
   if(now) target.pinned = true; else delete target.pinned;
   try{ await saveMapNow(target); }
-  catch(e){ toast('Could not update pin'); return; }
+  catch(e){ toast(rmsTr('tPinFailed','Could not update pin')); return; }
   if(map && map.id===id){ if(now) map.pinned=true; else delete map.pinned; }
   refreshList();
   toast(now ? rmsTr('pinnedToTop','Pinned to top') : rmsTr('unpinned','Unpinned'));
@@ -9059,7 +9065,7 @@ async function createMapFromTemplate(templateId){
 async function duplicateMap(id){
   let src = (map && map.id===id) ? map : null;
   if(!src){ try{ src = await Store.get(id); }catch(e){} }
-  if(!src){ toast('Could not duplicate'); return; }
+  if(!src){ toast(rmsTr('tDupFailed','Could not duplicate')); return; }
   const copy = JSON.parse(JSON.stringify(src));
   copy.id = uid();
   copy.title = (src.title||rmsTr('untitled','Untitled map')) + rmsTr('copySuffix',' (copy)');
@@ -9076,7 +9082,7 @@ async function duplicateMap(id){
   }catch(_){ imgOk = false; }
   await loadMap(copy.id);
   refreshList();
-  toast(imgOk ? 'Map duplicated' : 'Map copied, but images could not be copied');
+  toast(imgOk ? rmsTr('tMapDuplicated','Map duplicated') : rmsTr('tMapCopiedNoImg','Map copied, but images could not be copied'));
 }
 
 // ===== Save current map as a reusable template =====
@@ -9095,9 +9101,9 @@ async function saveAsTemplate(){
   const tpl = { id:'user_'+uid(), name, desc:'Your saved template', color: map.color||'#e0613a', group:'mine', icon:'⭐', nodes, _user:true };
   let store=[]; try{ store=JSON.parse(localStorage.getItem('mindspark:userTemplates')||'[]'); }catch(e){}
   store.push(tpl);
-  try{ localStorage.setItem('mindspark:userTemplates', JSON.stringify(store)); }catch(e){ toast('Could not save (storage full?)'); return; }
+  try{ localStorage.setItem('mindspark:userTemplates', JSON.stringify(store)); }catch(e){ toast(rmsTr('tSaveStorageFull','Could not save (storage full?)')); return; }
   loadUserTemplates();
-  toast('Saved to "My templates"');
+  toast(rmsTr('tSavedToMyTpl','Saved to “My templates”'));
 }
 function deleteUserTemplate(tid){
   let store=[]; try{ store=JSON.parse(localStorage.getItem('mindspark:userTemplates')||'[]'); }catch(e){}
@@ -9247,7 +9253,7 @@ async function loadMap(id){
   try{ await _mapSaves.flush(id); m=await Store.get(id); }
   catch(e){ if(generation===_mapLoadGeneration) toast(rmsTr('couldNotOpenMap','Could not open map')); return false; }
   if(generation!==_mapLoadGeneration) return false;
-  if(!m){ toast('Map not found'); return false; }
+  if(!m){ toast(rmsTr('tMapNotFound','Map not found')); return false; }
   sanitizeMap(m);
   // Legacy migration: old maps may still store `comment` — promote it to `notes`
   for(const n of Object.values(m.nodes||{})){
@@ -9466,8 +9472,8 @@ function relTime(ts){
   return new Date(ts).toLocaleDateString();
 }
 async function showVersionHistory(){
-  if(!map){ toast('Open a map first'); return; }
-  if(typeof Store.history !== 'function'){ toast('History not available'); return; }
+  if(!map){ toast(rmsTr('tOpenMapFirst','Open a map first')); return; }
+  if(typeof Store.history !== 'function'){ toast(rmsTr('tHistoryNA','History not available')); return; }
   document.querySelectorAll('.hist-panel,.export-pop').forEach(p=>p.remove());
   const panel=document.createElement('div');
   panel.className='hist-panel';
@@ -9519,10 +9525,10 @@ async function loadHistoryVersion(mapId,ref){
     await flushPendingSave();
     const data=await Store.version(mapId,ref);
     if(generation!==_historyRequestGeneration || mapGeneration!==_mapLoadGeneration || !map || map.id!==mapId) return null;
-    if(!data) toast('Could not load that version');
+    if(!data) toast(rmsTr('tVersionLoadFail','Could not load that version'));
     return data;
   }catch(error){
-    if(generation===_historyRequestGeneration && mapGeneration===_mapLoadGeneration) toast('Could not load that version');
+    if(generation===_historyRequestGeneration && mapGeneration===_mapLoadGeneration) toast(rmsTr('tVersionLoadFail','Could not load that version'));
     return null;
   }
 }
@@ -9608,7 +9614,7 @@ async function restoreVersion(mapId, ref){
   if(map!==restored) return;
   document.querySelectorAll('.hist-banner,.hist-panel').forEach(p=>p.remove());
   refreshList();
-  toast('Version restored');
+  toast(rmsTr('tVersionRestored','Version restored'));
 }
 // Normalize a loaded/decoded map object to the current shape (defensive defaults).
 // Unknown top-level fields (layoutConfig, layoutParams, layoutPreset,
@@ -9661,7 +9667,7 @@ const LLM_PROVIDERS = {
   }
 };
 function showBuildPrompt(nodeId){
-  if(!map){ toast('Open a map first'); return; }
+  if(!map){ toast(rmsTr('tOpenMapFirst','Open a map first')); return; }
   nodeId = nodeId && map.nodes[nodeId] ? nodeId : map.rootId;
   document.querySelectorAll('.bp-panel,.export-pop').forEach(p=>p.remove());
   const prompt=assemblePrompt(nodeId);
@@ -9694,7 +9700,7 @@ function showBuildPrompt(nodeId){
   panel.addEventListener('mousedown',e=>e.stopPropagation());
   const $$=s=>panel.querySelector(s);
   $$('.bp-x').onclick=()=>panel.remove();
-  $$('.bp-copy').onclick=()=>{ navigator.clipboard?.writeText($$('.bp-text').value).then(()=>toast('Prompt copied'),()=>toast('Copy failed')); };
+  $$('.bp-copy').onclick=()=>{ navigator.clipboard?.writeText($$('.bp-text').value).then(()=>toast(rmsTr('tPromptCopied','Prompt copied')),()=>toast(rmsTr('tCopyFailed','Copy failed'))); };
   $$('.bp-toggle').onclick=()=>{ const r=$$('.bp-run'); r.style.display = r.style.display==='none'?'block':'none'; };
   const provSel=$$('.bp-provider'), modelIn=$$('.bp-model'), keyIn=$$('.bp-key');
   provSel.onchange=()=>{ const pv=provSel.value;
@@ -9702,7 +9708,7 @@ function showBuildPrompt(nodeId){
     keyIn.value=localStorage.getItem('mindspark:llm:key:'+pv)||''; };
   $$('.bp-send').onclick=async()=>{
     const pv=provSel.value, key=keyIn.value.trim(), mdl=modelIn.value.trim()||LLM_PROVIDERS[pv].defaultModel;
-    if(!key){ toast('Enter an API key'); return; }
+    if(!key){ toast(rmsTr('tEnterApiKey','Enter an API key')); return; }
     localStorage.setItem('mindspark:llm:provider',pv);
     localStorage.setItem('mindspark:llm:model:'+pv,mdl);
     localStorage.setItem('mindspark:llm:key:'+pv,key);
@@ -9718,9 +9724,9 @@ function showBuildPrompt(nodeId){
       const pre=document.createElement('div'); pre.className='bp-answer'; pre.textContent=answer;
       const acts=document.createElement('div'); acts.className='bp-answer-acts';
       const cp=document.createElement('button'); cp.textContent='Copy answer';
-      cp.onclick=()=>navigator.clipboard?.writeText(answer).then(()=>toast('Answer copied'));
+      cp.onclick=()=>navigator.clipboard?.writeText(answer).then(()=>toast(rmsTr('tAnswerCopied','Answer copied')));
       const add=document.createElement('button'); add.className='primary'; add.textContent='Add as child nodes';
-      add.onclick=()=>{ addResponseAsNodes(nodeId, answer); panel.remove(); toast('Added to map'); };
+      add.onclick=()=>{ addResponseAsNodes(nodeId, answer); panel.remove(); toast(rmsTr('tAddedToMap','Added to map')); };
       acts.appendChild(cp); acts.appendChild(add);
       res.appendChild(pre); res.appendChild(acts);
     }catch(e){
@@ -9754,7 +9760,7 @@ function addResponseAsNodes(parentId, answer){
 let _pres = null;   // {order, idx, collapsed} while presenting
 function startPresentation(){
   if(_pres) return;
-  if(!map || !map.nodes[map.rootId]){ toast('Open a map first'); return; }
+  if(!map || !map.nodes[map.rootId]){ toast(rmsTr('tOpenMapFirst','Open a map first')); return; }
   document.querySelectorAll('.export-pop').forEach(p=>p.remove());
   // Expand everything so the whole map is walkable; remember what to restore.
   const wasCollapsed = Object.keys(map.nodes).filter(id=>map.nodes[id].collapsed);
@@ -9823,7 +9829,7 @@ function endPresentation(){
 
 function exportJSON(){
   const blob=new Blob([JSON.stringify(map,null,2)],{type:'application/json'});
-  download(blob,(map.title||'mindmap')+'.json'); toast('JSON exported');
+  download(blob,(map.title||'mindmap')+'.json'); toast(rmsTr('tJsonExported','JSON exported'));
 }
 function importJSON(){ importFile(); }   // back-compat alias
 // ---- GitMind (.gmind) import ----------------------------------------------
@@ -10019,7 +10025,7 @@ function importFile(){
       // proper tree, then frame the result.
       autoLayout(); fit();
       refreshList();
-      toast('Imported '+f.name + (preserveState?'':' (collapsed — click ＋ to expand)'));
+      toast(preserveState ? rmsTf('tImported','Imported %s', f.name) : rmsTf('tImportedCollapsed','Imported %s (collapsed — click ＋ to expand)', f.name));
     }catch(e){ console.error(e); rmsAlert(rmsTr('importFailed','Could not import this file:\n%s').replace('%s', e.message)); }
   };
   inp.click();
@@ -10848,12 +10854,12 @@ function exportMermaid(){
   const fenced = '```mermaid\n' + code + '\n```\n';
   if(navigator.clipboard?.writeText){
     navigator.clipboard.writeText(fenced).then(
-      () => toast('Mermaid diagram copied'),
-      () => { download(new Blob([fenced],{type:'text/plain'}), (map.title||'mindmap')+'.mmd.md'); toast('Clipboard blocked — downloaded instead'); }
+      () => toast(rmsTr('tMermaidCopied','Mermaid diagram copied')),
+      () => { download(new Blob([fenced],{type:'text/plain'}), (map.title||'mindmap')+'.mmd.md'); toast(rmsTr('tClipBlocked','Clipboard blocked — downloaded instead')); }
     );
   } else {
     download(new Blob([fenced],{type:'text/plain'}), (map.title||'mindmap')+'.mmd.md');
-    toast('Mermaid diagram downloaded');
+    toast(rmsTr('tMermaidDownloaded','Mermaid diagram downloaded'));
   }
 }
 
@@ -11222,12 +11228,12 @@ function exportAsPrompt(){
     const text = buildPrompt(startId, values);
     if(navigator.clipboard?.writeText){
       navigator.clipboard.writeText(text).then(
-        () => toast(`Prompt copied (${text.length} chars)`),
-        () => { download(new Blob([text],{type:'text/plain'}), (map.title||'prompt')+'.txt'); toast('Clipboard blocked — downloaded instead'); }
+        () => toast(rmsTf('tPromptCopiedChars','Prompt copied (%s chars)', text.length)),
+        () => { download(new Blob([text],{type:'text/plain'}), (map.title||'prompt')+'.txt'); toast(rmsTr('tClipBlocked','Clipboard blocked — downloaded instead')); }
       );
     } else {
       download(new Blob([text],{type:'text/plain'}), (map.title||'prompt')+'.txt');
-      toast('Prompt downloaded');
+      toast(rmsTr('tPromptDownloaded','Prompt downloaded'));
     }
   };
   if(vars.length === 0){
@@ -11250,7 +11256,7 @@ function exportAsPrompt(){
   const allCovered = vars.every(v => (map.vars||{})[v] != null && String((map.vars||{})[v]).trim() !== '');
   if(allCovered){
     finish(defaults);
-    toast('Used saved map variables');
+    toast(rmsTr('tUsedVars','Used saved map variables'));
     return;
   }
   showVariableForm(vars, defaults, map.id, (values) => {
@@ -11318,7 +11324,7 @@ function showMapVariables(){
     map.vars = out;
     pushHistory(); scheduleSave();
     close();
-    toast('Map variables saved');
+    toast(rmsTr('tVarsSaved','Map variables saved'));
   };
   m.querySelector('.vf-clear').onclick = () => { m.querySelectorAll('.vf-input').forEach(ta=>{ta.value='';ta.dispatchEvent(new Event('input'));}); };
   m.querySelector('.vf-cancel').onclick = close;
@@ -11335,21 +11341,21 @@ function exportMarkdown(toClipboard, rich){
   // pulling out a single prompt or section from a larger map.
   const startId = (sel && sel !== map.rootId) ? sel : map.rootId;
   const md = buildMarkdown(startId, {rich:!!rich, meta:!!rich});
-  const scope = startId === map.rootId ? '' : ' (selected branch)';
+  const scope = startId === map.rootId ? '' : rmsTr('tScopeBranch',' (selected branch)');
   if(toClipboard){
     if(navigator.clipboard?.writeText){
       navigator.clipboard.writeText(md).then(
-        ()=>toast('Copied to clipboard'+scope),
-        ()=>{ download(new Blob([md],{type:'text/markdown'}),(map.title||'mindmap')+'.md'); toast('Clipboard blocked — downloaded instead'); }
+        ()=>toast(rmsTr('tCopiedClip','Copied to clipboard')+scope),
+        ()=>{ download(new Blob([md],{type:'text/markdown'}),(map.title||'mindmap')+'.md'); toast(rmsTr('tClipBlocked','Clipboard blocked — downloaded instead')); }
       );
     } else {
       download(new Blob([md],{type:'text/markdown'}),(map.title||'mindmap')+'.md');
-      toast('Clipboard unavailable — downloaded');
+      toast(rmsTr('tClipUnavailable','Clipboard unavailable — downloaded'));
     }
   } else {
     const name = startId === map.rootId ? map.title : nodeTextPlain(map.nodes[startId]?.text);
     download(new Blob([md],{type:'text/markdown'}), (name||'mindmap')+'.md');
-    toast('Markdown exported'+scope);
+    toast(rmsTr('tMdExported','Markdown exported')+scope);
   }
 }
 // Build a Word-compatible HTML document (saved with .doc extension —
@@ -11493,7 +11499,7 @@ async function exportDoc(){
   const filename = (map.title||'mindmap')+'.doc';
   const blob = new Blob(['\ufeff', html], {type:'application/msword'});
   download(blob, filename);
-  toast('Word document exported');
+  toast(rmsTr('tWordExported','Word document exported'));
 }
 // --- Canvas math rendering (for PNG export) --------------------------------
 // A small layout engine that draws the MathML subset produced by latexToMathML
@@ -11940,11 +11946,11 @@ async function exportPNG(){
   });
 
   try{
-    cv.toBlob(b=>{download(b,(map.title||'mindmap')+'.png');toast('PNG exported');});
+    cv.toBlob(b=>{download(b,(map.title||'mindmap')+'.png');toast(rmsTr('tPngExported','PNG exported'));});
   }catch(e){
     // Only reachable if the canvas got tainted despite the CORS guard above.
     console.warn('PNG export failed:', e.message);
-    toast('Could not export the PNG');
+    toast(rmsTr('tPngFailed','Could not export the PNG'));
   }
 }
 
@@ -12597,12 +12603,12 @@ function setUiScale(v){
   v = Math.min(2, Math.max(0.5, v||1));
   try{ localStorage.setItem('mindspark:uiScale', String(v)); }catch(e){}
   applyUiScale(v);
-  toast('Interface scale: '+Math.round(v*100)+'%');
+  toast(rmsTf('tUiScale','Interface scale: %s%', Math.round(v*100)));
 }
 function setUiScaleAuto(){
   try{ localStorage.removeItem('mindspark:uiScale'); }catch(e){}
   applyUiScale(getUiScale());
-  toast('Interface scale: Auto ('+Math.round(getUiScale()*100)+'%)');
+  toast(rmsTf('tUiScaleAuto','Interface scale: Auto (%s%)', Math.round(getUiScale()*100)));
 }
 // Keeps auto-scale genuinely responsive to the browser window instead of a
 // snapshot frozen at whichever size the page happened to load at. Only acts

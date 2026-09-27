@@ -66,6 +66,18 @@ export function extractFunction(name) {
  */
 export function loadFns(names, deps = {}) {
   const bodies = names.map(extractFunction).join('\n\n');
+  // UI strings go through rmsTr / rmsTf. Tests that don't care about the
+  // language get the English fallback; a test may pass its own rmsTr.
+  deps = { ...deps };
+  if (!deps.rmsTr && /\brmsT[rf]\(/.test(bodies)) deps.rmsTr = (k, d) => (d != null ? d : k);
+  if (!deps.rmsTf && /\brmsTf\(/.test(bodies)) {
+    const tr = deps.rmsTr;
+    deps.rmsTf = (k, d, ...args) => {
+      let s = tr(k, d);
+      for (const a of args) s = s.replace('%s', () => String(a));
+      return s;
+    };
+  }
   const depNames = Object.keys(deps);
   const factory = new Function(
     ...depNames,
