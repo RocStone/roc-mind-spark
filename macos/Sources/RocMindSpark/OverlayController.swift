@@ -971,6 +971,66 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
         NSWorkspace.shared.open(url)
     }
 
+    /// WKWebView drops alert/confirm/prompt unless the UI delegate shows them.
+    func webView(
+        _ webView: WKWebView,
+        runJavaScriptAlertPanelWithMessage message: String,
+        initiatedByFrame frame: WKFrameInfo,
+        completionHandler: @escaping @MainActor @Sendable () -> Void
+    ) {
+        let alert = makeDialog(message)
+        alert.addButton(withTitle: L10n.t("dialog.ok"))
+        Task { @MainActor in
+            _ = await self.presentAlert(alert)
+            completionHandler()
+        }
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        runJavaScriptConfirmPanelWithMessage message: String,
+        initiatedByFrame frame: WKFrameInfo,
+        completionHandler: @escaping @MainActor @Sendable (Bool) -> Void
+    ) {
+        let alert = makeDialog(message)
+        alert.addButton(withTitle: L10n.t("dialog.ok"))
+        alert.addButton(withTitle: L10n.t("dialog.cancel"))
+        Task { @MainActor in
+            let response = await self.presentAlert(alert)
+            completionHandler(response == .alertFirstButtonReturn)
+        }
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        runJavaScriptTextInputPanelWithPrompt prompt: String,
+        defaultText: String?,
+        initiatedByFrame frame: WKFrameInfo,
+        completionHandler: @escaping @MainActor @Sendable (String?) -> Void
+    ) {
+        let alert = makeDialog(prompt)
+        alert.addButton(withTitle: L10n.t("dialog.ok"))
+        alert.addButton(withTitle: L10n.t("dialog.cancel"))
+        let field = NSTextField(string: defaultText ?? "")
+        field.frame = NSRect(x: 0, y: 0, width: 320, height: 24)
+        field.usesSingleLineMode = true
+        field.lineBreakMode = .byTruncatingTail
+        alert.accessoryView = field
+        alert.window.initialFirstResponder = field
+        Task { @MainActor in
+            let response = await self.presentAlert(alert)
+            completionHandler(response == .alertFirstButtonReturn ? field.stringValue : nil)
+        }
+    }
+
+    private func makeDialog(_ text: String) -> NSAlert {
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = text
+        alert.informativeText = ""
+        return alert
+    }
+
     /// Without this, `<input type=file>` (Attach image / Import) is a no-op
     /// in WKWebView.
     func webView(
