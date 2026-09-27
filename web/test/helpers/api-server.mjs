@@ -9,8 +9,9 @@ import http from 'node:http';
 
 const webRoot = dirname(fileURLToPath(new URL('../../server.js', import.meta.url)));
 
-export async function startApiServer() {
+export async function startApiServer({ prepareDb } = {}) {
   const temp = mkdtempSync(join(tmpdir(), 'rms-server-api-'));
+  if (prepareDb) prepareDb(join(temp, 'mindspark.db'));
   const env = {
     ...process.env,
     PORT: '0',

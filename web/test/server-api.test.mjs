@@ -1,6 +1,7 @@
 // HTTP-level tests against the real server.js process (throw-away DB).
 import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
+import { DatabaseSync } from 'node:sqlite';
 import { startApiServer, rawRequest, JSON_HEADERS, sampleMap } from './helpers/api-server.mjs';
 
 let srv;
@@ -56,6 +57,64 @@ describe('map list', () => {
     assert.equal(byId.pinYes.pinned, true);
     assert.equal(byId.pinNo.pinned, false);
     assert.equal('data' in byId.pinYes, false, 'list stays a lightweight index');
+  });
+});
+
+describe('version history retention', () => {
+  const MIN = 60 * 1000;
+  const T0 = 1_700_000_000_000;
+  const put = (id, updated, text) => rawRequest(srv.port, {
+    method: 'PUT', path: '/api/maps/' + id, headers: JSON_HEADERS,
+    chunks: [JSON.stringify(sampleMap(id, { updated, nodes: { r: { id: 'r', text, parent: null } } }))],
+  });
+  const versions = async (id) => (await rawRequest(srv.port, { path: `/api/maps/${id}/versions` })).json.map(v => v.ts);
+
+  test('saves inside one 5-minute window coalesce into that window\'s newest version', async () => {
+    assert.equal((await put('hist', T0, 'a')).status, 200);
+    assert.deepEqual(await versions('hist'), [T0]);
+    await put('hist', T0 + 1 * MIN, 'b');
+    await put('hist', T0 + 4 * MIN, 'c');
+    assert.deepEqual(await versions('hist'), [T0 + 4 * MIN], 'the window keeps only its latest state');
+    const tip = (await rawRequest(srv.port, { path: `/api/maps/hist/versions/${T0 + 4 * MIN}` })).json;
+    assert.equal(tip.nodes.r.text, 'c');
+
+    // Anchored at the window start: steady editing still opens a new version.
+    await put('hist', T0 + 5 * MIN + 1, 'd');
+    assert.deepEqual(await versions('hist'), [T0 + 5 * MIN + 1, T0 + 4 * MIN]);
+    await put('hist', T0 + 7 * MIN, 'e');
+    assert.deepEqual(await versions('hist'), [T0 + 7 * MIN, T0 + 4 * MIN]);
+    await put('hist', T0 + 60 * MIN, 'f');
+    assert.deepEqual(await versions('hist'), [T0 + 60 * MIN, T0 + 7 * MIN, T0 + 4 * MIN]);
+  });
+
+  test('an older database without the started column is migrated and still coalesces', async () => {
+    const legacyTs = Date.now() - 60 * 1000;
+    const legacy = await startApiServer({
+      prepareDb(file) {
+        const db = new DatabaseSync(file);
+        db.exec('CREATE TABLE map_versions (id TEXT NOT NULL, ts INTEGER NOT NULL, data TEXT NOT NULL, PRIMARY KEY (id, ts))');
+        db.prepare('INSERT INTO map_versions (id, ts, data) VALUES (?,?,?)').run('old', legacyTs, '{}');
+        db.close();
+      },
+    });
+    try {
+      const res = await rawRequest(legacy.port, {
+        method: 'PUT', path: '/api/maps/old', headers: JSON_HEADERS,
+        chunks: [JSON.stringify(sampleMap('old', { updated: legacyTs + 1000 }))],
+      });
+      assert.equal(res.status, 200);
+      const ts = (await rawRequest(legacy.port, { path: '/api/maps/old/versions' })).json.map(v => v.ts);
+      assert.deepEqual(ts, [legacyTs + 1000], 'a legacy row falls back to ts as its window start');
+    } finally {
+      await legacy.stop();
+    }
+  });
+
+  test('keeps at most 50 versions per map', async () => {
+    for (let i = 0; i < 55; i++) await put('cap', T0 + i * 6 * MIN, 'v' + i);
+    const ts = await versions('cap');
+    assert.equal(ts.length, 50);
+    assert.equal(ts[0], T0 + 54 * 6 * MIN);
   });
 });
 

@@ -54,6 +54,13 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_versions_id ON map_versions (id, ts DESC);
 `);
+// `started` is when a version's 5-minute coalescing window opened. Rows from
+// older databases have none and fall back to their ts.
+if (!db.prepare('PRAGMA table_info(map_versions)').all().some(c => c.name === 'started')) {
+  db.exec('ALTER TABLE map_versions ADD COLUMN started INTEGER');
+}
+const VERSION_WINDOW_MS = 5 * 60 * 1000;
+const VERSION_CAP = 50;
 const Q = {
   list:   db.prepare("SELECT id, title, color, updated, COALESCE(json_extract(data,'$.pinned'),0) AS pinned FROM maps ORDER BY updated DESC"),
   get:    db.prepare('SELECT data FROM maps WHERE id = ?'),
@@ -61,11 +68,12 @@ const Q = {
   update: db.prepare('UPDATE maps SET title=?, color=?, data=?, updated=? WHERE id=?'),
   del:    db.prepare('DELETE FROM maps WHERE id = ?'),
   // version history
-  vLatest: db.prepare('SELECT data FROM map_versions WHERE id = ? ORDER BY ts DESC LIMIT 1'),
-  vInsert: db.prepare('INSERT OR REPLACE INTO map_versions (id,ts,data) VALUES (?,?,?)'),
+  vLatest: db.prepare('SELECT ts, data, COALESCE(started, ts) AS started FROM map_versions WHERE id = ? ORDER BY ts DESC LIMIT 1'),
+  vInsert: db.prepare('INSERT OR REPLACE INTO map_versions (id,ts,data,started) VALUES (?,?,?,?)'),
+  vDelOne: db.prepare('DELETE FROM map_versions WHERE id = ? AND ts = ?'),
   vList:   db.prepare('SELECT ts FROM map_versions WHERE id = ? ORDER BY ts DESC LIMIT 100'),
   vGet:    db.prepare('SELECT data FROM map_versions WHERE id = ? AND ts = ?'),
-  vDelOld: db.prepare('DELETE FROM map_versions WHERE id = ? AND ts NOT IN (SELECT ts FROM map_versions WHERE id = ? ORDER BY ts DESC LIMIT 50)'),
+  vDelOld: db.prepare('DELETE FROM map_versions WHERE id = ? AND ts NOT IN (SELECT ts FROM map_versions WHERE id = ? ORDER BY ts DESC LIMIT ' + VERSION_CAP + ')'),
   vDelAll: db.prepare('DELETE FROM map_versions WHERE id = ?')
 };
 const upsert = (m) => {
@@ -73,12 +81,28 @@ const upsert = (m) => {
   const updated = m.updated || Date.now();
   const r = Q.update.run(m.title || 'Untitled map', m.color || null, data, updated, m.id);
   if (r.changes === 0) Q.insert.run(m.id, m.title || 'Untitled map', m.color || null, data, updated);
-  // Snapshot a version only when the content actually changed (skips no-op autosaves),
-  // then prune to the most recent 50 per map.
+  // Snapshot a version only when the content actually changed (skips no-op
+  // autosaves). Autosave runs every few hundred ms of editing, so saves inside
+  // one 5-minute window replace that window's newest version instead of
+  // adding rows; otherwise 50 versions would cover only minutes. The window
+  // is anchored at its first save (`started`), not the latest ts, so steady
+  // editing still yields one version per 5 minutes rather than one per session.
   const last = Q.vLatest.get(m.id);
-  if (!last || last.data !== data) {
-    Q.vInsert.run(m.id, updated, data);
-    Q.vDelOld.run(m.id, m.id);
+  if (last && last.data === data) return;
+  const age = last ? updated - last.started : Infinity;
+  db.exec('BEGIN');
+  try {
+    if (age >= 0 && age < VERSION_WINDOW_MS) {
+      Q.vDelOne.run(m.id, last.ts);
+      Q.vInsert.run(m.id, updated, data, last.started);
+    } else {
+      Q.vInsert.run(m.id, updated, data, updated);
+      Q.vDelOld.run(m.id, m.id);
+    }
+    db.exec('COMMIT');
+  } catch (e) {
+    db.exec('ROLLBACK');
+    throw e;
   }
 };
 
