@@ -54,14 +54,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard overlay != nil, !readyToTerminate else { return .terminateNow }
         if waitingForSave { return .terminateCancel }
+        // Nothing pending (or no live page): quit immediately so logout,
+        // restart and shutdown are not interrupted.
+        if !overlay.needsFlushBeforeQuit {
+            Paths.log("quit: nothing to save, terminating now")
+            server.stopIfLaunched()
+            return .terminateNow
+        }
         waitingForSave = true
         Task { [weak self] in
             guard let self else { return }
             do {
-                try await self.overlay.flushBeforeQuit()
+                try await QuitFlush.run(timeout: .seconds(7)) { try await self.overlay.flushBeforeQuit() }
                 self.readyToTerminate = true
                 sender.terminate(nil)
             } catch {
+                Paths.log("quit: flush failed \(error.localizedDescription)")
                 self.waitingForSave = false
                 self.terminationBridge?.resetAfterCancelledTermination()
                 self.overlay.show()
@@ -69,6 +77,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 alert.messageText = L10n.t("error.saveQuit")
                 alert.informativeText = error.localizedDescription
                 alert.alertStyle = .warning
+                alert.window.level = NSWindow.Level(rawValue: OverlayPanel.coverLevel.rawValue + 2)
                 alert.runModal()
             }
         }

@@ -45,6 +45,14 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
     /// Save panels and JS dialogs are sheets on the overlay. While one is up,
     /// clicks and app switches it causes must not hide the overlay.
     private var nativeModalDepth = 0
+    /// Mirrors the page's save queue (`{op:'saveState'}`): true while any map
+    /// has an edit that has not reached the server yet.
+    private(set) var pageDirty = false
+    /// WebContent crashed; the page (and anything unsaved in it) is gone
+    /// until the reload finishes.
+    private var webProcessCrashed = false
+    private var powerOffFlushInFlight = false
+    private var powerOffFlushedAt: Date?
 
     private(set) var isVisible = false
 
@@ -77,6 +85,12 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
             self,
             selector: #selector(languageDidChange),
             name: .rmsLanguageDidChange,
+            object: nil
+        )
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(willPowerOff),
+            name: NSWorkspace.willPowerOffNotification,
             object: nil
         )
     }
@@ -174,8 +188,42 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
 
     /// Normal application quit waits for the page's model and save queue.
     /// The page is kept alive if persistence fails, so drafts remain editable.
+    /// False means quitting now cannot lose anything: the page never loaded,
+    /// its process is dead, or its save queue is idle and the overlay is
+    /// parked (hiding already committed any open editor). A visible overlay
+    /// may hold an uncommitted node or note editor, so it still flushes unless
+    /// the logout/power-off pre-flush just did that.
+    var needsFlushBeforeQuit: Bool {
+        guard webView != nil, didStartLoad, !webProcessCrashed else { return false }
+        if pageDirty || powerOffFlushInFlight { return true }
+        if isVisible {
+            if let at = powerOffFlushedAt, Date().timeIntervalSince(at) < 60 { return false }
+            return true
+        }
+        return false
+    }
+
+    /// Logout / restart / shutdown: save before AppKit asks us to quit, so
+    /// the later `applicationShouldTerminate` can usually answer terminateNow.
+    @objc private func willPowerOff() {
+        guard needsFlushBeforeQuit, !powerOffFlushInFlight else { return }
+        Paths.log("willPowerOff: flushing early")
+        powerOffFlushInFlight = true
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                try await QuitFlush.run(timeout: .seconds(7)) { try await self.flushBeforeQuit() }
+                self.powerOffFlushedAt = Date()
+                Paths.log("willPowerOff: flush done")
+            } catch {
+                Paths.log("willPowerOff: flush failed \(error.localizedDescription)")
+            }
+            self.powerOffFlushInFlight = false
+        }
+    }
+
     func flushBeforeQuit() async throws {
-        guard let webView, didStartLoad else { return }
+        guard let webView, didStartLoad, !webProcessCrashed else { return }
         let result = try await webView.callAsyncJavaScript("""
             if (!window.rmsFlushPendingEdits) return {ok:true};
             let timer;
@@ -656,6 +704,10 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
             pushNativeState()
             return
         }
+        if op == "saveState" {
+            pageDirty = bool(spec["dirty"])
+            return
+        }
         if op == "setLogin" {
             do {
                 try LoginItem.setEnabled(bool(spec["on"]))
@@ -775,8 +827,20 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
         return false
     }
 
+    /// WebContent crashed or was killed (memory pressure, GPU reset). The
+    /// view goes blank and every evaluateJavaScript fails until we reload.
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        Paths.log("webview content process terminated; reloading")
+        webProcessCrashed = true
+        pageDirty = false
+        isWarm = false
+        didStartLoad = false
+        startLoadIfNeeded()
+    }
+
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         Paths.log("webview didFinish")
+        webProcessCrashed = false
         webView.evaluateJavaScript("document.documentElement.classList.add('rms-wk')")
         webView.evaluateJavaScript(
             "typeof window.__rmsSignalReady+' ready='+window.__RMS_READY__+' nodes='+document.querySelectorAll('.node').length+' map='+!!window.map"

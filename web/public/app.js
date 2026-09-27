@@ -8841,6 +8841,8 @@ const _mapSaves=createMapSaveQueue({
     _mapSaveStates.set(id,state);
     if(state==='saved') _saveErrorNotified.delete(id);
     if(map && map.id===id) updateMapSaveStatus();
+    // Native quit skips the save round-trip when nothing is pending.
+    try{ window.webkit.messageHandlers.rmsNative.postMessage({op:'saveState',dirty:[..._mapSaveStates.values()].some(s=>s!=='saved')}); }catch(_){}
     if(error && !_saveErrorNotified.has(id)){
       _saveErrorNotified.add(id);
       console.warn('Map save failed:',id,error);

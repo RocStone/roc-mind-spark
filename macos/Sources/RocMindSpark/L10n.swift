@@ -41,6 +41,7 @@ enum L10n {
     private static let en: [String: String] = [
         "dialog.ok": "OK",
         "dialog.cancel": "Cancel",
+        "error.saveTimeout": "Saving did not finish within 7 seconds.",
         "error.saveQuit": "Changes could not be saved. The app stayed open so you can retry.",
         "error.serverStopped": "The local map service stopped. Retry to reconnect; your open edits are still in this window.",
         "menu.toggle": "Show / Hide",
@@ -96,6 +97,7 @@ enum L10n {
     private static let zh: [String: String] = [
         "dialog.ok": "好",
         "dialog.cancel": "取消",
+        "error.saveTimeout": "7 秒内没有保存完成。",
         "error.saveQuit": "未能保存更改。应用已保持打开，请重试。",
         "error.serverStopped": "本机导图服务已停止。请重试连接；当前编辑内容仍保留在窗口中。",
         "menu.toggle": "显示 / 隐藏",
