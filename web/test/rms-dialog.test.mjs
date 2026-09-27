@@ -96,12 +96,10 @@ test('rmsAlert has no Cancel button and resolves on Enter', async () => {
   assert.equal(await p, undefined);
 });
 
-test('no native confirm/prompt/alert left outside the dead cloud code', () => {
+test('no native confirm/prompt/alert left in app.js', () => {
   const hits = appSrc.split('\n')
     .map((l, i) => [i + 1, l])
     .filter(([, l]) => /(^|[^\w.])(confirm|prompt|alert)\(/.test(l) && !/^\s*\/\//.test(l));
   const texts = hits.map(([, l]) => l.trim());
-  assert.equal(hits.length, 2, texts.join('\n'));
-  assert.ok(texts.some(t => t.includes('Sign out of MindSpark')));
-  assert.ok(texts.some(t => t.includes('Leave the live session')));
+  assert.equal(hits.length, 0, texts.join('\n'));
 });

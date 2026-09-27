@@ -318,7 +318,6 @@ describe('paste image as a child of the selected node', () => {
     let message = '';
     const { commitImageData } = loadFns(['commitImageData'], {
       map,
-      MODE: 'server',
       pushHistory() {},
       render() {},
       autoLayout() { laidOut = true; },

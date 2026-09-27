@@ -250,10 +250,12 @@ describe('pre-existing listeners are reported, never killed', () => {
   });
 });
 
-describe('GH_OAUTH is blank in the Mac canvas', () => {
-  test('app.js does not ship an upstream OAuth worker URL or client id', () => {
+describe('The Mac canvas ships no cloud / OAuth code', () => {
+  test('app.js has no GitHub OAuth, cloud store, or upstream worker', () => {
     const src = readFileSync(join(webRoot, 'public/app.js'), 'utf8');
-    assert.match(src, /const GH_OAUTH = \{ clientId: '', workerUrl: '' \}/);
+    assert.doesNotMatch(src, /GH_OAUTH/);
+    assert.doesNotMatch(src, /CloudStore/);
+    assert.doesNotMatch(src, /startGithubLogin/);
     assert.doesNotMatch(src, /mindspark-oauth\.githubpage\.workers\.dev/);
     assert.doesNotMatch(src, /Ov23liCukvrI3Zs9p3Px/);
   });

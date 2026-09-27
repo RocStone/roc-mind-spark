@@ -1,11 +1,7 @@
 /* ============================================================
-   MindSpark — pluggable storage.
-   - ServerStore: when running with `node server.js` locally (SQLite)
-   - CloudStore : when deployed as static files (GitHub Pages, CF Pages,
-                  Netlify, etc.). User logs in with a GitHub PAT and we
-                  store each map as a JSON file inside their own private
-                  `mindspark-maps` repo. No backend required.
-   `initStore()` probes /healthz, then picks one.
+   Roc Mind Spark — storage.
+   ServerStore talks to the local Node server (`web/server.js`, SQLite)
+   that the Mac app supervises on 127.0.0.1:3034.
    ============================================================ */
 
 /* ------------------------------------------------------------
@@ -28,15 +24,14 @@
    be swallowed. Those log via console.warn, and additionally toast()
    when the user initiated the action and would otherwise see no
    response at all. A silent failure there is how a real bug once
-   presented as "the sign-in popup just never appears".
+   presented as "the button just does nothing".
 
    If you are adding a new catch, decide which of those two groups it
    is in. When in doubt, warn — noise in the console is cheaper than an
    invisible failure.
    ------------------------------------------------------------ */
 // Overlay loads index.html from disk. API still lives on the local Node
-// server. HTTP pages keep relative URLs so GitHub Pages / cloud deploys
-// are unchanged.
+// server. HTTP pages keep relative URLs.
 const API_BASE=(typeof location!=='undefined' && location.protocol==='file:')
   ? 'http://127.0.0.1:3034' : '';
 function apiUrl(path){
@@ -74,304 +69,10 @@ const ServerStore = {
 
 };
 
-const CloudStore = {
-  token:null, user:null, repo:'mindspark-maps',
-  shas:{}, indexSha:null, index:[],
-  deleted:[], deletedSha:null,
-
-  _headers(t=this.token){ return {Authorization:`token ${t}`,Accept:'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28'}; },
-  // Base64 helpers safe for UTF-8 (atob/btoa are Latin-1 only)
-  _encode(s){ return btoa(unescape(encodeURIComponent(s))); },
-  _decode(s){ return decodeURIComponent(escape(atob(s.replace(/\n/g,'')))); },
-
-  // Writes that MUST succeed for core functionality (auth token, OAuth state
-  // nonce) go through this instead of a raw localStorage.setItem. If storage
-  // is full, the local map-backup cache (mindspark:backup:*) is the most
-  // likely cause — it's written on every save/load with no cap or expiry, and
-  // never cleared even for deleted maps. It's also just a recovery cache: the
-  // authoritative copy of every map already lives on GitHub, so clearing it
-  // to make room for something that actually blocks sign-in is always safe.
-  // Returns true/false rather than throwing, so callers can show one clear,
-  // actionable message instead of a raw QuotaExceededError.
-  _setItemSafe(key, value){
-    try{ localStorage.setItem(key, value); return true; }
-    catch(e){
-      if(!(e && (e.name==='QuotaExceededError' || e.code===22 || e.code===1014))) return false;
-      try{
-        const stale=[];
-        for(let i=0;i<localStorage.length;i++){ const k=localStorage.key(i); if(k && k.startsWith('mindspark:backup:')) stale.push(k); }
-        stale.forEach(k=>{ try{ localStorage.removeItem(k); }catch(_){} });
-      }catch(_){}
-      try{ localStorage.setItem(key, value); return true; }
-      catch(e2){ return false; }
-    }
-  },
-
-  async _verify(t){
-    const r=await fetch('https://api.github.com/user',{headers:this._headers(t)});
-    if(!r.ok) throw new Error('Invalid GitHub token (HTTP '+r.status+')');
-    return r.json();
-  },
-  async tryInit(){
-    const t=localStorage.getItem('mindspark:gh:token');
-    if(!t) return false;
-    try{
-      this.user=await this._verify(t);
-      this.token=t;
-      await this._ensureRepo();
-      await this._loadIndex();
-      await this._loadDeleted();
-      return true;
-    }catch(e){
-      console.warn('Stored GitHub token rejected:', e.message);
-      localStorage.removeItem('mindspark:gh:token');
-      return false;
-    }
-  },
-  async login(token){
-    this.user=await this._verify(token);
-    this.token=token;
-    if(!this._setItemSafe('mindspark:gh:token', token)){
-      throw new Error('Signed in, but could not save your session locally — your browser\'s storage is full. Try clearing site data for this page and signing in again.');
-    }
-    await this._ensureRepo();
-    await this._loadIndex();
-    await this._loadDeleted();
-    return this.user;
-  },
-  logout(){
-    this.token=null; this.user=null;
-    this.shas={}; this.indexSha=null; this.index=[];
-    this.deleted=[]; this.deletedSha=null;
-    localStorage.removeItem('mindspark:gh:token');
-  },
-  async _ensureRepo(){
-    const r=await fetch(`https://api.github.com/repos/${this.user.login}/${this.repo}`,{headers:this._headers()});
-    if(r.status===404){
-      const cr=await fetch('https://api.github.com/user/repos',{
-        method:'POST',
-        headers:{...this._headers(),'Content-Type':'application/json'},
-        body:JSON.stringify({name:this.repo,description:'My MindSpark mind maps',private:true,auto_init:true})
-      });
-      if(!cr.ok){ const t=await cr.text(); throw new Error('Could not create '+this.repo+' (HTTP '+cr.status+'). Token may lack `repo` scope. '+t.slice(0,140)); }
-      await new Promise(res=>setTimeout(res,800));
-    } else if(!r.ok){
-      throw new Error('Could not access repo (HTTP '+r.status+')');
-    }
-  },
-  // Raw read of _index.json (updates indexSha). Returns [] on 404 or parse error.
-  async _fetchIndexRaw(){
-    const r=await fetch(`https://api.github.com/repos/${this.user.login}/${this.repo}/contents/_index.json`,{headers:this._headers()});
-    if(r.status===404){ this.indexSha=null; return []; }
-    if(!r.ok) throw new Error('Could not load index (HTTP '+r.status+')');
-    const data=await r.json(); this.indexSha=data.sha;
-    try{ const a=JSON.parse(this._decode(data.content)); return Array.isArray(a)?a:[]; }catch(e){ return []; }
-  },
-  async _loadIndex(){ this.index=await this._fetchIndexRaw(); },
-  // Tombstones: ids of maps the user explicitly deleted. Persisted so a lingering
-  // map file (e.g. a delete whose file-removal failed) is never resurrected.
-  async _loadDeleted(){
-    try{
-      const r=await fetch(`https://api.github.com/repos/${this.user.login}/${this.repo}/contents/_deleted.json`,{headers:this._headers()});
-      if(!r.ok){ this.deleted=[]; this.deletedSha=null; return; }
-      const data=await r.json(); this.deletedSha=data.sha;
-      const a=JSON.parse(this._decode(data.content)); this.deleted=Array.isArray(a)?a:[];
-    }catch(e){ this.deleted=[]; this.deletedSha=null; }
-  },
-  async _saveDeleted(){
-    this.deletedSha=await this._writeFile('_deleted.json', JSON.stringify(this.deleted), this.deletedSha);
-  },
-  // List map ids present in the maps/ folder.
-  async _listMapFiles(){
-    const r=await fetch(`https://api.github.com/repos/${this.user.login}/${this.repo}/contents/maps`,{headers:this._headers()});
-    if(r.status===404) return [];
-    if(!r.ok) throw new Error('Could not list maps (HTTP '+r.status+')');
-    const arr=await r.json();
-    return arr.filter(f=>f.type==='file'&&/\.json$/.test(f.name)).map(f=>f.name.replace(/\.json$/,''));
-  },
-  // Map files that exist but are absent from the index AND not tombstoned — i.e.
-  // maps lost to a damaged/clobbered index. Returns ready-to-restore entries.
-  async orphanMaps(){
-    let fileIds; try{ fileIds=await this._listMapFiles(); }catch(e){ return []; }
-    const inIndex=new Set(this.index.map(m=>m.id));
-    const tomb=new Set(this.deleted);
-    const ids=fileIds.filter(id=>!inIndex.has(id)&&!tomb.has(id));
-    const out=[];
-    for(const id of ids){
-      try{
-        const r=await fetch(`https://api.github.com/repos/${this.user.login}/${this.repo}/contents/maps/${id}.json`,{headers:this._headers()});
-        if(!r.ok) continue;
-        const data=await r.json(); this.shas[id]=data.sha;
-        const m=JSON.parse(this._decode(data.content));
-        const e={id:m.id||id, title:m.title||'(untitled)', color:m.color, updated:m.updated||0}; if(m.pinned) e.pinned=true; out.push(e);
-      }catch(e){}
-    }
-    return out;
-  },
-  // Add recovered orphan entries back into the index (never a tombstoned id).
-  async restoreOrphans(entries){
-    if(!entries||!entries.length) return 0;
-    let n=0;
-    for(const e of entries){
-      if(this.deleted.includes(e.id)) continue;
-      if(!this.index.some(m=>m.id===e.id)){ this.index.unshift(e); n++; }
-    }
-    this.index.sort((a,b)=>(b.updated||0)-(a.updated||0));
-    if(n) await this._saveIndex();
-    return n;
-  },
-  async _writeFile(path, content, sha){
-    const body={message:`MindSpark: update ${path}`, content:this._encode(content)};
-    if(sha) body.sha=sha;
-    const r=await fetch(`https://api.github.com/repos/${this.user.login}/${this.repo}/contents/${path}`,{
-      method:'PUT', headers:{...this._headers(),'Content-Type':'application/json'},
-      body:JSON.stringify(body)
-    });
-    if(!r.ok){
-      // If we got a 409 sha conflict, try once more after refreshing the sha
-      if(r.status===409 || r.status===422){
-        const gh=await fetch(`https://api.github.com/repos/${this.user.login}/${this.repo}/contents/${path}`,{headers:this._headers()});
-        if(gh.ok){
-          const d=await gh.json();
-          body.sha=d.sha;
-          const retry=await fetch(`https://api.github.com/repos/${this.user.login}/${this.repo}/contents/${path}`,{
-            method:'PUT', headers:{...this._headers(),'Content-Type':'application/json'},
-            body:JSON.stringify(body)
-          });
-          if(retry.ok){ const dat=await retry.json(); return dat.content.sha; }
-        }
-      }
-      const t=await r.text();
-      throw new Error('Write '+path+' failed (HTTP '+r.status+') '+t.slice(0,140));
-    }
-    const data=await r.json();
-    return data.content.sha;
-  },
-  async _deleteFile(path, sha){
-    const url=`https://api.github.com/repos/${this.user.login}/${this.repo}/contents/${path}`;
-    const del=(s)=>fetch(url,{method:'DELETE', headers:{...this._headers(),'Content-Type':'application/json'},
-      body:JSON.stringify({message:`MindSpark: delete ${path}`, sha:s})});
-    let r=await del(sha);
-    if(r.ok || r.status===404) return;            // deleted, or already gone
-    if(r.status===409 || r.status===422){          // missing/stale sha → refresh and retry
-      const gh=await fetch(url,{headers:this._headers()});
-      if(gh.status===404) return;
-      if(gh.ok){ const d=await gh.json(); const r2=await del(d.sha); if(r2.ok||r2.status===404) return; r=r2; }
-    }
-    throw new Error('Delete '+path+' failed (HTTP '+r.status+')');
-  },
-  async _saveIndex(){
-    // Merge-on-write: re-read the server index and overlay our in-memory entries,
-    // then drop tombstoned ids. A save can therefore never clobber entries that
-    // still exist on the server — only an explicit delete (via the tombstone
-    // list) removes one. This neutralises the empty/failed-read clobber bug.
-    let server=[];
-    try{ server=await this._fetchIndexRaw(); }catch(e){ server=this.index.slice(); }
-    const byId=new Map(server.map(m=>[m.id,m]));
-    for(const m of this.index) byId.set(m.id,m);
-    for(const id of this.deleted) byId.delete(id);
-    this.index=[...byId.values()].sort((a,b)=>(b.updated||0)-(a.updated||0));
-    this.indexSha=await this._writeFile('_index.json', JSON.stringify(this.index), this.indexSha);
-  },
-  // public API matching ServerStore
-  async list(){ return this.index.slice(); },
-  async get(id){
-    try{
-      const r=await fetch(`https://api.github.com/repos/${this.user.login}/${this.repo}/contents/maps/${id}.json`,{headers:this._headers()});
-      if(r.status===404){ const b=this._localBackup(id); if(b) return b; return null; }
-      if(!r.ok) throw new Error('Could not load map (HTTP '+r.status+')');
-      const data=await r.json();
-      this.shas[id]=data.sha;
-      let json;
-      // The Contents API only inlines base64 content for files up to 1 MB. Larger
-      // files come back with empty content (and encoding "none"), so we must read
-      // them another way — via the Git Blobs API (handles up to 100 MB).
-      const inlined = data.content && data.content.trim() && data.encoding!=='none';
-      json = inlined ? this._decode(data.content) : await this._readLargeBlob(data);
-      const parsed=JSON.parse(json);
-      try{ localStorage.setItem('mindspark:backup:'+id, json); }catch(e){}   // refresh local copy
-      return parsed;
-    }catch(e){
-      console.warn('CloudStore.get', e);
-      const b=this._localBackup(id);
-      if(b){ console.warn('CloudStore.get: served local backup for', id); return b; }
-      return null;
-    }
-  },
-  // Read a file too large for the Contents API to inline (>1 MB). Prefer the Git
-  // Blobs API (returns base64, up to 100 MB); fall back to the raw download_url
-  // (plain text, no decode) if the blob endpoint is unavailable.
-  async _readLargeBlob(data){
-    if(data.git_url){
-      const br=await fetch(data.git_url,{headers:this._headers()});
-      if(br.ok){
-        const blob=await br.json();
-        if(blob && blob.content) return this._decode(blob.content);
-      }
-    }
-    if(data.download_url){
-      const dr=await fetch(data.download_url,{headers:this._headers()});
-      if(dr.ok) return await dr.text();   // raw JSON — already decoded
-    }
-    throw new Error('Could not read large map content (Blobs API + raw both failed)');
-  },
-  _localBackup(id){
-    try{ const s=localStorage.getItem('mindspark:backup:'+id); return s?JSON.parse(s):null; }catch(e){ return null; }
-  },
-  async save(map){
-    map.updated=Date.now();
-    // Durability net: keep a local copy *before* the network write, so a failed
-    // or interrupted GitHub save can never lose the user's edits.
-    try{ localStorage.setItem('mindspark:backup:'+map.id, JSON.stringify(map)); }catch(e){}
-    // Store compact (not pretty-printed): pretty-printing inflates large maps
-    // past GitHub's 1 MB Contents-API limit, which then breaks reads.
-    this.shas[map.id]=await this._writeFile(`maps/${map.id}.json`, JSON.stringify(map), this.shas[map.id]);
-    const entry={id:map.id, title:map.title, color:map.color, updated:map.updated};
-    if(map.pinned) entry.pinned=true;
-    const i=this.index.findIndex(m=>m.id===map.id);
-    if(i>=0) this.index[i]=entry; else this.index.unshift(entry);
-    this.index.sort((a,b)=>b.updated-a.updated);
-    await this._saveIndex();
-  },
-  async remove(id){
-    // Delete the file (refreshing the sha if we don't have it cached — so deleting
-    // a never-opened map still removes its file, not just the index entry).
-    try{ await this._deleteFile(`maps/${id}.json`, this.shas[id]); }
-    catch(e){ console.warn('map file delete:', e.message); }
-    delete this.shas[id];
-    this.index=this.index.filter(m=>m.id!==id);
-    if(!this.deleted.includes(id)) this.deleted.push(id);   // tombstone: never resurrect
-    try{ localStorage.removeItem('mindspark:backup:'+id); }catch(e){}
-    try{ await this._saveDeleted(); }catch(e){ console.warn('tombstone save:', e.message); }
-    await this._saveIndex();
-  },
-  // Version history = the GitHub commit history of the map's JSON file.
-  async history(id){
-    try{
-      const r=await fetch(`https://api.github.com/repos/${this.user.login}/${this.repo}/commits?path=maps/${id}.json&per_page=50`,{headers:this._headers()});
-      if(!r.ok) return [];
-      const commits=await r.json();
-      return commits.map(c=>({
-        ref: c.sha,
-        ts: Date.parse(c.commit?.author?.date || c.commit?.committer?.date || 0) || 0,
-        message: c.commit?.message || ''
-      }));
-    }catch(e){ console.warn('history', e); return []; }
-  },
-  async version(id, ref){
-    try{
-      const r=await fetch(`https://api.github.com/repos/${this.user.login}/${this.repo}/contents/maps/${id}.json?ref=${encodeURIComponent(ref)}`,{headers:this._headers()});
-      if(!r.ok) return null;
-      const data=await r.json();
-      const inlined = data.content && data.content.trim() && data.encoding!=='none';
-      const json = inlined ? this._decode(data.content) : await this._readLargeBlob(data);
-      return JSON.parse(json);
-    }catch(e){ console.warn('version', e); return null; }
-  }
-};
-
 let Store;
-let MODE = 'unknown';
+// True only while a version-history preview is open (previewVersion sets it,
+// cancelHistoryPreview restores it). Editing paths check it and bail out.
+let READONLY = false;
 // Wrap document.execCommand so missing-method environments (older Safari without
 // the legacy API, jsdom-based tests, etc.) silently no-op instead of throwing.
 // All inline-formatting toolbar buttons funnel through here.
@@ -382,22 +83,9 @@ function execCmd(cmd, value){
 }
 
 async function initStore(){
-  // The installed local product never turns a temporary server outage into a
-  // GitHub login flow. Its native supervisor owns server startup/recovery.
-  if(location.protocol==='file:' || location.port==='3034'){
-    Store=ServerStore; MODE='server'; return {mode:'server',loggedIn:true};
-  }
-  const tries=(typeof location!=='undefined' && location.protocol==='file:') ? 50 : 1;
-  for(let i=0;i<tries;i++){
-    try{
-      const r=await fetch(apiUrl('/healthz'), {cache:'no-store'});
-      if(r.ok){ Store=ServerStore; MODE='server'; return {mode:'server', loggedIn:true}; }
-    }catch(e){}
-    if(i+1<tries) await new Promise(ok=>setTimeout(ok,80));
-  }
-  Store=CloudStore; MODE='cloud';
-  const loggedIn=await CloudStore.tryInit();
-  return {mode:'cloud', loggedIn};
+  // The Mac product always talks to its own local server. The native
+  // supervisor owns server startup/recovery.
+  Store=ServerStore;
 }
 
 /* ---------- helpers ---------- */
@@ -2224,11 +1912,11 @@ function flipAnimateNodes(before){
    Layout configuration.
 
    The knobs a layout exposes, as plain validated JSON stored on the map
-   (map.layoutConfig) so it travels with share links and exports.
+   (map.layoutConfig) so it travels with exports and imports.
 
-   Deliberately DATA, never code. A layout config arrives on a stranger's
-   machine whenever they open a #view= link, so anything executable here
-   would be a code-execution channel into shared maps — the opposite of the
+   Deliberately DATA, never code. A layout config arrives with any map
+   file someone imports, so anything executable here would be a
+   code-execution channel into imported maps — the opposite of the
    care taken in sanitizeInlineHTML(). Numbers get clamped, unknown keys are
    dropped, and a malformed config falls back to defaults rather than
    throwing: a bad config should never make a map unopenable.
@@ -3704,7 +3392,6 @@ function pushHistory({preserveEditor=false}={}){
   hpos=history.length-1;
   updateUndo();
   scheduleSave();                              // any change to history persists
-  if(typeof Collab!=='undefined') Collab.onLocalChange();   // broadcast edits to live collaborators
   if(mdMode && !_mdSyncing) syncTextFromMap();                // keep the Markdown editor in sync with canvas edits
 }
 function updateUndo(){ $('#undo').disabled=hpos<=0; $('#redo').disabled=hpos>=history.length-1; }
@@ -6860,7 +6547,7 @@ function repositionNodeBar(){
 
 function positionNodeBar(){
   $('#nodebar')?.remove();
-  if(READONLY) return;            // read-only shared view shows no editing toolbar
+  if(READONLY) return;            // version-history preview shows no editing toolbar
   if(activePicker){ activePicker.remove(); activePicker=null; }
   // When 2+ nodes are multi-selected, the bottom bulk bar takes over — don't
   // also show the single-node toolbar.
@@ -8507,9 +8194,8 @@ async function refreshList(){
   catch(e){ console.warn('Could not refresh map list:',e); return; }
   if(generation!==_listGeneration) return;
   // Merge the current in-memory map so title edits / new maps appear immediately
-  // (don't wait for the debounced save to hit the database). Shared maps (_cloudView)
-  // are NOT owned — they belong in "Shared with me", never in "Your maps".
-  if(map && !map._cloudView){
+  // (don't wait for the debounced save to hit the database).
+  if(map){
     // Pin state comes from the server list for every row (togglePin saves
     // before refreshing); only a not-yet-saved map uses its in-memory flag.
     const local={id:map.id, title:map.title, color:map.color, updated:map.updated||Date.now()};
@@ -8529,35 +8215,6 @@ async function refreshList(){
     el.querySelector('.row-menu').onclick=ev=>{ ev.stopPropagation(); openRowMenu(ev.currentTarget, m); };
     list.appendChild(el);
   });
-  // Shared maps: one list combining maps you've shared OUT (you're the owner) and maps
-  // shared WITH you (you're a guest), deduped by room. Opening connects to the LIVE copy.
-  const _byMe=_sharedByMeStore(), _withMe=_sharedStore();
-  const _seen=new Set(); const _unified=[];
-  _byMe.forEach(x=>{ const room=x.room||x.id; if(!room||_seen.has(room)) return; _seen.add(room);
-    _unified.push({ room, token:x.token, title:x.title, color:x.color, addedAt:x.addedAt, mine:true }); });
-  _withMe.forEach(x=>{ const room=x.id; if(!room) return;
-    if(_seen.has(room)){ try{ _saveSharedStore(_sharedStore().filter(e=>e.id!==room)); }catch(e){} return; }  // self-heal an old double-filing
-    _seen.add(room);
-    _unified.push({ room, token:x.token, title:x.title, color:x.color, addedAt:x.addedAt, mine:false }); });
-  if(_unified.length){
-    const hdr=document.createElement('div'); hdr.className='map-group-label'; hdr.textContent=rmsTr('sharedMaps','Shared maps');
-    list.appendChild(hdr);
-    _unified.sort((a,b)=>(b.addedAt||0)-(a.addedAt||0)).forEach(sm=>{
-      const activeShared=(map && map._cloudView===sm.room) || (map && map.id==='shared-'+sm.room);
-      const el=document.createElement('div');
-      el.className='map-item shared-row'+(activeShared?' active':'');
-      const badge = sm.mine
-        ? '<span class="shared-badge" title="'+rmsTr('sharedByYou','Shared by you')+'">\uD83D\uDD17</span>'
-        : '<span class="shared-badge" title="'+(sm.token?rmsTr('sharedWithYouEdit','Shared with you · editable'):rmsTr('sharedWithYouView','Shared with you · view only'))+'">'+(sm.token?'\u270F\uFE0F':'\uD83D\uDC41')+'</span>';
-      el.innerHTML='<span class="dot" style="background:'+(safeColor(sm.color)||'#e0613a')+'"></span>'+
-        '<span class="nm">'+escapeHtml(sm.title||'Shared map')+'</span>'+badge+
-        '<button class="row-menu" title="'+rmsTr('more','More')+'" aria-haspopup="true" aria-label="'+rmsTr('moreActions','More actions')+'">\u22ee</button>';
-      el.style.cursor='pointer';
-      el.onclick=()=>{ if(!(map && map._cloudView===sm.room)) openSharedInPlace(sm.room, sm.token); };
-      el.querySelector('.row-menu').onclick=ev=>{ ev.stopPropagation(); openSharedRowMenu(ev.currentTarget, sm); };
-      list.appendChild(el);
-    });
-  }
 }
 function escapeHtml(s){return (s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 
@@ -8838,8 +8495,7 @@ function showNotesEditor(nodeId, opts){
    ============================================================ */
 async function createMapFromTemplate(templateId){
   ++_mapLoadGeneration;
-  if(!leaveLiveForSwitch()) return;
-  exitSharedMode();
+  resetMapViewState();
   closeNotesPopup();
   const tpl = TEMPLATES[templateId];
   if(!tpl){ createMap(); return; }
@@ -9047,8 +8703,7 @@ function showTemplatesMenu(){
 
 function createMap(){
   ++_mapLoadGeneration;
-  if(!leaveLiveForSwitch()) return;
-  exitSharedMode();
+  resetMapViewState();
   const id=uid(); const rid=uid();
   const rootText='Central Idea';
   const m={id,title:rootText,titleAuto:true,color:PALETTE[Math.floor(Math.random()*PALETTE.length)],rootId:rid,
@@ -9073,8 +8728,7 @@ function createMap(){
 }
 async function loadMap(id){
   const generation=++_mapLoadGeneration;
-  if(!leaveLiveForSwitch()) return;
-  exitSharedMode();            // if we were viewing a shared map, leave it cleanly
+  resetMapViewState();
   flushPendingSave();
   let m=null;
   try{ await _mapSaves.flush(id); m=await Store.get(id); }
@@ -9163,11 +8817,10 @@ function updateMapSaveStatus(){
   $('#saveText').textContent=rmsTr(key,fallback[key]);
 }
 function scheduleSave(){
-  if(!map || READONLY || map._ephemeral || _historyPreview) return;
+  if(!map || READONLY || _historyPreview) return;
   if(typeof applyLevelColors==='function') applyLevelColors();
-  if(map._cloudEdit){ scheduleCloudSave(); return; }
   map.updated=Date.now();
-  _mapSaves.schedule(map,MODE==='cloud' ? 1500 : 600);
+  _mapSaves.schedule(map,600);
 }
 async function saveMapNow(target){
   target.updated=Date.now();
@@ -9237,13 +8890,7 @@ function exportMenu(){
   closeAllMenus();
   const pop=document.createElement('div');
   pop.className='export-pop';
-  const _collabItems = collabAvailable() ? `
-    <button data-a="collab"><span class="ex-ic">👥</span><span><b>Collaborate live</b><i>Real-time editing — share an invite link</i></span></button>
-    <button data-a="cloudshare"><span class="ex-ic">☁</span><span><b>Cloud share (editable)</b><i>Publish + copy an edit link collaborators can save to</i></span></button>
-    <button data-a="manageaccess"><span class="ex-ic">🔐</span><span><b>Manage access</b><i>Named collaborators &amp; link permissions</i></span></button>` : '';
   pop.innerHTML=`
-    <div class="ex-grp">Share &amp; collaborate</div>
-    <button data-a="share"><span class="ex-ic">🔗</span><span><b>Copy share link</b><i>Read-only view, no account needed</i></span></button>${_collabItems}
     <div class="ex-grp">Tools</div>
     <button data-a="history"><span class="ex-ic">🕘</span><span><b>Version history</b><i>Browse & restore past versions</i></span></button>
     <button data-a="present"><span class="ex-ic">▶</span><span><b>Presentation mode</b><i>Step through the map one topic at a time</i></span></button>
@@ -9271,11 +8918,7 @@ function exportMenu(){
   }), 0);
   pop.querySelectorAll('button').forEach(b=>b.onclick=()=>{
     const a=b.dataset.a; close();
-    if(a==='share') copyShareLink();
-    if(a==='collab'){ if(collabAvailable()) Collab.startHost(); else toast('Live collaboration needs the hosted app'); }
-    if(a==='cloudshare'){ if(collabAvailable()) publishSharedMap(); else toast('Cloud share needs the hosted app'); }
-    if(a==='manageaccess'){ if(collabAvailable()) openAccessPanel(); else toast('Managing access needs the hosted app'); }
-    else if(a==='history') showVersionHistory();
+    if(a==='history') showVersionHistory();
     else if(a==='present') startPresentation();
     else if(a==='buildprompt') showBuildPrompt(sel || (map&&map.rootId));
     else if(a==='png') exportPNG();
@@ -9294,8 +8937,7 @@ function exportMenu(){
 
 /* ============================================================
    Version history — browse and restore past saves of the current map.
-   Cloud mode: real GitHub commit history of the map's file.
-   Server mode: SQLite snapshots taken on each content change.
+   SQLite snapshots taken by the local server on each content change.
    ============================================================ */
 let _historyRequestGeneration=0;
 let _historyPreview = null;   // {original} while previewing a past version
@@ -9326,7 +8968,7 @@ async function showVersionHistory(){
   catch(e){ list.textContent=rmsTr('storageUnavailable','Could not load your maps.'); return; }
   if(!panel.isConnected || !map || map.id!==mapId) return;
   if(!versions || !versions.length){
-    list.innerHTML=`<div class="hist-status">No earlier versions yet.<br><span class="hist-sub">Versions are recorded each time the map changes${MODE==='cloud'?' (your GitHub commit history)':''}. Make an edit, then check back.</span></div>`;
+    list.innerHTML=`<div class="hist-status">No earlier versions yet.<br><span class="hist-sub">Versions are recorded each time the map changes. Make an edit, then check back.</span></div>`;
     return;
   }
   list.innerHTML = versions.map((v,i)=>`
@@ -12471,13 +12113,13 @@ const MAP_STYLES = [
    whole design: 'balanced' keeps each child on whichever side it already had,
    'down' does org-chart width packing, 'timeline' chains an axis. Those are
    recursive procedures, not numbers, and the only way JSON could express them
-   is by shipping executable code — which would arrive on a stranger's machine
-   through every #view= link. So an imported layout picks an engine and tunes
+   is by shipping executable code — which would then arrive inside every
+   imported map file. So an imported layout picks an engine and tunes
    it, and every built-in below is written in exactly the schema an import must
    use, so there is no privileged path.
 
    Applying a preset writes map.layout (the engine) and map.layoutConfig (its
-   options). Both travel with the map, so a shared map renders correctly for
+   options). Both travel with the map, so an exported map renders correctly for
    someone who has never seen the preset — only the picker entry is local.
    ------------------------------------------------------------ */
 /* ------------------------------------------------------------
@@ -13057,11 +12699,10 @@ window.addEventListener('keydown', e=>{
 window.addEventListener('keydown', e=>{
   if(e.key!=='Escape') return;
   if(!document.body.classList.contains('focus-mode')) return;
-  // Don't fight with editing/notes/login overlay — they handle Esc themselves
+  // Don't fight with editing/notes — they handle Esc themselves
   if(topModalEl()) return;
   if(document.querySelector('.node.editing')) return;
   if(document.querySelector('.notes-popup')) return;
-  if($('#loginOverlay') && $('#loginOverlay').style.display==='flex') return;
   e.preventDefault();
   toggleFocusMode();
 }, true);
@@ -13124,8 +12765,6 @@ function showStoreFailure(error){
 }
 async function proceedBoot(){
   loadUserTemplates();   // merge any saved "My templates" into the catalog
-  // A shared map queued for copying takes priority over loading the last map.
-  if(await consumePendingImport()) return;
   try{ const _mid=new URLSearchParams(location.search).get('map'); if(_mid && await loadMap(_mid)) return; }catch(e){}
   let idx=[];
   idx=await Store.list();
@@ -13133,19 +12772,6 @@ async function proceedBoot(){
     const ok=await loadMap(idx[0].id);
     if(!ok) throw new Error('Could not open the saved map');
   } else {
-    // Empty list. Before seeding a blank map, check for orphan map files that
-    // exist in the repo but aren't in the index and weren't deleted — the
-    // signature of a damaged/clobbered index. Restore those instead of losing them.
-    let orphans=[];
-    if(typeof Store.orphanMaps==='function'){ try{ orphans=await Store.orphanMaps(); }catch(e){} }
-    if(orphans && orphans.length){
-      try{
-        const n=await Store.restoreOrphans(orphans);
-        if(n) toast(n+' recovered map'+(n>1?'s':'')+' restored to your list');
-      }catch(e){}
-      let idx2=[]; try{ idx2=await Store.list(); }catch(e){ console.warn('could not re-list maps after orphan recovery:', e.message); }
-      if(idx2.length && await loadMap(idx2[0].id)) return;
-    }
     // Truly empty store: on first run, seed the demo sample instead of a blank map.
     if(!localStorage.getItem('mindspark:demoSeeded')){
       const seeded = await seedDemoMap();
@@ -13156,970 +12782,12 @@ async function proceedBoot(){
   }
 }
 
-function showSharedPill(editable){
-  const pill=$('#userPill'); if(!pill) return;
-  pill.style.display='flex';
-  pill.classList.add('shared-pill');
-  const nm=$('#userName'); if(nm) nm.textContent = editable ? 'Shared map' : 'Shared \u00b7 read-only';
-  pill.title = editable
-    ? 'Editing a shared map \u2014 changes are visible to everyone with access'
-    : 'Viewing a shared map \u2014 read-only';
-}
-function showUserPill(){
-  const pill=$('#userPill'); if(!pill) return;
-  pill.classList.remove('shared-pill'); pill.title='';
-  pill.style.display='flex';
-  $('#userAvatar').src = CloudStore.user.avatar_url;
-  $('#userName').textContent = CloudStore.user.login;
-  $('#userSignOut').onclick = ()=>{
-    if(confirm('Sign out of MindSpark? Your maps stay safely in your GitHub repo.')){
-      CloudStore.logout();
-      location.reload();
-    }
-  };
-}
-
-// Inherited OAuth fields from upstream MindSpark. The Mac overlay ships both
-// empty so it never contacts an upstream worker. Do not fill these in here.
-const GH_OAUTH = { clientId: '', workerUrl: '' };
-function oauthConfigured(){ return !!(GH_OAUTH.clientId && GH_OAUTH.workerUrl); }
-// Live collaboration & cloud share rely on the Cloudflare worker, whose CORS/origin
-// is bound to the deployed app — they can't work from local (server-mode) hosting.
-function collabAvailable(){ return MODE==='cloud' && !!(GH_OAUTH && GH_OAUTH.workerUrl); }
-
-// Shared success path for BOTH login methods (PAT and OAuth).
-// A cloud-backed #shared= link opened while signed out is parked here, then opened
-// in-place once sign-in completes (Overleaf-style: shared links require an account).
-let _pendingSharedLink = null;
-async function completeCloudLogin(token){
-  await CloudStore.login(token);
-  const ov=$('#loginOverlay'); if(ov) ov.style.display='none';
-  showUserPill();
-  await proceedBoot();
-  if(_pendingSharedLink){
-    const s=_pendingSharedLink; _pendingSharedLink=null;
-    try{ await openSharedInPlace(s.id, s.token); }catch(e){ console.warn('open shared after login failed:', e); }
-  }
-}
-
-// Open GitHub's authorize page in a popup. The Worker callback posts the token
-// back to this window (see the message listener below).
-function startGithubLogin(){
-  if(!oauthConfigured()) return;
-  const rnd = (window.crypto && crypto.getRandomValues)
-    ? Array.from(crypto.getRandomValues(new Uint8Array(16))).map(b=>b.toString(16).padStart(2,'0')).join('')
-    : (Date.now().toString(36)+Math.random().toString(36).slice(2));
-  const err=$('#ghError');
-  if(!CloudStore._setItemSafe('mindspark:oauth:state', rnd)){
-    if(err) err.textContent = 'Could not start sign-in — your browser\'s local storage is full. Try clearing site data for this page and trying again.';
-    return;
-  }
-  const redirect = GH_OAUTH.workerUrl.replace(/\/+$/,'') + '/callback';
-  const url = 'https://github.com/login/oauth/authorize'
-    + '?client_id='   + encodeURIComponent(GH_OAUTH.clientId)
-    + '&redirect_uri=' + encodeURIComponent(redirect)
-    + '&scope=repo'
-    + '&state='        + encodeURIComponent(rnd);
-  const w=620,h=720, left=Math.max(0,(screen.width-w)/2), top=Math.max(0,(screen.height-h)/2);
-  const pop = window.open(url, 'mindspark_github_oauth', `width=${w},height=${h},left=${left},top=${top}`);
-  if(!pop && err) err.textContent = 'Popup blocked — allow popups for this site, or use a token below.';
-}
-
-// Receive the token from the Worker popup. Validated by (a) message origin ===
-// the configured Worker origin and (b) a matching one-time state nonce.
-window.addEventListener('message', async (ev)=>{
-  if(!oauthConfigured()) return;
-  let workerOrigin; try{ workerOrigin = new URL(GH_OAUTH.workerUrl).origin; }catch(e){ return; }
-  if(ev.origin !== workerOrigin) return;
-  const d = ev.data;
-  if(!d || d.type !== 'mindspark-oauth') return;
-  const expected = localStorage.getItem('mindspark:oauth:state');
-  localStorage.removeItem('mindspark:oauth:state');
-  const err=$('#ghError');
-  if(d.error || !d.token){ if(err) err.textContent='GitHub sign-in failed'+(d.error?(': '+d.error):'')+'.'; return; }
-  if(!expected || d.state !== expected){ if(err) err.textContent='Sign-in could not be verified — please try again.'; return; }
-  try{ await completeCloudLogin(d.token); }
-  catch(e){ if(err) err.textContent = e.message || String(e); }
-});
-
-function showLoginOverlay(opts){
-  const ov=$('#loginOverlay'); if(!ov) return;
-  ov.style.display='flex';
-  const note=$('#loginShareNote');
-  if(note){
-    if(opts && opts.shared){ note.textContent='This map was shared with you. Sign in with GitHub to open it.'; note.style.display='block'; }
-    else { note.style.display='none'; }
-  }
-  const sign=$('#ghSignIn'), pat=$('#ghPat'), err=$('#ghError');
-  // OAuth button: only shown when an OAuth App + Worker are configured.
-  const oauthBox=$('#loginOauth'), oauthBtn=$('#ghOauthBtn');
-  if(oauthBox){
-    if(oauthConfigured()){ oauthBox.style.display='block'; if(oauthBtn) oauthBtn.onclick=startGithubLogin; }
-    else { oauthBox.style.display='none'; }
-  }
-  const doLogin=async()=>{
-    const tok=(pat.value||'').trim();
-    if(!tok){ err.textContent='Paste your token first.'; return; }
-    err.textContent=''; sign.disabled=true; sign.textContent='Signing in…';
-    try{
-      await completeCloudLogin(tok);
-    }catch(e){
-      err.textContent = e.message || String(e);
-      sign.disabled=false; sign.textContent='Sign in';
-    }
-  };
-  sign.onclick = doLogin;
-  pat.addEventListener('keydown', e=>{ if(e.key==='Enter') doLogin(); });
-  pat.focus();
-}
-
-/* ============================================================
-   ASYNC SHARING — read-only share links (no backend needed)
-
-   The whole map is serialized, gzip-compressed (when the browser supports
-   CompressionStream), and packed into the URL fragment. Opening the link
-   decodes it and shows a read-only view. Nothing is sent to any server — the
-   data lives entirely in the link, so recipients need no account.
-   ============================================================ */
-let READONLY = false;   // true while viewing a shared (read-only) map
-
-function _b64urlFromBytes(bytes){
-  let bin=''; const CH=0x8000;
-  for(let i=0;i<bytes.length;i+=CH) bin+=String.fromCharCode.apply(null, bytes.subarray(i,i+CH));
-  return btoa(bin).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
-}
-function _bytesFromB64url(s){
-  s=s.replace(/-/g,'+').replace(/_/g,'/'); while(s.length%4) s+='=';
-  const bin=atob(s), out=new Uint8Array(bin.length);
-  for(let i=0;i<bin.length;i++) out[i]=bin.charCodeAt(i);
-  return out;
-}
-async function _gzip(str){
-  if(typeof CompressionStream==='undefined') return null;
-  const cs=new CompressionStream('gzip');
-  const w=cs.writable.getWriter(); w.write(new TextEncoder().encode(str)); w.close();
-  const buf=await new Response(cs.readable).arrayBuffer();
-  return new Uint8Array(buf);
-}
-async function _gunzip(bytes){
-  const ds=new DecompressionStream('gzip');
-  const w=ds.writable.getWriter(); w.write(bytes); w.close();
-  const buf=await new Response(ds.readable).arrayBuffer();
-  return new TextDecoder().decode(buf);
-}
-function _shareePayload(m){
-  const p = { v:1, title:m.title, color:m.color, style:m.style, layout:m.layout,
-              rootId:m.rootId, nodes:m.nodes, links:m.links||[], vars:m.vars||{} };
-  if(m.layoutConfig) p.layoutConfig = m.layoutConfig;   // omitted entirely when unset
-  return p;
-}
-async function buildShareLink(){
-  const json=JSON.stringify(_shareePayload(map));
-  const gz=await _gzip(json);
-  const token = gz ? ('g'+_b64urlFromBytes(gz)) : ('r'+_b64urlFromBytes(new TextEncoder().encode(json)));
-  return location.origin + location.pathname + '#view=' + token;
-}
-async function decodeShareToken(token){
-  const scheme=token[0], body=token.slice(1);
-  const bytes=_bytesFromB64url(body);
-  const json = scheme==='g' ? await _gunzip(bytes) : new TextDecoder().decode(bytes);
-  return JSON.parse(json);
-}
-async function copyShareLink(){
-  if(!map) return;
-  try{
-    const url=await buildShareLink();
-    const kb=Math.round(url.length/1024*10)/10;
-    const finish=()=> toast(url.length>12000
-      ? `Link copied (~${kb} KB) — very long links may not open everywhere; consider removing large images`
-      : 'Read-only share link copied');
-    if(navigator.clipboard?.writeText){
-      navigator.clipboard.writeText(url).then(finish, ()=>showShareFallback(url));
-    } else showShareFallback(url);
-  }catch(e){ toast('Could not build share link'); }
-}
-function showShareFallback(url){
-  document.querySelectorAll('.share-fallback').forEach(p=>p.remove());
-  const m=document.createElement('div'); m.className='var-form share-fallback';
-  m.innerHTML=`<div class="vf-backdrop"></div><div class="vf-card">
-    <button class="vf-close">×</button><h2>Read-only share link</h2>
-    <p class="vf-sub">Copy this link and send it to anyone — they can view (not edit) this map, no account needed.</p>
-    <textarea class="vf-input" rows="4" readonly style="width:100%">${escapeHtml(url)}</textarea>
-    <div class="vf-actions"><button class="vf-go primary">Copy</button></div></div>`;
-  document.body.appendChild(m);
-  m.addEventListener('mousedown',e=>e.stopPropagation());
-  const ta=m.querySelector('textarea'); ta.focus(); ta.select();
-  const close=()=>m.remove();
-  m.querySelector('.vf-go').onclick=()=>{ ta.select(); try{document.execCommand('copy'); toast('Copied');}catch(e){} close(); };
-  m.querySelector('.vf-close').onclick=close;
-  m.querySelector('.vf-backdrop').onclick=close;
-}
-async function tryEnterSharedView(){
-  const h=location.hash||'';
-  const mt=h.match(/^#view=(.+)$/);
-  if(!mt) return false;
-  let payload;
-  try{ payload=await decodeShareToken(mt[1]); }
-  catch(e){ console.error('bad share link',e); return false; }
-  READONLY=true;
-  document.body.classList.add('shared-view');
-  map=sanitizeMap({ id:'shared', title:payload.title||'Shared map', color:payload.color||'#e0613a',
-        style:payload.style, layout:payload.layout, rootId:payload.rootId,
-        nodes:payload.nodes||{}, links:payload.links||[], vars:payload.vars||{} });
-  sel=null;
-  $('#mapTitle').value=map.title; $('#mapTitle').readOnly=true;
-  // Grow the title <input> to fit the whole title (it clips to its width) so a
-  // shared map shows its full name rather than a truncation.
-  $('#mapTitle').size = Math.max(8, (map.title||'').length + 1);
-  render();
-  showSharedBanner();
-  // Lay out + fit once the page has actually been laid out. At initial boot the
-  // stage (and nodes) can still measure 0, which makes fit() center on a wrong
-  // box and the map disappears. Re-running autoLayout re-measures every node and
-  // recomputes clean positions, then fit() frames it. Retry across frames until
-  // the stage has a real size; also do it on window 'load' as a backstop.
-  let tries=0;
-  const settle=()=>{
-    if(stage.getBoundingClientRect().width>1){ autoLayout(); fit(); }
-    else if(tries++<60){ requestAnimationFrame(settle); }
-  };
-  requestAnimationFrame(settle);
-  window.addEventListener('load', ()=>{ autoLayout(); fit(); }, { once:true });
-  return true;
-}
-function showSharedBanner(){
-  if($('#sharedBanner')) return;
-  const b=document.createElement('div'); b.id='sharedBanner'; b.className='shared-banner';
-  b.innerHTML=`<span class="sb-eye">👁</span>
-    <span class="sb-text">You're viewing a shared map — <b>read-only</b></span>
-    <button class="sb-copy" id="sbCopy">Make an editable copy</button>
-    <a class="sb-brand" href="${location.origin+location.pathname}" title="Open MindSpark">MindSpark</a>`;
-  document.body.appendChild(b);
-  _setBannerHeightVar(b);
-  b.addEventListener('mousedown',e=>e.stopPropagation());
-  $('#sbCopy').onclick=()=>{
-    try{ sessionStorage.setItem('mindspark:pendingImport', JSON.stringify(_shareePayload(map))); }catch(e){}
-    location.href = location.origin + location.pathname;
-  };
-}
-async function consumePendingImport(){
-  let raw; try{ raw=sessionStorage.getItem('mindspark:pendingImport'); }catch(e){ return false; }
-  if(!raw) return false;
-  try{ sessionStorage.removeItem('mindspark:pendingImport'); }catch(e){}
-  let p; try{ p=JSON.parse(raw); }catch(e){ return false; }
-  const id=uid();
-  map=sanitizeMap({ id, title:(p.title||'Shared map')+' (copy)', titleAuto:false, color:p.color||'#e0613a',
-        style:p.style, layout:p.layout, rootId:p.rootId, nodes:p.nodes||{},
-        links:p.links||[], vars:p.vars||{}, updated:Date.now() });
-  sel=map.rootId; history=[]; hpos=-1; pushHistory();
-  $('#mapTitle').value=map.title;
-  render(); fit();
-  if(typeof Store!=='undefined' && Store){ try{ await saveMapNow(map); }catch(e){ console.warn('saving the editable copy failed:', e.message); toast('Copy created, but saving failed \u2014 it is local only'); } }
-  refreshList();
-  toast('Editable copy created');
-  return true;
-}
-
-/* ============================================================================
-   Live collaboration — dependency-free op-broadcast (per-node last-write-wins).
-   Emits per-node ops on every local edit (via pushHistory) and applies remote
-   ops + presence cursors from the room's Durable Object. No Yjs, no deps.
-   ============================================================================ */
-const Collab = (function(){
-  let ws=null, me=null, room=null, active=false, applying=false, joiner=false, firstSnap=true;
-  let shadow=null, snapTimer=0, curThrottle=0, pingTimer=0, reapTimer=0;
-  const peers=new Map();                    // id -> {color,name,x,y,el}
-  let layer=null, pill=null;
-
-  const clone = o => JSON.parse(JSON.stringify(o));
-  const snap  = () => ({ nodes:clone(map.nodes), rootId:map.rootId, title:map.title, color:map.color,
-                         links:clone(map.links||[]), layout:map.layout, vars:clone(map.vars||{}), style:map.style });
-  function wsUrl(r){ try{ const u=new URL(GH_OAUTH.workerUrl);
-    return (u.protocol==='https:'?'wss:':'ws:')+'//'+u.host+'/api/collab/'+encodeURIComponent(r); }catch(e){ return null; } }
-
-  function ensureUI(){
-    if(!layer){ layer=document.createElement('div'); layer.id='collabCursors'; document.body.appendChild(layer); }
-    if(!pill){ pill=document.createElement('div'); pill.id='collabPill'; pill.style.display='none';
-      pill.innerHTML='<span class="cp-dots"></span><span class="cp-txt"></span>'
-        +'<button class="cp-save" title="Save your own editable copy to your maps">Save a copy</button>'
-        +'<button class="cp-link" title="Copy invite link">🔗</button>'
-        +'<button class="cp-stop" title="Leave live session">✕</button>';
-      document.body.appendChild(pill);
-      pill.querySelector('.cp-stop').onclick=()=>stop(true);
-      pill.querySelector('.cp-link').onclick=()=>{ copyLink(); toast('Invite link copied'); };
-      pill.querySelector('.cp-save').onclick=()=>saveCopy();
-    }
-  }
-  function updatePill(){
-    ensureUI();
-    if(!active){ pill.style.display='none'; return; }
-    pill.style.display='flex';
-    const dots=pill.querySelector('.cp-dots'); dots.innerHTML='';
-    const add=(c,t)=>{ const d=document.createElement('i'); d.className='cp-dot'; d.style.background=c; d.title=t; dots.appendChild(d); };
-    add(me?me.color:'#999','You');
-    peers.forEach(p=>add(p.color, p.name||'Guest'));
-    const n=peers.size+1;
-    pill.querySelector('.cp-txt').textContent='Live · '+n+(n===1?' person':' people');
-    const sv=pill.querySelector('.cp-save'); if(sv) sv.style.display=(map&&map._ephemeral)?'':'none';   // only guests fork a copy
-  }
-
-  function startHost(){
-    if(!map||!map.id){ toast('Open a map first'); return; }
-    if(active){ copyLink(); toast('Invite link copied'); return; }
-    joiner=false; firstSnap=false; connect(map.id, true);
-  }
-  function join(roomId){ joiner=true; firstSnap=true; connect(roomId, false); }
-
-  function connect(roomId, asHost){
-    const url=wsUrl(roomId); if(!url){ toast('Live editing isn\u2019t configured'); return; }
-    room=roomId;
-    try{ ws=new WebSocket(url); }catch(e){ toast('Could not start live session'); return; }
-    ws.onopen=()=>{ active=true; shadow=snap();
-      if(asHost){ send({t:'snapshot', map:snap()}); copyLink(); toast('Live session started \u2014 link copied'); }
-      bindCursor(); updatePill(); loop();
-      pingTimer=setInterval(()=>send({t:'ping'}), 6000);   // heartbeat so peers know we\u2019re alive
-      reapTimer=setInterval(reapStale, 5000);              // drop cursors of peers gone silent (network drop)
-    };
-    ws.onmessage=ev=>onMessage(ev.data);
-    ws.onclose=()=>{ active=false; clearCursors(); updatePill(); };
-    ws.onerror=()=>{ toast('Live connection error'); };
-  }
-  function stop(notify){ clearInterval(pingTimer); clearInterval(reapTimer); if(ws){ try{ ws.close(); }catch(e){} } ws=null; active=false; room=null; peers.clear(); clearCursors(); updatePill(); if(notify) toast('Left live session'); }
-  function send(o){ if(ws&&ws.readyState===1){ try{ ws.send(JSON.stringify(o)); }catch(e){ console.warn('live-session send failed; this edit was not broadcast:', e.message); } } }
-  function link(){ return location.origin+location.pathname+'#live='+room; }
-  function copyLink(){ try{ navigator.clipboard.writeText(link()); }catch(e){ console.warn('clipboard write failed:', e.message); toast('Could not copy \u2014 copy the link from the address bar'); } }
-
-  function onMessage(data){
-    let m; try{ m=JSON.parse(data); }catch(e){ return; }
-    if(m.from){ const pr=peers.get(m.from); if(pr) pr.lastSeen=Date.now(); }   // liveness
-    switch(m.t){
-      case 'welcome':
-        me={id:m.id, color:m.color};
-        peers.clear(); (m.peers||[]).forEach(p=>peers.set(p.id,{color:p.color,name:p.name||'',lastSeen:Date.now()}));
-        if(joiner && m.snapshot) applySnapshot(m.snapshot);
-        updatePill(); break;
-      case 'ping': break;   // heartbeat only (lastSeen already refreshed above)
-      case 'join':  peers.set(m.id,{color:m.color,name:'',lastSeen:Date.now()}); updatePill(); break;
-      case 'leave': removeCursor(m.id); peers.delete(m.id); updatePill(); break;
-      case 'name':  { const p=peers.get(m.id); if(p){ p.name=m.name; updatePill(); } break; }
-      case 'cur':   moveCursor(m.from, m.x, m.y); break;
-      case 'op':    applyOps(m.ops); break;
-      case 'snapshot': if(joiner && firstSnap) applySnapshot(m.map); break;
-    }
-  }
-
-  function applySnapshot(s){
-    applying=true;
-    try{
-      map.nodes=clone(s.nodes||{}); if(s.rootId) map.rootId=s.rootId;
-      if(s.title!=null){ map.title=s.title; const t=$('#mapTitle'); if(t) t.value=s.title; }
-      if(s.color) map.color=s.color;
-      if(s.links) map.links=clone(s.links);
-      if(s.layout) map.layout=s.layout;
-      if(s.vars)  map.vars=clone(s.vars);
-      if('style' in s) map.style=s.style;
-      sanitizeMap(map);              // peer data is untrusted: same checks as an import
-      shadow=snap();
-      if(typeof autoLayout==='function') autoLayout();
-      render();
-      if(firstSnap && typeof fit==='function'){ fit(); firstSnap=false; }
-      pushHistory();                 // baseline snapshot so a guest can undo their first edit
-    } finally { applying=false; }    // always release the lock, even if malformed snapshot data throws partway through — otherwise every local edit silently stops syncing for the rest of the session
-  }
-  function applyOps(ops){
-    applying=true;
-    try{
-      for(const op of ops){
-        if(op.t==='node'){ if(SAFE_NODE_ID_RE.test(String(op.id))){ const sn=sanitizeMapNode(op.n); if(sn){ sn.id=op.id; map.nodes[op.id]=sn; } } }
-        else if(op.t==='del'){ delete map.nodes[op.id]; if(sel===op.id) sel=null; }
-        else if(op.t==='meta'){ if(op.k==='title'){ map.title=op.v; const t=$('#mapTitle'); if(t) t.value=op.v; } else if(op.k==='color') map.color=safeColor(op.v)||map.color; else map[op.k]=op.v; }
-      }
-      shadow=snap(); render();
-    } finally { applying=false; }    // same guarantee — a malformed op or a render() edge case must not permanently wedge sync
-    if(map && !map._ephemeral && !READONLY) scheduleSave();   // host persists collaborators' edits
-  }
-
-  // Called from pushHistory() AND after autoLayout(). Coalesced on a short timer
-  // so a pushHistory()+autoLayout() burst is diffed ONCE — capturing the final,
-  // aligned node positions rather than the pre-layout ones.
-  let opTimer=0;
-  function onLocalChange(){
-    if(!active||applying||!shadow||!map) return;
-    clearTimeout(opTimer); opTimer=setTimeout(flushOps, 60);
-  }
-  function flushOps(){
-    if(!active||!shadow||!map) return;
-    const cur=snap(), ops=diff(shadow, cur);
-    if(ops.length){
-      send({t:'op', ops}); shadow=cur;
-      clearTimeout(snapTimer); snapTimer=setTimeout(()=>{ if(active) send({t:'snapshot', map:snap()}); }, 1500);
-    }
-  }
-  function diff(prev, cur){
-    const ops=[];
-    for(const id in cur.nodes){ const a=prev.nodes[id], b=cur.nodes[id];
-      if(!a || JSON.stringify(a)!==JSON.stringify(b)) ops.push({t:'node', id, n:b}); }
-    for(const id in prev.nodes){ if(!cur.nodes[id]) ops.push({t:'del', id}); }
-    if(prev.title!==cur.title)  ops.push({t:'meta', k:'title',  v:cur.title});
-    if(prev.color!==cur.color)  ops.push({t:'meta', k:'color',  v:cur.color});
-    if(prev.rootId!==cur.rootId)ops.push({t:'meta', k:'rootId', v:cur.rootId});
-    if(JSON.stringify(prev.links||[])!==JSON.stringify(cur.links||[])) ops.push({t:'meta', k:'links', v:cur.links});
-    if(prev.layout!==cur.layout) ops.push({t:'meta', k:'layout', v:cur.layout});
-    if(JSON.stringify(prev.vars||{})!==JSON.stringify(cur.vars||{})) ops.push({t:'meta', k:'vars', v:cur.vars});
-    if(JSON.stringify(prev.style)!==JSON.stringify(cur.style)) ops.push({t:'meta', k:'style', v:cur.style});
-    return ops;
-  }
-
-  // ---- presence cursors ----
-  function bindCursor(){
-    const surf = (typeof stage!=='undefined' && stage) ? stage : document.body;
-    if(surf._collabBound) return; surf._collabBound=true;
-    surf.addEventListener('pointermove', e=>{
-      if(!active) return; const now=Date.now(); if(now-curThrottle<55) return; curThrottle=now;
-      // e.clientX/Y are raw viewport-relative coordinates — need the same stage-offset +
-      // UI-zoom correction _stagePoint() already applies elsewhere before they're
-      // comparable to view.x/y at all, then undo the canvas pan/zoom to get map-space.
-      const p=_stagePoint(e.clientX, e.clientY);
-      send({t:'cur', x:(p.x-view.x)/view.k, y:(p.y-view.y)/view.k });
-    });
-  }
-  function moveCursor(id, wx, wy){
-    const p=peers.get(id); if(!p) return; p.x=wx; p.y=wy; ensureUI();
-    if(!p.el){ p.el=document.createElement('div'); p.el.className='collab-cursor';
-      p.el.innerHTML='<svg viewBox="0 0 16 16" width="18" height="18"><path d="M1 1 L1 13 L4.6 9.6 L7 14.5 L9.2 13.4 L6.8 8.6 L11.5 8.6 Z"/></svg><b></b>';
-      layer.appendChild(p.el); }
-    p.el.querySelector('path').setAttribute('fill', p.color);
-    const b=p.el.querySelector('b'); b.textContent=p.name||'Guest'; b.style.background=p.color;
-    place(p);
-  }
-  function place(p){ if(!p.el||p.x==null) return; p.el.style.transform='translate('+(p.x*view.k+view.x)+'px,'+(p.y*view.k+view.y)+'px)'; }
-  function reposition(){ peers.forEach(place); }
-  function loop(){ if(!active) return; reposition(); requestAnimationFrame(loop); }
-  function removeCursor(id){ const p=peers.get(id); if(p&&p.el){ p.el.remove(); p.el=null; } }
-  function clearCursors(){ peers.forEach(p=>{ if(p.el){ p.el.remove(); p.el=null; } }); if(layer) layer.innerHTML=''; }
-  function reapStale(){ const now=Date.now(); let changed=false;
-    peers.forEach((pr,id)=>{ if(now-(pr.lastSeen||now) > 18000){ removeCursor(id); peers.delete(id); changed=true; } });
-    if(changed) updatePill(); }
-
-  // Guest forks the live map into their OWN repo. Reuses the shared-view import:
-  // stash the current map, leave the room, reload — consumePendingImport() (which
-  // runs after sign-in) creates and saves the editable copy.
-  function saveCopy(){
-    if(!map){ return; }
-    try{ sessionStorage.setItem('mindspark:pendingImport', JSON.stringify(_shareePayload(map))); }catch(e){}
-    stop(false);
-    toast('Opening your copy\u2026');
-    location.href = location.origin + location.pathname;
-  }
-
-  // A closing/backgrounded tab closes the socket promptly so peers drop our cursor.
-  window.addEventListener('pagehide', ()=>{ try{ if(ws && ws.readyState===1) ws.close(); }catch(e){} });
-
-  return { startHost, join, stop, onLocalChange, reposition, isActive:()=>active };
-})();
-
-// autoLayout() repositions nodes without going through pushHistory(), so wrap it
-// to also notify the live session — coalesced, so it only sends real changes.
-if(typeof autoLayout==='function'){
-  const _autoLayout_orig = autoLayout;
-  autoLayout = function(){ const r=_autoLayout_orig.apply(this, arguments);
-    try{ if(typeof Collab!=='undefined') Collab.onLocalChange(); }catch(e){} return r; };
-}
-
-function leaveLiveForSwitch(){
-  // Returns true if the caller may switch maps, false to abort.
-  if(typeof Collab==='undefined' || !Collab.isActive()) return true;
-  if(map && map._ephemeral){
-    // Guest leaving the live view: re-boot the app (login overlay, or their own maps).
-    Collab.stop(false);
-    location.href = location.origin + location.pathname;   // drops #live
-    return false;
-  }
-  // Host: confirm before disconnecting collaborators.
-  if(!confirm('Leave the live session? Your collaborators will be disconnected from this map.')) return false;
-  Collab.stop(false); toast('Left the live session');
-  return true;
-}
-
-// ---- Cloud-hosted shared map (async, persists in the Durable Object) ----
-function sharedApiUrl(id){
-  try{ const u=new URL(GH_OAUTH.workerUrl); return u.origin+'/api/collab/'+encodeURIComponent(id); }
-  catch(e){ return null; }
-}
-// ---- Session identity: a short-lived signed JWT proving the GitHub identity, sent
-// as a Bearer to the collab worker so it can enforce per-map ACLs. If the worker has
-// no AUTH_SECRET configured it returns 501 and we fall back to legacy capability links.
-const Session = {
-  jwt:null, exp:0, id:null, login:null, _pending:null, _off:false,
-  async ensure(){
-    if(this._off) return null;
-    if(this.jwt && (Date.now()/1000) < this.exp-60) return this.jwt;
-    if(this._pending) return this._pending;
-    this._pending=(async()=>{
-      try{
-        if(typeof CloudStore==='undefined' || !CloudStore.token) return null;
-        const base=(GH_OAUTH.workerUrl||'').replace(/\/+$/,''); if(!base) return null;
-        const r=await fetch(base+'/api/session',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:CloudStore.token})});
-        if(r.status===501){ this._off=true; return null; }
-        if(!r.ok) return null;
-        const d=await r.json(); this.jwt=d.token; this.exp=d.exp||0; this.id=d.id||null; this.login=d.login||null;
-        return this.jwt;
-      }catch(e){ return null; }
-    })();
-    const v=await this._pending; this._pending=null; return v;
-  },
-  clear(){ this.jwt=null; this.exp=0; this.id=null; this.login=null; this._off=false; }
-};
-// All collab Durable-Object calls go through here so they carry the Bearer identity.
-async function _collabFetch(url, opts={}){
-  const headers={ ...(opts.headers||{}) };
-  const jwt=await Session.ensure(); if(jwt) headers['Authorization']='Bearer '+jwt;
-  return fetch(url, { ...opts, headers });
-}
-// ---- "Shared with me" library: links you've opened, kept per-browser ----
-function _sharedStore(){ try{ return JSON.parse(localStorage.getItem('mindspark:sharedMaps')||'[]'); }catch(e){ return []; } }
-function _saveSharedStore(a){ try{ localStorage.setItem('mindspark:sharedMaps', JSON.stringify(a)); }catch(e){} }
-function rememberSharedMap(entry){
-  if(!entry || !entry.id) return;
-  const a=_sharedStore(); const at=a.findIndex(x=>x.id===entry.id);
-  const rec={ id:entry.id, token: entry.token || (at>=0?a[at].token:null),
-              title: entry.title || (at>=0?a[at].title:'Shared map'),
-              color: entry.color || (at>=0?a[at].color:'#e0613a'), addedAt: Date.now() };
-  if(at>=0) a[at]=rec; else a.unshift(rec);
-  _saveSharedStore(a);
-}
-function forgetSharedMap(id){ _saveSharedStore(_sharedStore().filter(x=>x.id!==id)); refreshList(); toast('Removed from list'); }
-function openSharedFromLibrary(sm){ openSharedInPlace(sm.id, sm.token); }
-// ---- "Shared by me" library: maps you've published; opening one connects to the LIVE
-// shared copy (polling + merge) so you actually see collaborators' edits. ----
-function _sharedByMeStore(){ try{ return JSON.parse(localStorage.getItem('mindspark:sharedByMe')||'[]'); }catch(e){ return []; } }
-function _saveSharedByMeStore(a){ try{ localStorage.setItem('mindspark:sharedByMe', JSON.stringify(a)); }catch(e){} }
-function rememberSharedByMe(entry){
-  if(!entry || !entry.room) return;
-  const a=_sharedByMeStore(); const at=a.findIndex(x=>x.room===entry.room || x.id===entry.id);
-  const rec={ id:entry.id, room:entry.room, token: entry.token || (at>=0?a[at].token:null),
-              title: entry.title || (at>=0?a[at].title:'Shared map'), color: entry.color || (at>=0?a[at].color:'#e0613a'), addedAt: Date.now() };
-  if(at>=0) a[at]=rec; else a.unshift(rec);
-  _saveSharedByMeStore(a);
-  if(typeof refreshList==='function') refreshList();
-}
-function forgetSharedByMe(room){ _saveSharedByMeStore(_sharedByMeStore().filter(x=>x.room!==room)); refreshList(); toast('Removed from Shared by me'); }
-function openSharedByMeRowMenu(btn, sm){
-  if(_rowPop && _rowPop._for==='sbm:'+sm.room){ closeRowMenu(); return; }
-  if(typeof closeAllMenus==='function') closeAllMenus();
-  closeRowMenu();
-  const pop=document.createElement('div'); pop.className='row-pop'; pop._for='sbm:'+sm.room;
-  pop.innerHTML='<button data-a="open"><span class="rp-ic">\u2197</span>Open live copy</button>'+
-    '<button data-a="copyedit"><span class="rp-ic">\u270F\uFE0F</span>Copy edit link</button>'+
-    '<button data-a="access"><span class="rp-ic">\uD83D\uDD10</span>Manage access</button>'+
-    '<button data-a="forget" class="danger"><span class="rp-ic">\u2715</span>Remove from list</button>';
-  const row = btn.closest('.map-item') || btn.parentElement;
-  row.appendChild(pop);
-  const rb = btn.getBoundingClientRect();
-  // Same raw-vs-logical mismatch class as elsewhere: rb (getBoundingClientRect) scales
-  // with UI-level zoom, offsetHeight's behaviour under it is unverified, and
-  // window.innerHeight does not scale with it — measuring the popup via the same API as
-  // rb and dividing the raw side by _uiZ() keeps this an apples-to-apples comparison
-  // regardless of Display Size.
-  const _z=_uiZ();
-  if((rb.bottom + pop.getBoundingClientRect().height)/_z + 10 > window.innerHeight){ pop.classList.add('flip-up'); }
-  const editLink=location.origin+location.pathname+'#shared='+sm.room+':'+sm.token;
-  pop.querySelector('[data-a="open"]').onclick=ev=>{ ev.stopPropagation(); closeRowMenu(); openSharedInPlace(sm.room, sm.token); };
-  pop.querySelector('[data-a="copyedit"]').onclick=async ev=>{ ev.stopPropagation(); closeRowMenu(); try{ await navigator.clipboard.writeText(editLink); toast('Edit link copied'); }catch(e){} };
-  pop.querySelector('[data-a="access"]').onclick=ev=>{ ev.stopPropagation(); closeRowMenu(); openAccessPanel(sm.room); };
-  pop.querySelector('[data-a="forget"]').onclick=ev=>{ ev.stopPropagation(); closeRowMenu(); forgetSharedByMe(sm.room); };
-  _rowPop=pop;
-  _rowPopOut=(e)=>{ if(_rowPop && (!e || e.type!=='mousedown' || !_rowPop.contains(e.target))) closeRowMenu(); };
-  setTimeout(()=>{ document.addEventListener('mousedown', _rowPopOut, true); window.addEventListener('scroll', closeRowMenu, true); window.addEventListener('blur', closeRowMenu); },0);
-}
-function openSharedRowMenu(btn, sm){
-  const key='sh:'+(sm.room||sm.id);
-  if(_rowPop && _rowPop._for===key){ closeRowMenu(); return; }
-  if(typeof closeAllMenus==='function') closeAllMenus();
-  closeRowMenu();
-  const room=sm.room||sm.id;
-  const pop=document.createElement('div'); pop.className='row-pop'; pop._for=key;
-  pop.innerHTML='<button data-a="open"><span class="rp-ic">\u2197</span>Open</button>'+
-    (sm.token?'<button data-a="copyedit"><span class="rp-ic">\u270F\uFE0F</span>Copy edit link</button>':'')+
-    '<button data-a="copyview"><span class="rp-ic">\uD83D\uDD17</span>Copy view link</button>'+
-    (sm.mine?'<button data-a="access"><span class="rp-ic">\uD83D\uDD10</span>Manage access</button>':'')+
-    '<button data-a="forget" class="danger"><span class="rp-ic">\u2715</span>Remove from list</button>';
-  const row = btn.closest('.map-item') || btn.parentElement;
-  row.appendChild(pop);
-  const rb = btn.getBoundingClientRect();
-  // Same raw-vs-logical mismatch class as elsewhere: rb (getBoundingClientRect) scales
-  // with UI-level zoom, offsetHeight's behaviour under it is unverified, and
-  // window.innerHeight does not scale with it — measuring the popup via the same API as
-  // rb and dividing the raw side by _uiZ() keeps this an apples-to-apples comparison
-  // regardless of Display Size.
-  const _z=_uiZ();
-  if((rb.bottom + pop.getBoundingClientRect().height)/_z + 10 > window.innerHeight){ pop.classList.add('flip-up'); }
-  const base=location.origin+location.pathname+'#shared='+room;
-  pop.querySelector('[data-a="open"]').onclick=ev=>{ ev.stopPropagation(); closeRowMenu(); openSharedInPlace(room, sm.token); };
-  const ce=pop.querySelector('[data-a="copyedit"]'); if(ce) ce.onclick=async ev=>{ ev.stopPropagation(); closeRowMenu(); try{ await navigator.clipboard.writeText(base+':'+sm.token); toast('Edit link copied'); }catch(e){} };
-  pop.querySelector('[data-a="copyview"]').onclick=async ev=>{ ev.stopPropagation(); closeRowMenu(); try{ await navigator.clipboard.writeText(base); toast('View link copied'); }catch(e){} };
-  const ac=pop.querySelector('[data-a="access"]'); if(ac) ac.onclick=ev=>{ ev.stopPropagation(); closeRowMenu(); openAccessPanel(room); };
-  pop.querySelector('[data-a="forget"]').onclick=ev=>{ ev.stopPropagation(); closeRowMenu(); if(sm.mine) forgetSharedByMe(room); else forgetSharedMap(room); };
-  _rowPop=pop;
-  _rowPopOut=(e)=>{ if(_rowPop && (!e || e.type!=='mousedown' || !_rowPop.contains(e.target))) closeRowMenu(); };
-  setTimeout(()=>{ document.addEventListener('mousedown', _rowPopOut, true); window.addEventListener('scroll', closeRowMenu, true); window.addEventListener('blur', closeRowMenu); },0);
-}
-// Publish the current map to the cloud store; returns a short #shared=<id> link.
-async function publishSharedMap(){
-  if(!map || !map.id){ toast('Open a map first'); return; }
-  if(!sharedApiUrl(map.id)){ toast('Cloud sharing isn\u2019t configured'); return; }
-  if(!map._editToken) map._editToken = 'e'+Math.random().toString(36).slice(2,10)+Math.random().toString(36).slice(2,6);
-  let room = map._shareRoom || map.id;
-  const body = JSON.stringify(_shareePayload(map));
-  try{
-    let r=await _collabFetch(sharedApiUrl(room), { method:'PUT', headers:{'Content-Type':'application/json','X-Edit-Token':map._editToken}, body });
-    if(r.status===403){
-      // Base room was claimed under a different (older) token and is locked. Move to a
-      // fresh room id so the owner always gets a working edit link.
-      room = map.id+'~'+Math.random().toString(36).slice(2,7); map._shareRoom = room;
-      r=await _collabFetch(sharedApiUrl(room), { method:'PUT', headers:{'Content-Type':'application/json','X-Edit-Token':map._editToken}, body });
-    }
-    if(!r.ok) throw new Error('HTTP '+r.status);
-    const editLink=location.origin+location.pathname+'#shared='+room+':'+map._editToken;
-    try{ await navigator.clipboard.writeText(editLink); }catch(e){ console.warn('clipboard write failed:', e.message); toast('Could not copy the edit link'); }
-    map._shareRoom = room;
-    // New editable shares require collaborators to sign in (legacy links stay anonymous until re-shared).
-    try{ await accessApi(room, 'link', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ access:'edit-auth' }) }); }catch(e){}
-    rememberSharedByMe({ id: map.id, room, token: map._editToken, title: map.title, color: map.color });
-    if(typeof scheduleSave==='function' && !map._cloudEdit) scheduleSave();   // persist the token in the owner repo so re-publishing reuses it
-    toast('Edit link copied — collaborators sign in with GitHub to open it.');
-  }catch(e){ toast('Could not publish: '+(e.message||e)); }
-}
-
-// ---- Identity-based access control: owner manages named collaborators + link access ----
-async function accessApi(roomId, sub, opts){
-  const base=sharedApiUrl(roomId); if(!base) return { status:0, ok:false, d:{} };
-  try{ const r=await _collabFetch(base+(sub?('/'+sub):''), opts||{}); let d={}; try{ d=await r.json(); }catch(e){} return { status:r.status, ok:r.ok, d }; }
-  catch(e){ return { status:0, ok:false, d:{} }; }
-}
-async function _resolveGitHubUser(login){
-  login=String(login||'').trim().replace(/^@/,''); if(!login) return null;
-  try{
-    const h=(typeof CloudStore!=='undefined'&&CloudStore.token)?{Authorization:'token '+CloudStore.token,Accept:'application/vnd.github+json'}:{Accept:'application/vnd.github+json'};
-    const r=await fetch('https://api.github.com/users/'+encodeURIComponent(login),{headers:h});
-    if(!r.ok) return null; const u=await r.json(); return (u&&u.id!=null)?{ id:String(u.id), login:u.login }:null;
-  }catch(e){ return null; }
-}
-function _accessRoomId(){ return (map && (map._cloudView || map._shareRoom || map.id)) || null; }
-async function openAccessPanel(roomId){
-  roomId = roomId || _accessRoomId();
-  if(!roomId){ toast('Publish or open a shared map first'); return; }
-  if(!sharedApiUrl(roomId)){ toast('Cloud sharing isn\u2019t configured'); return; }
-  const acl=await accessApi(roomId,'acl',{method:'GET'});
-  if(acl.status===401){ toast('Sign in to manage access'); return; }
-  if(acl.status===403){ toast('Only the map owner can manage access'); return; }
-  if(!acl.ok){ toast('Couldn\u2019t load access settings \u2014 publish the map first'); return; }
-  _renderAccessPanel(roomId, acl.d);
-}
-function _timeAgo(ts){
-  const sec=Math.max(0,Math.floor((Date.now()-(ts||0))/1000));
-  if(sec<60) return 'just now';
-  const m=Math.floor(sec/60); if(m<60) return m+'m ago';
-  const h=Math.floor(m/60); if(h<24) return h+'h ago';
-  return Math.floor(h/24)+'d ago';
-}
-function _renderAccessPanel(roomId, data){
-  const ex=document.querySelector('.access-modal'); if(ex) ex.remove();
-  const ov=document.createElement('div'); ov.className='access-modal';
-  const members=data.members||{}; const link=data.linkAccess||'none';
-  // Decompose linkAccess into a level (none/view/edit) + whether sign-in is required.
-  const level = link==='none' ? 'none' : (link.indexOf('view')===0 ? 'view' : 'edit');
-  const requireAuth = /-auth$/.test(link);
-  const rows=Object.keys(members).map(id=>{
-    const mem=members[id]||{};
-    return '<div class="am-row"><span class="am-who">@'+escapeHtml(mem.login||id)+'</span>'+
-      '<span class="am-role">'+(mem.role==='viewer'?'Viewer':'Editor')+'</span>'+
-      '<button class="am-rm" data-id="'+escapeHtml(id)+'">Remove</button></div>';
-  }).join('') || '<div class="am-empty">No named collaborators yet.</div>';
-  const vis=data.visitors||{};
-  const vkeys=Object.keys(vis).sort((a,b)=>(vis[b].lastSeen||0)-(vis[a].lastSeen||0));
-  const visitorsHtml = vkeys.length ? (
-    '<div class="am-sec"><div class="am-lbl">Recently opened by</div><div class="am-vis">'+
-    vkeys.map(id=>'<div class="am-visrow"><span class="am-who">@'+escapeHtml(vis[id].login||id)+'</span>'+
-      '<span class="am-vtime">'+_timeAgo(vis[id].lastSeen)+'</span></div>').join('')+
-    '</div></div>') : '';
-  ov.innerHTML='<div class="am-card"><div class="am-head"><b>Manage access</b><button class="am-x" aria-label="Close">\u00d7</button></div>'+
-    '<div class="am-sec"><div class="am-lbl">Anyone with the link</div><div class="am-link">'+
-      '<label><input type="radio" name="amlink" value="none" '+(level==='none'?'checked':'')+'> No access</label>'+
-      '<label><input type="radio" name="amlink" value="view" '+(level==='view'?'checked':'')+'> Can view</label>'+
-      '<label><input type="radio" name="amlink" value="edit" '+(level==='edit'?'checked':'')+'> Can edit</label>'+
-    '</div>'+
-    '<label class="am-auth"><input type="checkbox" class="am-reqauth" '+(requireAuth?'checked':'')+' '+(level==='none'?'disabled':'')+'> Require GitHub sign-in to open</label>'+
-    '</div>'+
-    '<div class="am-sec"><div class="am-lbl">Collaborators</div><div class="am-list">'+rows+'</div>'+
-      '<div class="am-add"><input class="am-user" type="text" placeholder="GitHub username" autocomplete="off">'+
-      '<select class="am-newrole"><option value="editor">Editor</option><option value="viewer">Viewer</option></select>'+
-      '<button class="am-addbtn">Add</button></div></div>'+
-    visitorsHtml+
-    '<div class="am-foot">Owner: @'+escapeHtml(data.ownerLogin||data.ownerId||'')+'</div></div>';
-  document.body.appendChild(ov);
-  const close=()=>ov.remove();
-  ov.addEventListener('mousedown',e=>{ if(e.target===ov) close(); });
-  ov.querySelector('.am-x').onclick=close;
-  const combined=()=>{
-    const lvl=ov.querySelector('input[name="amlink"]:checked').value;
-    if(lvl==='none') return 'none';
-    return ov.querySelector('.am-reqauth').checked ? (lvl+'-auth') : lvl;
-  };
-  const applyLink=async()=>{
-    const access=combined();
-    const res=await accessApi(roomId,'link',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({access})});
-    toast((res&&res.ok)?'Link access updated':'Couldn\u2019t update link access');
-  };
-  ov.querySelectorAll('input[name="amlink"]').forEach(r=>r.onchange=()=>{
-    ov.querySelector('.am-reqauth').disabled = (r.value==='none');
-    applyLink();
-  });
-  ov.querySelector('.am-reqauth').onchange=applyLink;
-  ov.querySelectorAll('.am-rm').forEach(b=>b.onclick=async()=>{
-    const res=await accessApi(roomId,'acl/'+encodeURIComponent(b.dataset.id),{method:'DELETE'});
-    if(res&&res.ok) openAccessPanel(roomId); else toast('Couldn\u2019t remove collaborator');
-  });
-  ov.querySelector('.am-addbtn').onclick=async()=>{
-    const login=ov.querySelector('.am-user').value; const role=ov.querySelector('.am-newrole').value;
-    if(!login.trim()) return;
-    const u=await _resolveGitHubUser(login);
-    if(!u){ toast('No such GitHub user'); return; }
-    const res=await accessApi(roomId,'acl',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({userId:u.id, login:u.login, role})});
-    if(res&&res.ok){ toast('Added @'+u.login); openAccessPanel(roomId); }
-    else toast(res&&res.status===400?'That user is already the owner':'Couldn\u2019t add collaborator');
-  };
-}
-function _cloneObj(o){ return JSON.parse(JSON.stringify(o)); }
-// Diff the loaded base against the current map -> per-node ops the server merges.
-function cloudDiff(base, cur){
-  const ops=[]; const bn=(base&&base.nodes)||{}, cn=(cur&&cur.nodes)||{};
-  for(const id in cn){ if(JSON.stringify(bn[id])!==JSON.stringify(cn[id])) ops.push({t:'node', id, n:cn[id]}); }
-  for(const id in bn){ if(!cn[id]) ops.push({t:'del', id}); }
-  ['title','color','rootId','layout','style'].forEach(k=>{ if((base||{})[k]!==(cur||{})[k]) ops.push({t:'meta',k,v:cur[k]}); });
-  if(JSON.stringify((base&&base.links)||[])!==JSON.stringify((cur&&cur.links)||[])) ops.push({t:'meta',k:'links',v:cur.links});
-  if(JSON.stringify((base&&base.vars)||{})!==JSON.stringify((cur&&cur.vars)||{})) ops.push({t:'meta',k:'vars',v:cur.vars});
-  return ops;
-}
-// Adopt the server's merged map (your edits + others') so editors converge.
-function adoptCloudMerged(merged){
-  if(!merged || typeof merged!=='object') return;
-  const selId = sel && sel.id;
-  map.nodes = merged.nodes||{};
-  map.links = merged.links||[];
-  if(merged.title!=null) map.title=merged.title;
-  if(merged.color) map.color=merged.color;
-  if(merged.rootId) map.rootId=merged.rootId;
-  if(merged.layout) map.layout=merged.layout;
-  if('style' in merged) map.style=merged.style;
-  if(merged.vars) map.vars=merged.vars;
-  sel = (selId && map.nodes[selId]) ? map.nodes[selId] : null;
-  if($('#mapTitle')) $('#mapTitle').value=map.title;
-  render();
-}
-let _cloudSaveTimer=0, _cloudPollTimer=0, _cloudPollSig='';
-// Perform the cloud save (diff -> PATCH -> adopt merged). Separated so a map switch
-// can flush a pending save immediately.
-// If the owner is locked out of their own shared map (the Durable Object room was
-// claimed under a token from an earlier build/session, so this link's token no
-// longer matches \u2014 a 403), re-publish the CURRENT content to a fresh room id and
-// rebind the live session. The old link is already dead, so a new one is the only fix.
-async function _recoverCloudSave(ce){
-  if(map._healing) return false; map._healing=true;
-  try{
-    const baseId=String(ce.id||'').split('~')[0];
-    let owned=null; try{ owned=await Store.get(baseId); }catch(e){}
-    if(!owned) return false;                     // not the owner -> can't reset someone else's room
-    const room=baseId+'~'+Math.random().toString(36).slice(2,7);
-    const token=owned._editToken || ce.token || ('e'+Math.random().toString(36).slice(2,10));
-    const url=sharedApiUrl(room); if(!url) return false;
-    const r=await _collabFetch(url,{method:'PUT',headers:{'Content-Type':'application/json','X-Edit-Token':token},body:JSON.stringify(_shareePayload(map))});
-    if(!r.ok) return false;
-    map._cloudEdit={id:room,token}; map._cloudView=room;
-    map._cloudBase=_cloneObj(_shareePayload(map));
-    rememberSharedMap({id:room,token,title:map.title,color:map.color});
-    try{ _saveSharedStore(_sharedStore().filter(x=>x.id!==baseId)); }catch(e){}   // drop the dead base-room entry
-    const link=location.origin+location.pathname+'#shared='+room+':'+token;
-    try{ window.history.replaceState(null,'',link); }catch(e){}
-    try{ await navigator.clipboard.writeText(link); }catch(e){ console.warn('clipboard write failed:', e.message); toast('Could not copy the link'); }
-    _cloudPollSig=JSON.stringify(_shareePayload(map)); stopCloudPoll(); startCloudPoll(room);
-    toast('Old share link was out of sync \u2014 created a fresh editable link (copied). Re-share it with collaborators.');
-    return true;
-  } finally { map._healing=false; }
-}
-async function _doCloudSave(ce, retried){
-  const url=sharedApiUrl(ce.id);
-  if(!url){ $('#saveText').textContent=rmsTr('saveFailed','Save failed'); return; }
-  const cur=_shareePayload(map);
-  const ops=cloudDiff(map._cloudBase||cur, cur);
-  if(!ops.length){ $('#savePill').classList.remove('saving'); $('#saveText').textContent=rmsTr('saved','Saved'); return; }
-  try{
-    const r=await _collabFetch(url, { method:'PATCH', headers:{'Content-Type':'application/json','X-Edit-Token':ce.token}, body:JSON.stringify({ops}) });
-    if(!r.ok) throw new Error('HTTP '+r.status);
-    const res=await r.json().catch(()=>null);
-    if(res && res.map) adoptCloudMerged(res.map);
-    map._cloudBase=_cloneObj(_shareePayload(map));   // base = what's now on the server
-    _cloudPollSig = JSON.stringify(res && res.map ? res.map : _shareePayload(map));
-    $('#savePill').classList.remove('saving'); $('#saveText').textContent=rmsTr('saved','Saved');
-  }catch(e){
-    if(!retried && /\b403\b/.test(String(e.message))){
-      if(await _recoverCloudSave(ce)) return _doCloudSave(map._cloudEdit, true);
-      $('#savePill').classList.remove('saving'); $('#saveText').textContent=rmsTr('saveFailed','Save failed');
-      toast('This shared link is out of sync. Ask the map owner for a fresh edit link.');
-      return;
-    }
-    $('#savePill').classList.remove('saving'); $('#saveText').textContent=rmsTr('saveFailed','Save failed');
-    toast('Couldn\u2019t save shared map: '+(e.message||e));
-  }
-}
-function scheduleCloudSave(){
-  const ce=map._cloudEdit; if(!ce) return;
-  if(map._opening) return;                    // just opened this shared map — not a user edit
-  const cur=_shareePayload(map);
-  if(!cloudDiff(map._cloudBase||cur, cur).length) return;   // nothing actually changed — don't flash "Saving…"
-  $('#savePill').classList.add('saving'); $('#saveText').textContent=rmsTr('saving','Saving…');
-  clearTimeout(_cloudSaveTimer);
-  _cloudSaveTimer=setTimeout(()=>{ _cloudSaveTimer=0; _doCloudSave(ce); }, 1200);
-}
-// Fire any pending cloud edit immediately (used when leaving a shared map): send the
-// diff without adopting back, since we're switching away from this map.
-function flushCloudSave(){
-  if(!_cloudSaveTimer) return;
-  clearTimeout(_cloudSaveTimer); _cloudSaveTimer=0;
-  const ce=map && map._cloudEdit; if(!ce) return;
-  const url=sharedApiUrl(ce.id); if(!url) return;
-  const ops=cloudDiff(map._cloudBase||_shareePayload(map), _shareePayload(map));
-  if(!ops.length) return;
-  try{ _collabFetch(url, { method:'PATCH', headers:{'Content-Type':'application/json','X-Edit-Token':ce.token}, body:JSON.stringify({ops}) }).catch(()=>{}); }catch(e){}
-}
-// Lightweight polling so shared maps reflect others' edits without a live session.
-function startCloudPoll(id){ stopCloudPoll(); _cloudPollTimer=setInterval(()=>cloudPollOnce(id), 5000); }
-function stopCloudPoll(){ if(_cloudPollTimer){ clearInterval(_cloudPollTimer); _cloudPollTimer=0; } }
-async function cloudPollOnce(id){
-  if(!map || document.hidden) return;
-  if(map._cloudView!==id){ stopCloudPoll(); return; }   // switched away -> stop; never adopt onto another map
-  const url=sharedApiUrl(id); if(!url) return;
-  let data; try{ const r=await _collabFetch(url); if(!r.ok) return; data=await r.json(); }catch(e){ return; }
-  const sig=JSON.stringify(data);
-  if(sig===_cloudPollSig) return;                        // nothing new since last poll
-  if(map._cloudEdit){
-    const pending = cloudDiff(map._cloudBase||_shareePayload(map), _shareePayload(map)).length>0;
-    if(pending) return;                                  // don't stomp unsaved local edits; next save merges
-    adoptCloudMerged(data); map._cloudBase=_cloneObj(_shareePayload(map));
-  } else {
-    adoptCloudMerged(data);                              // read-only viewer reflects latest
-  }
-  _cloudPollSig=sig;
-}
-window.addEventListener('pagehide', stopCloudPoll);
-// Measure the shared banner's real height into a CSS var so the app/canvas offset
-// adapts when the text wraps (e.g. narrow screens) instead of guessing a fixed px.
-function _setBannerHeightVar(b){
-  requestAnimationFrame(()=>{ try{ const h=Math.ceil(b.getBoundingClientRect().height/_uiZ());
-    if(h>0) document.documentElement.style.setProperty('--shared-banner-h', h+'px'); }catch(e){} });
-}
-window.addEventListener('resize', ()=>{ const b=document.getElementById('cloudEditBanner')||document.getElementById('sharedBanner'); if(b) _setBannerHeightVar(b); });
-function showCloudEditBanner(){
-  if($('#cloudEditBanner')) return;
-  const b=document.createElement('div'); b.id='cloudEditBanner'; b.className='shared-banner';
-  b.innerHTML='<span class="sb-eye">\u270F\uFE0F</span>'
-    +'<span class="sb-text">You\u2019re editing a <b>shared</b> map \u2014 changes save for everyone with the link</span>';
-  document.body.appendChild(b);
-  _setBannerHeightVar(b);
-}
-// ---- Shared-map core (used by direct-link boot AND in-place open from the sidebar) ----
-async function _fetchSharedMap(id){
-  const url=sharedApiUrl(id); if(!url) return null;
-  try{ const r=await _collabFetch(url); if(!r.ok) return null; return await r.json(); }
-  catch(e){ console.error('shared map load failed', e); return null; }
-}
-// Apply a fetched shared snapshot into the live editor (banner, poll, read-only state).
-function _applySharedMap(id, token, data){
-  const editable=!!token;
-  READONLY=!editable;
-  document.body.classList.remove('cloud-edit','shared-view');
-  document.body.classList.add(editable?'cloud-edit':'shared-view');
-  document.body.classList.add('no-banner');   // compact themed pill instead of a full-width banner
-  map=sanitizeMap({ id:'shared-'+id, title:data.title||'Shared map', color:data.color||'#e0613a',
-        style:data.style, layout:data.layout||'balanced', rootId:data.rootId,
-        nodes:data.nodes||{}, links:data.links||[], vars:data.vars||{} });
-  map._cloudView=id;
-  map._opening=true;                 // opening a shared map isn't an edit — suppress the save pill until it settles
-  if(editable){ map._cloudEdit={ id, token }; }
-  sel=null; history=[]; hpos=-1;
-  $('#mapTitle').value=map.title; $('#mapTitle').readOnly=!editable;
-  $('#mapTitle').size = Math.max(8, (map.title||'').length + 1);
-  render();
-  if(editable) map._cloudBase=_cloneObj(_shareePayload(map));   // base AFTER render (coords baked in)
-  if(editable) pushHistory();
-  showSharedPill(editable);
-  // A map you published lives under "Shared by me"; don't also file it as a guest
-  // entry (that produced a duplicate sidebar row).
-  if(!(typeof _sharedByMeStore==='function' && _sharedByMeStore().some(x=>(x.room||x.id)===id)))
-    rememberSharedMap({ id, token, title: map.title, color: map.color });
-  _cloudPollSig = JSON.stringify(data);
-  startCloudPoll(id);
-  let tries=0;
-  const rebase=()=>{ if(editable) map._cloudBase=_cloneObj(_shareePayload(map)); };
-  const settle=()=>{ if(stage.getBoundingClientRect().width>1){ autoLayout(); fit(); rebase(); map._opening=false; } else if(tries++<60){ requestAnimationFrame(settle); } else { map._opening=false; } };
-  requestAnimationFrame(settle);
-}
-// Leave shared mode WITHOUT a reload: flush a pending save, stop polling, drop the
-// banner/read-only state, and clear #shared= from the URL so you can switch straight
-// back to "Your maps" in the same session (no browser back button needed).
-function exitSharedMode(){
+// Called before switching to another map: close any version-history preview
+// and make the title editable again.
+function resetMapViewState(){
   cancelHistoryPreview();
-  flushCloudSave();
-  stopCloudPoll();
-  const ce=document.getElementById('cloudEditBanner'); if(ce) ce.remove();
-  const sb=document.getElementById('sharedBanner'); if(sb) sb.remove();
-  document.body.classList.remove('cloud-edit','shared-view','no-banner');
   READONLY=false;
-  if(typeof CloudStore!=='undefined' && CloudStore.user) showUserPill();   // restore your account pill
   const t=$('#mapTitle'); if(t) t.readOnly=false;
-  _cloudPollSig='';
-  if((location.hash||'').indexOf('#shared=')===0){
-    try{ window.history.replaceState(null,'', location.origin+location.pathname+location.search); }catch(e){}
-  }
-}
-// Open a shared map IN-PLACE from the sidebar — keeps "Your maps" + "Shared with me"
-// visible and switchable, the way Overleaf keeps owned and shared projects in one list.
-async function openSharedInPlace(id, token){
-  if(typeof leaveLiveForSwitch==='function' && !leaveLiveForSwitch()) return false;
-  flushPendingSave();          // persist the outgoing map
-  exitSharedMode();            // clear any previous shared banner/poll
-  showSharedPill(!!token);     // set the shared pill NOW so the username doesn't flash during the fetch
-  const data=await _fetchSharedMap(id);
-  if(!data){ toast('Couldn\u2019t open the shared map'); if(typeof CloudStore!=='undefined' && CloudStore.user) showUserPill(); return false; }
-  _applySharedMap(id, token, data);
-  refreshList();               // keep the sidebar populated + highlight the shared row
-  try{ window.history.replaceState(null,'', location.origin+location.pathname+'#shared='+id+(token?(':'+token):'')); }catch(e){}
-  return true;
-}
-// On boot: a direct #shared=<id> link opened by someone NOT signed in (external
-// recipient) — standalone read-only / edit view, no account needed.
-async function tryEnterSharedMap(){
-  const mt=(location.hash||'').match(/^#shared=([^:]+)(?::(.+))?$/);
-  if(!mt) return false;
-  const id=decodeURIComponent(mt[1]);
-  const token=mt[2]?decodeURIComponent(mt[2]):null;
-  const data=await _fetchSharedMap(id);
-  if(!data) return false;
-  _applySharedMap(id, token, data);
-  window.addEventListener('load', ()=>{ autoLayout(); fit(); if(token) map._cloudBase=_cloneObj(_shareePayload(map)); }, { once:true });
-  return true;
-}
-
-async function tryEnterLiveSession(){
-  const m=(location.hash||'').match(/^#live=(.+)$/);
-  if(!m) return false;
-  const room=decodeURIComponent(m[1]);
-  map={ id:'live-'+room, title:'Live map', color:'#e0613a', rootId:null, nodes:{}, links:[], vars:{}, _ephemeral:true };
-  sel=null; history=[]; hpos=-1;
-  const t=$('#mapTitle'); if(t) t.value=map.title;
-  render();
-  Collab.join(room);
-  return true;
 }
 
 (async()=>{
@@ -14132,23 +12800,8 @@ async function tryEnterLiveSession(){
   // result rather than trusting a guess taken before there was anything to measure.
   try{ if(isUiScaleAuto()) applyUiScale(getUiScale()); }catch(e){}
   requestAnimationFrame(()=>{ try{ if(isUiScaleAuto()) applyUiScale(getUiScale()); }catch(e){} });
-  // Read-only shared link? Decode and render a view-only map — no store, no
-  // login, no account needed by the recipient.
-  if(await tryEnterLiveSession()) return;
-  if(await tryEnterSharedView()) return;
-  // A #shared= link: if you're signed in, boot your app first (so "Your maps" + the
-  // "Shared with me" library are loaded) and open the shared map IN-PLACE. If you're
-  // an external recipient (not signed in), fall back to the standalone shared view.
-  const _sh=(location.hash||'').match(/^#shared=([^:]+)(?::(.+))?$/);
-  const _openSharedAfterBoot=async()=>{ if(_sh) await openSharedInPlace(decodeURIComponent(_sh[1]), _sh[2]?decodeURIComponent(_sh[2]):null); };
-  const {mode, loggedIn} = await initStore();
-  if(mode==='cloud'){
-    if(loggedIn){ showUserPill(); await proceedBoot(); await _openSharedAfterBoot(); }
-    else if(_sh){ _pendingSharedLink={ id:decodeURIComponent(_sh[1]), token:_sh[2]?decodeURIComponent(_sh[2]):null }; showLoginOverlay({ shared:true }); }   // shared link -> require sign-in first
-    else { showLoginOverlay(); }
-  } else {
-    await proceedBoot(); await _openSharedAfterBoot();   // server / local mode
-  }
+  await initStore();
+  await proceedBoot();
 })().catch(e=>{
   console.error(e);
   showStoreFailure(e);
