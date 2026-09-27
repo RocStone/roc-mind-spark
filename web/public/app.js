@@ -794,6 +794,8 @@ function clearNodes(){
   if(typeof discardEditOverlay==='function') discardEditOverlay();
 }
 
+// Pending coalesced relayout after node images finish loading (see render()).
+let _imgRelayoutT=null;
 function render(){
   if(typeof applyLevelColors==='function') applyLevelColors();
   // Rebuild destroys .node elements. If a WK .edit-float is still mounted,
@@ -873,7 +875,16 @@ function render(){
           pend.remove();
           el.classList.remove('image-pending');
           img.style.display='';
-          if(typeof autoLayout==='function') autoLayout();
+          // Relayout only when the revealed image actually changed the card's
+          // size, and coalesce a burst of image loads into one non-persisting
+          // pass: each autoLayout re-renders, and saving here would bump
+          // map.updated just because pictures finished loading.
+          if(typeof autoLayout!=='function' || !el.isConnected) return;
+          const sz=(view.k||1)*_uiZ();
+          const r=el.getBoundingClientRect();
+          if(Math.abs(r.width/sz-(n.w||0))<=1 && Math.abs(r.height/sz-(n.h||0))<=1) return;
+          clearTimeout(_imgRelayoutT);
+          _imgRelayoutT=setTimeout(()=>{ _imgRelayoutT=null; autoLayout(false,{persist:false}); },50);
         };
         img.addEventListener('load', reveal);
         img.addEventListener('dblclick',ev=>{
