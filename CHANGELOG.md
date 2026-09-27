@@ -29,6 +29,8 @@ Versions follow the macOS bundle `CFBundleShortVersionString` and the matching G
 - Unreferenced image files older than a day are removed on startup and daily, after checking every map and every stored version.
 - The export Save panel remembers the last folder.
 - Quit and logout skip the save round-trip whenever the page reports nothing dirty, including open node, notes and Markdown editors.
+- `POST /api/import` accepts `marker`, formatting fields, citation `source`, balanced root sides and `layoutConfig` again (parity with the removed worker builder); the fields are listed in `web/README.md`.
+- Find inside branch focus searches only the focused branch; hits elsewhere are counted and Enter leaves branch focus to reach them.
 - The operations log no longer records topic text. Removed the inherited `web/worker/` modules; the import endpoint's map builder lives in `web/import-spec.js`.
 - ⌘V with a topic selected pastes the copied subtree (or a multi-line outline) as children; ⌘C copies the subtree outline. ⌘A selects all visible topics, ⌘⇧A selects siblings, ⇧Esc cancels an edit.
 - Right-click menu on a topic (add child/sibling, edit, notes, marker, copy as Markdown, duplicate subtree, fold, delete).
