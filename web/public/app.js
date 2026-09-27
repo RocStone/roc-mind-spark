@@ -5412,7 +5412,7 @@ async function searchAllMaps(query, isStale){
         const src=plain.includes(q)?nodeTextPlain(n.text||''):notes.includes(q)?(n.notes||'').replace(/<[^>]*>/g,' '):(n.url||'');
         const at=src.toLowerCase().indexOf(q);
         const snippet=(at>30?'…':'')+src.slice(Math.max(0,at-30), at+q.length+40).trim()+'…';
-        results.push({ mapId:m.id, mapTitle:m.title||'Untitled', nodeId:n.id, snippet });
+        results.push({ mapId:m.id, mapTitle:m.title||rmsTr('untitled','Untitled map'), nodeId:n.id, snippet });
         if(results.length>=200) return results;
       }
     }
@@ -8630,7 +8630,7 @@ function updateBreadcrumb(){
   if(path.length<=1){ bc.style.display='none'; return; }   // nothing to show at the root
   bc.style.display='flex';
   bc.innerHTML=path.map((id,i)=>{
-    const label=nodeTextPlain(map.nodes[id].text||'')||'(untitled)';
+    const label=nodeTextPlain(map.nodes[id].text||'')||rmsTr('untitledNode','(untitled)');
     const short=label.length>22 ? label.slice(0,22)+'…' : label;
     const crumb=`<button class="bc-crumb${id===sel?' current':''}" data-id="${escapeHtml(String(id))}" title="${escapeHtml(label)}">${escapeHtml(short)}</button>`;
     return crumb + (i<path.length-1 ? '<span class="bc-sep">›</span>' : '');
@@ -9060,7 +9060,7 @@ async function duplicateMap(id){
   if(!src){ toast('Could not duplicate'); return; }
   const copy = JSON.parse(JSON.stringify(src));
   copy.id = uid();
-  copy.title = (src.title||'Untitled') + ' (copy)';
+  copy.title = (src.title||rmsTr('untitled','Untitled map')) + rmsTr('copySuffix',' (copy)');
   copy.titleAuto = false;
   copy.updated = Date.now();
   await saveMapNow(copy);
@@ -9216,7 +9216,7 @@ function createMap(){
   ++_mapLoadGeneration;
   resetMapViewState();
   const id=uid(); const rid=uid();
-  const rootText='Central Idea';
+  const rootText=rmsTr('centralIdea','Central Idea');
   const m={id,title:rootText,titleAuto:true,color:PALETTE[Math.floor(Math.random()*PALETTE.length)],rootId:rid,
     nodes:{[rid]:{id:rid,text:rootText,parent:null,x:0,y:0,side:'root',color:'#fff'}}};
   // Show it immediately — never wait on the network to render the UI.
@@ -9799,7 +9799,7 @@ function presGo(i){
   const bar=document.querySelector('.pres-bar');
   if(bar){
     bar.querySelector('.pres-count').textContent=`${i+1} / ${_pres.order.length}`;
-    bar.querySelector('.pres-title').textContent=nodeTextPlain(map.nodes[id]?.text||'')||'(untitled)';
+    bar.querySelector('.pres-title').textContent=nodeTextPlain(map.nodes[id]?.text||'')||rmsTr('untitledNode','(untitled)');
     bar.querySelector('.pres-prev').disabled = i===0;
     bar.querySelector('.pres-next').disabled = i===_pres.order.length-1;
   }
