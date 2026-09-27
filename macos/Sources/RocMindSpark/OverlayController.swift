@@ -3,7 +3,7 @@ import CoreGraphics
 import WebKit
 
 @MainActor
-final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
+final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler, WKDownloadDelegate {
     private let panel = OverlayPanel()
     private var webView: WKWebView!
     private var selectionDiagnostics: SelectionDiagnostics?
@@ -40,6 +40,11 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
     private var boot = CanvasBootCoordinator()
     private var statusView: CanvasStatusView?
     private var lastBootError: Error?
+    /// WKDownload is not retained by WebKit once it hands it to us.
+    private var activeDownloads: Set<WKDownload> = []
+    /// Save panels and JS dialogs are sheets on the overlay. While one is up,
+    /// clicks and app switches it causes must not hide the overlay.
+    private var nativeModalDepth = 0
 
     private(set) var isVisible = false
 
@@ -460,7 +465,7 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
     }
 
     private func hideIfClickOutside(_: NSEvent) {
-        guard isVisible, !pickingOpenPanel, !SelectionDiagnostics.keepVisible else { return }
+        guard isVisible, !pickingOpenPanel, nativeModalDepth == 0, !SelectionDiagnostics.keepVisible else { return }
         if Self.isScreenshotApp(NSWorkspace.shared.frontmostApplication) { return }
         let point = NSEvent.mouseLocation
         if !panel.frame.contains(point) {
@@ -504,7 +509,7 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
     }
 
     @objc private func anotherAppActivated(_ note: Notification) {
-        guard isVisible, !pickingOpenPanel, !SelectionDiagnostics.keepVisible else { return }
+        guard isVisible, !pickingOpenPanel, nativeModalDepth == 0, !SelectionDiagnostics.keepVisible else { return }
         let app = (note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication)
             ?? NSWorkspace.shared.frontmostApplication
         let shouldHide = Self.shouldHideOnActivation(
@@ -630,6 +635,12 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
             return
         }
         if message.name == "rmsNative" {
+            let origin = message.frameInfo.securityOrigin
+            guard message.frameInfo.isMainFrame,
+                  WebPolicy.isServerOrigin(host: origin.host, port: origin.port) else {
+                Paths.log("rmsNative ignored from \(origin.protocol)://\(origin.host):\(origin.port) main=\(message.frameInfo.isMainFrame)")
+                return
+            }
             handleNative(message.body)
         }
     }
@@ -819,11 +830,121 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
         _ webView: WKWebView,
         decidePolicyFor navigationAction: WKNavigationAction
     ) async -> WKNavigationActionPolicy {
-        guard let url = navigationAction.request.url else { return .cancel }
-        if url.host == "127.0.0.1" || url.host == "localhost" { return .allow }
-        if url.scheme == "about" { return .allow }
-        openExternal(url)
-        return .cancel
+        let url = navigationAction.request.url
+        let decision = WebPolicy.navigation(url: url, shouldPerformDownload: navigationAction.shouldPerformDownload)
+        switch decision {
+        case .allow: return .allow
+        case .download: return .download
+        case .openExternal:
+            if let url { openExternal(url) }
+            return .cancel
+        case .cancel:
+            Paths.log("navigation blocked \(url?.absoluteString ?? "nil")")
+            return .cancel
+        }
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        decidePolicyFor navigationResponse: WKNavigationResponse
+    ) async -> WKNavigationResponsePolicy {
+        navigationResponse.canShowMIMEType ? .allow : .download
+    }
+
+    func webView(_ webView: WKWebView, navigationAction: WKNavigationAction, didBecome download: WKDownload) {
+        adoptDownload(download)
+    }
+
+    func webView(_ webView: WKWebView, navigationResponse: WKNavigationResponse, didBecome download: WKDownload) {
+        adoptDownload(download)
+    }
+
+    private func adoptDownload(_ download: WKDownload) {
+        download.delegate = self
+        activeDownloads.insert(download)
+        Paths.log("download started \(download.originalRequest?.url?.absoluteString.prefix(80) ?? "?")")
+    }
+
+    func download(
+        _ download: WKDownload,
+        decideDestinationUsing response: URLResponse,
+        suggestedFilename: String
+    ) async -> URL? {
+        let save = NSSavePanel()
+        save.nameFieldStringValue = suggestedFilename
+        save.directoryURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+        save.canCreateDirectories = true
+        save.isExtensionHidden = false
+        let result = await presentSavePanel(save)
+        guard result == .OK, let url = save.url else {
+            Paths.log("download cancelled by user")
+            activeDownloads.remove(download)
+            return nil
+        }
+        // NSSavePanel already asked about replacing. WKDownload refuses to
+        // write over an existing file, so remove it now.
+        if FileManager.default.fileExists(atPath: url.path) {
+            do {
+                try FileManager.default.removeItem(at: url)
+            } catch {
+                Paths.log("download could not replace \(url.path): \(error.localizedDescription)")
+                activeDownloads.remove(download)
+                return nil
+            }
+        }
+        Paths.log("download destination \(url.path)")
+        return url
+    }
+
+    func downloadDidFinish(_ download: WKDownload) {
+        Paths.log("download finished")
+        activeDownloads.remove(download)
+    }
+
+    func download(_ download: WKDownload, didFailWithError error: Error, resumeData: Data?) {
+        Paths.log("download failed \(error.localizedDescription)")
+        activeDownloads.remove(download)
+    }
+
+    /// A sheet attached to the overlay stays above its cover level. When the
+    /// overlay is parked, fall back to a free-standing panel above it.
+    private func presentSavePanel(_ save: NSSavePanel) async -> NSApplication.ModalResponse {
+        beginNativeModal()
+        defer { endNativeModal() }
+        if isVisible {
+            return await withCheckedContinuation { continuation in
+                save.beginSheetModal(for: panel) { continuation.resume(returning: $0) }
+            }
+        }
+        save.level = NSWindow.Level(rawValue: OverlayPanel.coverLevel.rawValue + 2)
+        return await withCheckedContinuation { continuation in
+            save.begin { continuation.resume(returning: $0) }
+        }
+    }
+
+    private func presentAlert(_ alert: NSAlert) async -> NSApplication.ModalResponse {
+        beginNativeModal()
+        defer { endNativeModal() }
+        if isVisible {
+            return await withCheckedContinuation { continuation in
+                alert.beginSheetModal(for: panel) { continuation.resume(returning: $0) }
+            }
+        }
+        alert.window.level = NSWindow.Level(rawValue: OverlayPanel.coverLevel.rawValue + 2)
+        return alert.runModal()
+    }
+
+    private func beginNativeModal() {
+        nativeModalDepth += 1
+        NSApp.activate()
+        if isVisible { panel.makeKey() }
+    }
+
+    private func endNativeModal() {
+        nativeModalDepth = max(0, nativeModalDepth - 1)
+        guard nativeModalDepth == 0, isVisible else { return }
+        panel.makeKey()
+        panel.makeFirstResponder(webView)
     }
 
     func webView(
@@ -839,6 +960,10 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
     }
 
     private func openExternal(_ url: URL) {
+        guard WebPolicy.canOpenExternally(url) else {
+            Paths.log("openExternal refused scheme \(url.scheme ?? "nil")")
+            return
+        }
         if let last = lastExternalOpen, last.url == url, Date().timeIntervalSince(last.at) < 0.8 {
             return
         }
