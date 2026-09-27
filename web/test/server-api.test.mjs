@@ -118,6 +118,47 @@ describe('version history retention', () => {
   });
 });
 
+describe('map body validation', () => {
+  const write = (method, path, value) => rawRequest(srv.port, { method, path, headers: JSON_HEADERS, chunks: [JSON.stringify(value)] });
+  const bad = [
+    ['an array', [1, 2]],
+    ['a string', 'hello'],
+    ['null', null],
+    ['an empty object', {}],
+    ['nodes as an array', { rootId: 'r', nodes: [] }],
+    ['a rootId missing from nodes', { rootId: 'x', nodes: { r: { id: 'r' } } }],
+    ['no rootId', { nodes: { r: { id: 'r' } } }],
+  ];
+  for (const [label, value] of bad) {
+    test(`PUT and POST refuse ${label} with 400`, async () => {
+      const put = await write('PUT', '/api/maps/valid', value);
+      assert.equal(put.status, 400);
+      const post = await write('POST', '/api/maps', value && typeof value === 'object' && !Array.isArray(value) ? { ...value, id: 'valid' } : value);
+      assert.equal(post.status, 400);
+      assert.equal((await rawRequest(srv.port, { path: '/api/maps/valid' })).status, 404, 'nothing was stored');
+    });
+  }
+
+  test('a well-formed map is accepted by PUT and POST', async () => {
+    assert.equal((await write('PUT', '/api/maps/valid1', sampleMap('valid1'))).status, 200);
+    assert.equal((await write('POST', '/api/maps', sampleMap('valid2'))).status, 201);
+  });
+
+  test('POST still requires a usable id', async () => {
+    const { id, ...noId } = sampleMap('x');
+    assert.equal((await write('POST', '/api/maps', noId)).status, 400);
+    assert.equal((await write('POST', '/api/maps', { ...noId, id: '../evil' })).status, 400);
+  });
+
+  test('POST /api/import still builds a map from a node-list spec', async () => {
+    const res = await write('POST', '/api/import', { title: 'Imp', nodes: [{ id: 'r', text: 'Root', parent: null }, { id: 'a', text: 'A', parent: 'r' }] });
+    assert.equal(res.status, 201);
+    const got = await rawRequest(srv.port, { path: '/api/maps/' + res.json.id });
+    assert.equal(got.status, 200);
+    assert.equal(got.json.nodes[got.json.rootId].text, 'Root');
+  });
+});
+
 describe('CSRF guards on writes', () => {
   const body = () => [JSON.stringify(sampleMap('csrf'))];
 

@@ -106,6 +106,18 @@ const upsert = (m) => {
   }
 };
 
+// Minimal shape check for a stored map. Anything that fails it would load as
+// a blank or crashing canvas, so it is refused instead of overwriting data.
+const isPlainObject = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
+function mapBodyError(m) {
+  if (!isPlainObject(m)) return 'body must be a JSON object';
+  if (!isPlainObject(m.nodes)) return 'nodes must be an object';
+  if (typeof m.rootId !== 'string' || !Object.prototype.hasOwnProperty.call(m.nodes, m.rootId)) {
+    return 'rootId must name a node in nodes';
+  }
+  return null;
+}
+
 // ---- map import (GPT integration) ---------------------------------------
 const uid = () => Math.random().toString(36).slice(2, 9);
 
@@ -273,7 +285,9 @@ const server = http.createServer(async (req, res) => {
 
     if (p === '/api/maps' && req.method === 'POST') {
       const m = await readBody(req);
-      if (!m || !m.id) return send(res, 400, { error: 'missing map id' });
+      const bad = mapBodyError(m);
+      if (bad) return send(res, 400, { error: bad });
+      if (typeof m.id !== 'string' || !/^[\w-]+$/.test(m.id)) return send(res, 400, { error: 'missing map id' });
       upsert(m); return send(res, 201, { ok: true, id: m.id });
     }
 
@@ -296,7 +310,10 @@ const server = http.createServer(async (req, res) => {
         return row ? send(res, 200, row.data, 'application/json') : send(res, 404, { error: 'not found' });
       }
       if (req.method === 'PUT') {
-        const m = await readBody(req); m.id = id; upsert(m);
+        const m = await readBody(req);
+        const bad = mapBodyError(m);
+        if (bad) return send(res, 400, { error: bad });
+        m.id = id; upsert(m);
         return send(res, 200, { ok: true, id });
       }
       if (req.method === 'DELETE') {
