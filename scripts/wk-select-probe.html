@@ -1,0 +1,125 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>wk-select-probe</title>
+<style>
+  html,body{margin:0;background:#eee;font:13px/20px ui-monospace,Menlo,monospace}
+  #box{position:relative;width:520px;height:320px;margin:12px;background:#fff;overflow:hidden}
+  .app-tf{transform:scale(.9);transform-origin:0 0;width:578px;height:356px;position:relative}
+  .hl,.ta{position:absolute;inset:0;margin:0;padding:12px 14px;border:0;font:13px/20px ui-monospace,Menlo,monospace;white-space:pre;box-sizing:border-box}
+  .hl{overflow:hidden;pointer-events:none;color:#23201b;z-index:1}
+  .hl-inner{will-change:transform}
+  .hl-line{min-height:20px}
+  .ta-ghost{background:transparent;color:transparent;caret-color:#23201b;z-index:2}
+  .ta-solid{background:#fff;color:#23201b;z-index:2}
+  .ce{padding:12px;outline:2px solid #e0613a;height:100%;overflow:auto;white-space:pre-wrap;box-sizing:border-box}
+  .hidden{visibility:hidden}
+  .gone{display:none}
+</style>
+<div id="box"></div>
+<script>
+const LINES = 600;
+const TEXT = Array.from({length:LINES}, (_,i)=>'- topic '+i+' / 这是一段用来划选的文字 '+i).join('\n');
+const CE_TEXT = TEXT.slice(0, 3500);
+const SWEEPS = 24;
+window.__PROBE_BOOT = true;
+
+function lineDivs(n){
+  let s='';
+  for(let i=0;i<n;i++) s+='<div class="hl-line">- topic '+i+' / 这是一段用来划选的文字 '+i+'</div>';
+  return s;
+}
+const OVERLAY = '<pre class="hl" id="ov"><div class="hl-inner">'+lineDivs(LINES)+'</div></pre>';
+function frame(){
+  return new Promise(r=>{
+    let done=false;
+    const go=()=>{ if(done) return; done=true; r(); };
+    requestAnimationFrame(go);
+    setTimeout(go, 32);
+  });
+}
+function twoFrames(){ return frame().then(frame); }
+
+function setTaSel(ta, i){
+  const len=ta.value.length;
+  const a=Math.floor(len*(i%SWEEPS)/SWEEPS);
+  const b=Math.min(len, a+Math.floor(len*0.12));
+  ta.selectionStart=a;
+  ta.selectionEnd=Math.max(a+1,b);
+}
+
+function setCeSel(el, i){
+  const text=el.firstChild;
+  const len=(text && text.length)||0;
+  const a=Math.floor(len*(i%SWEEPS)/SWEEPS);
+  const b=Math.min(len, a+Math.floor(len*0.12)+8);
+  const r=document.createRange();
+  r.setStart(text, Math.max(0,a));
+  r.setEnd(text, Math.max(a+1,b));
+  const sel=window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(r);
+}
+
+async function bench(name, html, kind){
+  const box=document.getElementById('box');
+  box.innerHTML=html;
+  const ta=box.querySelector('textarea');
+  const ce=box.querySelector('[contenteditable]');
+  if(ta) ta.value=TEXT;
+  if(ce) ce.textContent=CE_TEXT;
+  await twoFrames();
+  if(ta){ ta.focus(); setTaSel(ta, 0); }
+  if(ce){ ce.focus(); setCeSel(ce, 0); }
+  await twoFrames();
+
+  let work=0, frames=0;
+  const t0=performance.now();
+  for(let i=0;i<SWEEPS;i++){
+    const a=performance.now();
+    if(ta) setTaSel(ta, i);
+    if(ce) setCeSel(ce, i);
+    void box.offsetHeight;
+    const ov=box.querySelector('#ov');
+    if(ov) void ov.getBoundingClientRect();
+    work += performance.now()-a;
+    const f0=performance.now();
+    await frame();
+    frames += performance.now()-f0;
+  }
+  const total=performance.now()-t0;
+  return {
+    name, kind,
+    workMs:+work.toFixed(1),
+    frameMs:+frames.toFixed(1),
+    totalMs:+total.toFixed(1),
+    workPer:+(work/SWEEPS).toFixed(2),
+    framePer:+(frames/SWEEPS).toFixed(2)
+  };
+}
+
+(async function(){
+  window.__PROBE_ERR=null;
+  const out=[];
+  try{
+  out.push(await bench('native-textarea',
+    '<textarea class="ta ta-solid"></textarea>', 'textarea'));
+  out.push(await bench('ghost+overlay',
+    OVERLAY+'<textarea class="ta ta-ghost"></textarea>', 'textarea'));
+  out.push(await bench('solid+overlay-hidden',
+    OVERLAY.replace('class="hl"','class="hl hidden" id="ov"')+'<textarea class="ta ta-solid"></textarea>', 'textarea'));
+  out.push(await bench('solid+overlay-none',
+    OVERLAY.replace('class="hl"','class="hl gone" id="ov"')+'<textarea class="ta ta-solid"></textarea>', 'textarea'));
+  out.push(await bench('transform+ghost+overlay',
+    '<div class="app-tf">'+OVERLAY+'<textarea class="ta ta-ghost"></textarea></div>', 'textarea'));
+  out.push(await bench('contenteditable',
+    '<div class="ce" contenteditable="true"></div>', 'ce'));
+  out.push(await bench('contenteditable+transform',
+    '<div class="app-tf"><div class="ce" contenteditable="true"></div></div>', 'ce'));
+  window.__PROBE__={sweeps:SWEEPS, lines:LINES, cases:out};
+  }catch(e){
+    window.__PROBE_ERR=String(e && e.stack || e);
+    window.__PROBE__={error:window.__PROBE_ERR};
+  }
+  document.title=JSON.stringify(window.__PROBE__);
+})();
+</script>
