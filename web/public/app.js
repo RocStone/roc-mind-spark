@@ -11213,13 +11213,18 @@ async function exportPNG(){
   // object, not the data-URL string, so this has to finish before the drawing
   // pass below runs. A per-image timeout means one slow/corrupt image can't hang
   // the whole export; that node just falls back to no image, like before.
+  // Remote (http/https) images load with crossOrigin='anonymous' for the same reason
+  // as favicons below: a tainted canvas makes toBlob() throw and kills the whole
+  // export. A host without CORS just fails the load, and that node draws no image.
   const loadImg = src => new Promise(resolve=>{
+    if(!src){ resolve(null); return; }
     const img=new Image();
     let done=false; const finish=v=>{ if(!done){ done=true; resolve(v); } };
+    if(/^(https?:)?\/\//i.test(String(src))) img.crossOrigin='anonymous';
     img.onload=()=>finish(img);
     img.onerror=()=>finish(null);
     setTimeout(()=>finish(null), 4000);
-    img.src=src;
+    try{ img.src=src; }catch(_){ finish(null); }
   });
   const imgMap={};
   await Promise.all(ids.filter(i=>map.nodes[i].image).map(async i=>{ imgMap[i]=await loadImg(nodeImageSrc(map.nodes[i])); }));
