@@ -8843,7 +8843,13 @@ const _mapSaves=createMapSaveQueue({
     _mapSaveStates.set(id,state);
     if(state==='saved') _saveErrorNotified.delete(id);
     if(map && map.id===id) updateMapSaveStatus();
-    if(error && !_saveErrorNotified.has(id)){
+    // A terminal refusal is not retried, so it always gets its own warning
+    // even if a retryable failure was already announced for this map.
+    if(state==='failed-terminal'){
+      _saveErrorNotified.add(id);
+      console.warn('Map save refused:',id,error);
+      toast(rmsTr('saveFailedTerminalWarning','The server refused to save this map. Your latest changes are only in this window; they will not be retried automatically.'));
+    }else if(error && !_saveErrorNotified.has(id)){
       _saveErrorNotified.add(id);
       console.warn('Map save failed:',id,error);
       toast(rmsTr('savePendingWarning','Changes are still in this window and have not been saved. Retrying; keep the app open.'));
@@ -8854,8 +8860,8 @@ function updateMapSaveStatus(){
   const state=map && _mapSaveStates.get(map.id);
   const busy=state==='saving'||state==='retrying';
   $('#savePill').classList.toggle('saving',busy);
-  const key=state==='failed' ? 'saveFailed' : state==='retrying' ? 'saveRetrying' : busy ? 'saving' : 'saved';
-  const fallback={saveFailed:'Save failed',saveRetrying:'Retrying…',saving:'Saving…',saved:'Saved'};
+  const key=state==='failed-terminal' ? 'saveFailedTerminal' : state==='failed' ? 'saveFailed' : state==='retrying' ? 'saveRetrying' : busy ? 'saving' : 'saved';
+  const fallback={saveFailedTerminal:'Save refused',saveFailed:'Save failed',saveRetrying:'Retrying…',saving:'Saving…',saved:'Saved'};
   $('#saveText').textContent=rmsTr(key,fallback[key]);
 }
 function scheduleSave(){

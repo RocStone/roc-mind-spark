@@ -16,6 +16,25 @@ function createMapSaveQueue(options){
   // save for that id.  `generation` invalidates all callbacks after remove().
   const entries = new Map();
 
+  // A client error means the server will refuse the same snapshot again.
+  // 408 (timeout) and 429 (rate limit) are the 4xx codes worth retrying.
+  function isTerminalError(error){
+    if(!error) return false;
+    if(error.terminal === true) return true;
+    const status = Number(error.status);
+    return Number.isInteger(status) && status >= 400 && status < 500 && status !== 408 && status !== 429;
+  }
+
+  function newEntry(id){
+    return { id, generation:0, revision:0, timer:null, retryTimer:null,
+      pending:null, inflight:null, removing:false, removePromise:null,
+      lastState:null, lastError:null, terminalRevision:0 };
+  }
+
+  function isTerminalPending(entry){
+    return !!entry.pending && entry.terminalRevision > 0 && entry.pending.revision === entry.terminalRevision;
+  }
+
   function emit(entry, state, error){
     if(entry.lastState === state) return;
     entry.lastState = state;
@@ -115,6 +134,15 @@ function createMapSaveQueue(options){
       entry.pending = { revision:op.revision, snapshot:op.snapshot };
     }
     entry.lastError = op.error;
+    if(entry.pending.revision === op.revision && isTerminalError(op.error)){
+      // The server rejected this exact snapshot (4xx, e.g. 400/413).  Sending
+      // it again every four seconds cannot succeed and would keep quit blocked.
+      // Keep it so the edit is not silently dropped; the next schedule()
+      // supersedes it, and flush() reports the stored error without resending.
+      entry.terminalRevision = op.revision;
+      emit(entry, 'failed-terminal', op.error);
+      return;
+    }
     if(entry.pending.revision === op.revision) emit(entry, 'failed', op.error);
     else emit(entry, 'retrying', op.error);
     scheduleRetry(entry, op.generation);
@@ -129,9 +157,7 @@ function createMapSaveQueue(options){
     const snapshot = JSON.parse(JSON.stringify(map));
     let entry = entries.get(id);
     if(!entry){
-      entry = { id, generation:0, revision:0, timer:null, retryTimer:null,
-        pending:null, inflight:null, removing:false, removePromise:null,
-        lastState:null, lastError:null };
+      entry = newEntry(id);
       entries.set(id, entry);
     }
     // UI events can arrive while a delete request is awaiting the server.  A
@@ -160,6 +186,9 @@ function createMapSaveQueue(options){
       // A flush bypasses both debounce and the four-second retry delay.
       cancelTimer(entry, 'timer');
       cancelTimer(entry, 'retryTimer');
+      // A snapshot the server already refused stays unsaved: report it
+      // instead of resending it or resolving as if everything were stored.
+      if(!entry.inflight && isTerminalPending(entry)) throw entry.lastError;
       if(!entry.inflight && entry.pending) startPending(entry, entry.generation);
       const op = entry.inflight;
       if(op){
@@ -187,9 +216,7 @@ function createMapSaveQueue(options){
       // The tombstone must exist before the first await.  Otherwise a caller
       // can schedule the same id while removeFn is pending and issue a late
       // save that recreates the map being deleted.
-      entry = { id, generation:0, revision:0, timer:null, retryTimer:null,
-        pending:null, inflight:null, removing:false, removePromise:null,
-        lastState:null, lastError:null };
+      entry = newEntry(id);
       entries.set(id, entry);
     }
     if(entry.removePromise) return entry.removePromise;
@@ -200,6 +227,9 @@ function createMapSaveQueue(options){
     entry.generation += 1;
     cancelTimer(entry, 'timer');
     cancelTimer(entry, 'retryTimer');
+    // Keep the unsaved snapshot aside: if the delete fails, the map still
+    // exists remotely and this edit must not be lost.
+    const stashed = entry.pending;
     entry.pending = null;
     const inflight = entry.inflight;
 
@@ -218,6 +248,25 @@ function createMapSaveQueue(options){
         entry.removing = false;
         entry.removePromise = null;
         entry.generation += 1;
+        // Newest unsaved work: the queued snapshot, else a failed in-flight one.
+        const restore = stashed
+          || (inflight && inflight.ok === false ? { revision:inflight.revision, snapshot:inflight.snapshot } : null);
+        if(restore && (!entry.pending || entry.pending.revision < restore.revision)){
+          entry.pending = restore;
+          if(!stashed && isTerminalError(inflight.error)){
+            entry.lastError = inflight.error;
+            entry.terminalRevision = restore.revision;
+          }
+          if(isTerminalPending(entry)) emit(entry, 'failed-terminal', entry.lastError);
+          else {
+            emit(entry, 'failed');
+            scheduleRetry(entry, entry.generation);
+          }
+        }else if(!entry.pending && !entry.inflight){
+          // Nothing is outstanding; do not leave a stale `saving` status.
+          emit(entry, 'saved');
+          cleanIfIdle(entry);
+        }
         throw error;
       }
       if(entries.get(id) === entry) entries.delete(id);

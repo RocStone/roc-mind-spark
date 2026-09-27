@@ -183,4 +183,108 @@ describe('createMapSaveQueue',()=>{
     await all;
     assert.deepEqual(calls.map(item=>item.id).sort(),['a','b']);
   });
+
+  test('a 4xx rejection is terminal: no retry loop, flush rejects without resending, a new edit recovers',async()=>{
+    const {calls,waiting,save}=controlledSave();
+    const states=[];
+    const queue=createMapSaveQueue({save,onState:(id,state,error)=>states.push({state,error})});
+    queue.schedule({id:'a',text:'too big'},0);
+    mock.timers.tick(0);
+    await settle();
+    const error=Object.assign(new Error('HTTP 413'),{status:413});
+    waiting[0].reject(error);
+    await settle();
+    assert.deepEqual(states.at(-1),{state:'failed-terminal',error});
+
+    mock.timers.tick(60000);
+    await settle();
+    assert.equal(calls.length,1,'a refused snapshot is not retried on a timer');
+
+    await assert.rejects(queue.flush('a'),err=>err===error);
+    await assert.rejects(queue.flush(),err=>err===error,'quit-time flush reports the refusal');
+    assert.equal(calls.length,1,'flush does not resend the refused snapshot');
+
+    queue.schedule({id:'a',text:'smaller'},0);
+    assert.equal(states.at(-1).state,'saving');
+    const flushed=queue.flush('a');
+    await settle();
+    assert.equal(calls.length,2);
+    assert.equal(calls[1].text,'smaller');
+    waiting[1].resolve();
+    await flushed;
+    assert.equal(states.at(-1).state,'saved');
+  });
+
+  test('error.terminal marks a failure terminal; 408, 429 and 5xx keep retrying',async()=>{
+    for(const [error,terminal] of [
+      [Object.assign(new Error('custom'),{terminal:true}),true],
+      [Object.assign(new Error('HTTP 400'),{status:400}),true],
+      [Object.assign(new Error('HTTP 408'),{status:408}),false],
+      [Object.assign(new Error('HTTP 429'),{status:429}),false],
+      [Object.assign(new Error('HTTP 500'),{status:500}),false],
+    ]){
+      const {calls,waiting,save}=controlledSave();
+      const states=[];
+      const queue=createMapSaveQueue({save,onState:(id,state)=>states.push(state)});
+      queue.schedule({id:'a'},0);
+      mock.timers.tick(0);
+      await settle();
+      waiting[0].reject(error);
+      await settle();
+      assert.equal(states.at(-1),terminal?'failed-terminal':'failed',error.message);
+      mock.timers.tick(4000);
+      await settle();
+      assert.equal(calls.length,terminal?1:2,error.message);
+      if(!terminal){ waiting[1].resolve(); await settle(); }
+    }
+  });
+
+  test('a failed remove restores the queued snapshot, reports failed, and retries it',async()=>{
+    const {calls,waiting,save}=controlledSave();
+    const states=[];
+    const queue=createMapSaveQueue({save,onState:(id,state)=>states.push(state)});
+    queue.schedule({id:'a',text:'unsaved edit'},1000);
+    await assert.rejects(queue.remove('a',async()=>{ throw new Error('delete failed'); }),/delete failed/);
+    assert.equal(states.at(-1),'failed','status no longer stays at saving');
+    mock.timers.tick(3999);
+    await settle();
+    assert.equal(calls.length,0);
+    mock.timers.tick(1);
+    await settle();
+    assert.equal(calls.length,1,'the stashed snapshot is retried');
+    assert.equal(calls[0].text,'unsaved edit');
+    waiting[0].resolve();
+    await settle();
+    assert.equal(states.at(-1),'saved');
+  });
+
+  test('a failed remove restores an in-flight snapshot that also failed',async()=>{
+    const {calls,waiting,save}=controlledSave();
+    const queue=createMapSaveQueue({save});
+    queue.schedule({id:'a',text:'sent'},0);
+    mock.timers.tick(0);
+    await settle();
+    const removing=queue.remove('a',async()=>{ throw new Error('delete failed'); });
+    waiting[0].reject(new Error('offline'));
+    await assert.rejects(removing,/delete failed/);
+    const flushed=queue.flush('a');
+    await settle();
+    assert.equal(calls.length,2);
+    assert.equal(calls[1].text,'sent');
+    waiting[1].resolve();
+    await flushed;
+  });
+
+  test('a failed remove with nothing outstanding reports saved, not saving',async()=>{
+    const {waiting,save}=controlledSave();
+    const states=[];
+    const queue=createMapSaveQueue({save,onState:(id,state)=>states.push(state)});
+    queue.schedule({id:'a'},0);
+    mock.timers.tick(0);
+    await settle();
+    const removing=queue.remove('a',async()=>{ throw new Error('delete failed'); });
+    waiting[0].resolve();
+    await assert.rejects(removing,/delete failed/);
+    assert.equal(states.at(-1),'saved');
+  });
 });
