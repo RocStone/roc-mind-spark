@@ -1,8 +1,10 @@
 # Layout presets
 
-Each file here is a complete MindSpark layout, expressed as JSON. To use one:
-open the theme panel (🎨), find **Layout**, scroll to the **Import** tile, and
-paste the file's contents.
+Each file here is a complete MindSpark layout, expressed as JSON. They are
+served at `/layouts/` and listed in `index.json`; the theme panel (🎨) shows
+them in the **Layout presets** row, and clicking one imports and applies it.
+To use your own, click **Import…** at the end of that row and paste the JSON.
+Adding a file here means adding its name to `index.json` too (a test checks).
 
 Imported layouts are saved on your device. The maps you apply them to are not
 affected — a map records the resolved strategy and parameters, so a map using

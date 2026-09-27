@@ -111,7 +111,7 @@
         <button class="tb" id="searchBtn" data-i18n-title="search" data-chord="find" title="Search">⌕</button>
         <button class="tb" id="varsBtn" data-i18n-title="variables" title="Map variables — set {{placeholder}} defaults">{ }</button>
         <button class="tb" id="themeBtn" data-i18n-title="theme" title="Theme">🎨</button>
-        <button class="tb" id="menuExport" data-i18n-title="export" title="Export">⤓</button>
+        <button class="tb" id="menuExport" data-i18n-title="exportMore" title="Export, import &amp; more">⤓</button>
         <button class="tb" id="focusBtn" data-i18n-title="focusMode" title="Focus mode (Esc to exit)">⛶</button>
         <button class="tb" id="settingsBtn" data-i18n-title="settingsTitle" data-chord="openSettings" title="Settings">⚙</button>
       </div>
@@ -142,11 +142,11 @@
     <div class="minimap" id="minimap" data-i18n-title="minimap" title="Overview — click to jump"></div>
 
     <div class="hint" id="hint">
-      <button class="close" id="hintClose">×</button>
-      <span data-i18n-html="hintHtml"><b>⌘+drag</b> box-select · <b>drag</b> move / nest / reorder · <b>Tab</b> child · <b>Enter</b> sibling · <b>↑↓←→</b> navigate · <b>F2</b>/dbl-click edit · <b>L</b> link · <b>Del</b> remove · <b>?</b> all shortcuts</span>
+      <button class="close" id="hintClose" type="button" aria-label="Dismiss tips" data-i18n-aria="hintCloseAria">×</button>
+      <span id="hintText"><b>⌘+drag</b> box-select · <b>drag</b> move / nest / reorder · <b>Tab</b> child · <b>Enter</b> sibling · <b>↑↓←→</b> navigate · <b>F2</b>/dbl-click edit · <b>L</b> link · <b>Del</b> remove · <b>?</b> all shortcuts</span>
     </div>
 
-    <div class="toast" id="toast"></div>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
   </div>
 </div>
 

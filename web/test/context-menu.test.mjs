@@ -42,3 +42,28 @@ describe('rms-settings context menu', () => {
     assert.ok(preventAt < eligibleAt, 'native menu must be killed even when the click is not on a button');
   });
 });
+
+describe('node context menu', () => {
+  const fakeTarget = (closestMap) => ({ closest: sel => {
+    for(const k of Object.keys(closestMap)) if(sel.split(',').map(s => s.trim()).includes(k)) return closestMap[k];
+    return null;
+  } });
+  test('nodeContextId finds any node, not only ones with a URL', () => {
+    const { nodeContextId } = loadFns(['nodeContextId'], { map: { nodes: { n1: { id: 'n1', text: 'x' } } } });
+    assert.equal(nodeContextId(fakeTarget({ '.node': { dataset: { id: 'n1' } } })), 'n1');
+  });
+  test('nodeContextId leaves handles and an open editor to their own menus', () => {
+    const { nodeContextId } = loadFns(['nodeContextId'], { map: { nodes: { n1: { id: 'n1' } } } });
+    assert.equal(nodeContextId(fakeTarget({ '.handle': {}, '.node': { dataset: { id: 'n1' } } })), null);
+    assert.equal(nodeContextId(fakeTarget({ '.node.editing': {}, '.node': { dataset: { id: 'n1' } } })), null);
+  });
+  test('insertNodeKeysAfter puts the duplicate right after its original', () => {
+    const { insertNodeKeysAfter } = loadFns(['insertNodeKeysAfter']);
+    const out = insertNodeKeysAfter({ r: 1, a: 2, b: 3, c1: 4, c2: 5 }, 'a', ['c1', 'c2']);
+    assert.deepEqual(Object.keys(out), ['r', 'a', 'c1', 'c2', 'b']);
+  });
+  test('the node menu is wired on contextmenu', () => {
+    const app = readFileSync(join(here, '..', 'public', 'app.js'), 'utf8');
+    assert.match(app, /addEventListener\('contextmenu', onNodeContextMenu, true\)/);
+  });
+});

@@ -28,7 +28,11 @@ What Roc Mind Spark can do today, as a **macOS overlay**. This is the product ca
 - Add a child with **Tab**, a sibling with **Enter**. Navigate with arrows. Edit with **F2** or double-click. Delete with Backspace / Delete.
 - **Drag** a topic to move its subtree. Drop on the centre of another topic to nest. Drop on the top or bottom edge to insert as a sibling or reorder.
 - **⌘ + drag** box-select. **⌘ + click** add or remove a topic from the selection. Bulk format, recolor, re-parent, or delete the selection.
+- Right-click a topic for Add child, Add sibling, Edit, Notes, Set marker, Copy as Markdown, Duplicate subtree, Collapse / Expand and Delete. Arrow keys move through the menu; Esc or a click outside closes it.
+- **⌘A** on the canvas selects every visible topic; **⌘⇧A** selects the current topic and its siblings.
+- **⇧Esc** while editing a topic discards the edit and restores the text from before; **Esc** saves.
 - Copy the selection as a Markdown outline from the bulk bar (**MD**) or **⌘C**. Parent/child among the selected topics is kept as indent. Unselected descendants are left out.
+- With one topic selected (not editing), **⌘C** copies its whole subtree as a Markdown outline. **⌘V** on a selected topic pastes a just-copied subtree as a clone (notes, markers, colors and links inside it kept), or splits a multi-line Markdown outline into child topics. A single line of text still replaces the topic text.
 - Cross-link any two topics with **L**.
 - Collapse / expand a branch with **Space**. The **−** / **+** control on a topic is the same fold. Collapse all, one level per click.
 - **⌘F** finds topic text in the current map, including topics hidden by a **−** fold. Focus stays in the find box. Enter cycles to the next hit, centres the canvas on it, and unfolds its ancestor chain. Enter again refolds that temporary chain when the previous topic was not edited. A second **⌘F** while find is open closes it. **⌘H** opens find and replace. The toolbar 🌐 control searches across all maps.
@@ -54,10 +58,10 @@ What Roc Mind Spark can do today, as a **macOS overlay**. This is the product ca
 ## Look and layout
 
 - Colour themes, map styles (modern / classic / others), and a handwritten / office / coffee-shop look.
-- Layouts: balanced tree, left, right, down, org-chart up, timeline, fishbone, radial, grid, matrix. Import a layout JSON from `web/layouts/`.
+- Layouts: balanced tree, left, right, down, org-chart up, timeline, fishbone, radial, grid, matrix. The 🎨 panel's **Layout presets** row lists the presets shipped in `web/public/layouts/`; click one to apply it. Its last tile, **Import…**, takes your own layout JSON.
 - Interface language: English or 中文. This does not translate the words you type into nodes.
 - Display size for chrome density. Scroll to zoom the map, drag empty canvas to pan, Fit to frame every topic, minimap to jump.
-- Focus mode to work on one branch. Presentation mode to step through topics.
+- Focus mode is an immersive mode: it hides the sidebar, toolbar and tips so only the canvas is left (Esc exits); ⌘F still opens the find box there. Presentation mode to step through topics.
 
 ## Export and import
 

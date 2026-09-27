@@ -63,6 +63,28 @@
   function applyCanvas(){
     window.__RMS_SHORTCUTS__ = canvasMap();
   }
+  // What the shell injected before any local override: a reset returns to this
+  // (or to the built-in default), not to whatever was last applied.
+  const shellShortcuts = Object.assign({}, window.__RMS_SHORTCUTS__||{});
+  function canvasOverrides(){ return loadJSON(CANVAS_KEY, {}); }
+  // Drop local overrides for `ids` (all of them when ids is null) and repaint.
+  function resetCanvasShortcuts(ids){
+    const all=canvasOverrides();
+    const targets=ids || Array.from(new Set(Object.keys(all).concat(canvasMeta().map(m=>m.id))));
+    const cur=Object.assign({}, window.__RMS_SHORTCUTS__||{});
+    targets.forEach(id=>{
+      delete all[id];
+      const base=shellShortcuts[id] || defaults[id];
+      if(base) cur[id]=base; else delete cur[id];
+    });
+    saveJSON(CANVAS_KEY, all);
+    window.__RMS_SHORTCUTS__=cur;
+    applyCanvas();
+    if(window.rmsApplyI18n) window.rmsApplyI18n();
+    if(typeof refreshLocaleChrome==='function') refreshLocaleChrome();
+    paintSettings();
+  }
+  window.rmsResetCanvasShortcuts = resetCanvasShortcuts;
 
   function specFromEvent(e){
     return {
@@ -146,6 +168,7 @@
     if(login) login.checked = !!(state && state.login);
     const tog = document.getElementById('rmsToggleChord');
     if(tog && !(listening && listening.kind==='toggle')) tog.textContent = (state && state.toggleDisplay) || 'Caps + Q';
+    if(typeof window.rmsRenderHint==='function') window.rmsRenderHint();
   };
 
   window.__rmsToggleListenDone = function(){
@@ -370,7 +393,7 @@
           <div class="rms-row"><span>${t('showHide')}</span><button type="button" class="rms-chord" id="rmsToggleChord" data-rec="toggle">Caps + Q</button></div>
         </div>
         <div class="rms-set-sec">
-          <h3>${t('canvas')}</h3>
+          <h3 class="rms-sec-head">${t('canvas')}<button type="button" class="rms-clear" id="rmsCanvasResetAll">${t('resetAllShortcuts')}</button></h3>
           <p class="vf-sub" style="margin:0 0 8px">${t('canvasHelp')}</p>
           <div id="rmsCanvasRows"></div>
         </div>
@@ -450,6 +473,7 @@
     const levelHint=root.querySelector('.rms-level-colors-disabled');
     if(levelHint) levelHint.textContent=t('levelColorsDisabled');
     const canvas=canvasMap();
+    const overrides=canvasOverrides();
     const box=root.querySelector('#rmsCanvasRows');
     if(box){
       let lastGroup='';
@@ -458,9 +482,21 @@
           ? '<div class="rms-sub">'+t(item.group)+'</div>'
           : '';
         lastGroup=item.group||lastGroup;
+        const custom=Object.prototype.hasOwnProperty.call(overrides, item.id);
         return head+'<div class="rms-row"><span>'+item.title+'</span>'+
-          '<button type="button" class="rms-chord" data-rec="'+item.id+'">'+specLabel(canvas[item.id])+'</button></div>';
+          '<button type="button" class="rms-chord" data-rec="'+item.id+'">'+specLabel(canvas[item.id])+'</button>'+
+          '<button type="button" class="rms-clear" data-reset="'+item.id+'"'+(custom?'':' disabled')+' title="'+t('resetShortcut')+'">'+t('resetShortcut')+'</button></div>';
       }).join('');
+      box.querySelectorAll('[data-reset]').forEach(b=>b.onclick=ev=>{
+        ev.stopPropagation();
+        if(listening) return;
+        resetCanvasShortcuts([b.dataset.reset]);
+      });
+    }
+    const resetAll=root.querySelector('#rmsCanvasResetAll');
+    if(resetAll){
+      resetAll.disabled=!Object.keys(overrides).length;
+      resetAll.onclick=ev=>{ ev.stopPropagation(); if(!listening) resetCanvasShortcuts(null); };
     }
     const btns=buttonMap();
     const list=root.querySelector('#rmsButtonRows');
@@ -482,6 +518,7 @@
   }
 
   applyCanvas();
+  if(typeof window.rmsRenderHint==='function') window.rmsRenderHint();
   nativePost({ op:'setLanguage', lang: (window.rmsLang ? window.rmsLang() : 'en') });
   document.getElementById('settingsBtn')?.addEventListener('click', openSettings);
 })();

@@ -662,7 +662,9 @@ function render(){
     const decos=[]; if(n.underline) decos.push('underline'); if(n.strike) decos.push('line-through');
     if(decos.length) t.style.textDecoration=decos.join(' ');
     if(n.textColor) t.style.color=n.textColor;
-    if(n.highlight){ t.style.background=n.highlight; t.style.padding='0 4px'; t.style.borderRadius='3px'; t.style.boxDecorationBreak='clone'; t.style.webkitBoxDecorationBreak='clone'; }
+    // Highlights are light pastels: on a dark theme the default ink would be
+    // light-on-light, so highlighted text falls back to dark ink.
+    if(n.highlight){ t.style.color=n.textColor || '#23201b'; t.style.background=n.highlight; t.style.padding='0 4px'; t.style.borderRadius='3px'; t.style.boxDecorationBreak='clone'; t.style.webkitBoxDecorationBreak='clone'; }
     // Text alignment
     if(n.align && n.align!=='center'){
       t.style.textAlign=n.align;
@@ -3609,6 +3611,45 @@ function clearMultiSelect(){
   reparentMode = false;
   updateMultiSelUI();
 }
+// Nodes on screen: everything not hidden under a collapsed ancestor.
+function visibleNodeIds(nodes, rootId){
+  const out=[];
+  if(!nodes || !nodes[rootId]) return out;
+  const kids={};
+  for(const k in nodes){ const p=nodes[k] && nodes[k].parent; if(p!=null) (kids[p]||(kids[p]=[])).push(k); }
+  const walk=id=>{ out.push(id); if(!nodes[id].collapsed) (kids[id]||[]).forEach(walk); };
+  walk(rootId);
+  return out;
+}
+// ⌘A / ⌘⇧A on the canvas (no editor or text field focused).
+function canvasOwnsSelectAll(){
+  if(typeof map==='undefined' || !map || !map.nodes) return false;
+  if(typeof READONLY!=='undefined' && READONLY) return false;
+  if(typeof topModalEl==='function' && topModalEl()) return false;
+  const ae=typeof document!=='undefined' ? document.activeElement : null;
+  if(ae && (ae.tagName==='INPUT' || ae.tagName==='TEXTAREA' || (ae.isContentEditable && !(typeof pendingNodeTyping==='function' && pendingNodeTyping())))) return false;
+  if(ae && ae.closest && ae.closest('#mdPane')) return false;
+  return !document.querySelector('.node.editing');
+}
+function selectNodeSet(ids){
+  ids=(ids||[]).filter(id=>map.nodes[id]);
+  if(!ids.length) return false;
+  multiSel.clear();
+  reparentMode=false;
+  if(ids.length>=2) ids.forEach(id=>multiSel.add(id));
+  if(!sel || !ids.includes(sel)) select(ids[0], false);
+  updateMultiSelUI();
+  return true;
+}
+function selectAllNodesOnCanvas(){
+  if(!canvasOwnsSelectAll()) return false;
+  return selectNodeSet(visibleNodeIds(map.nodes, map.rootId));
+}
+function selectSiblingsOnCanvas(){
+  if(!canvasOwnsSelectAll() || !sel || !map.nodes[sel]) return false;
+  const parent=map.nodes[sel].parent;
+  return selectNodeSet(parent!=null && map.nodes[parent] ? childrenOf(parent) : [sel]);
+}
 function updateMultiSelUI(){
   if(multiSel.size>=2 && pendingNodeTyping()) discardEditOverlay();
   document.querySelectorAll('.node.multi-sel').forEach(n=>n.classList.remove('multi-sel'));
@@ -3716,7 +3757,7 @@ function showBulkSizePicker(anchorBtn){
 function showBulkColorPicker(anchorBtn, kind){
   document.querySelectorAll('.picker').forEach(p=>p.remove());
   let colors, prop, allowNone=false;
-  if(kind==='text'){ colors = TEXT_COLORS; prop='textColor'; }
+  if(kind==='text'){ colors = textColorSwatches(); prop='textColor'; }
   else if(kind==='highlight'){ colors = HILITES; prop='highlight'; allowNone=true; }
   else { colors = ['#fff','#ffd9c2','#ffe9a8','#d6f0c8','#c5e8e4','#cfe0f5','#e6d4f2','#f5d0dd','#e0e0e0']; prop='color'; }
   const pk = document.createElement('div');
@@ -3763,7 +3804,7 @@ function selectionMarkdownPayload(){
   return buildSelectionMarkdown([...multiSel], map.nodes, map.rootId);
 }
 function copySelectionAsMarkdown(){
-  const md=selectionMarkdownPayload();
+  const md=typeof nodeSelectionClipboard==='function' && multiSel && multiSel.size>=2 ? nodeSelectionClipboard().text : selectionMarkdownPayload();
   if(!md) return false;
   if(typeof writeClipboardText==='function' && writeClipboardText(md)){
     toast(rmsTr('copiedAsMd','Copied as Markdown'));
@@ -4010,6 +4051,166 @@ function buildSelectionMarkdown(ids, nodes, rootId){
 }
 
 /* ============================================================
+   Node clipboard — copy/paste whole subtrees.
+   Text on the clipboard is always the Markdown outline (portable,
+   works through the native shell which only carries a string). A JSON
+   snapshot rides along as NODE_CLIP_MIME where the browser allows it
+   and in memory (lastNodeClip) so pasting what we just copied keeps
+   notes, markers, colors and links exactly.
+   ============================================================ */
+const NODE_CLIP_MIME='application/x-rms-nodes';
+let _lastNodeClip=null;   // {text, clip}
+function rememberNodeClip(text, clip){ _lastNodeClip = text && clip ? {text:String(text), clip} : null; }
+function lastNodeClipFor(text){
+  if(!_lastNodeClip || text==null) return null;
+  const norm=s=>String(s).replace(/\r\n?/g,'\n').trim();
+  return norm(text)===norm(_lastNodeClip.text) ? _lastNodeClip.clip : null;
+}
+// Snapshot of the subtrees under `rootIds`. With `onlyIds`, only those nodes
+// are kept (a multi-selection copies what is selected, like its Markdown).
+function serializeNodeClip(rootIds, nodes, onlyIds, links){
+  const out={v:1, roots:[], nodes:{}, links:[]};
+  if(!nodes) return out;
+  const only=onlyIds ? new Set(onlyIds) : null;
+  const kids={};
+  for(const k in nodes){ const p=nodes[k] && nodes[k].parent; if(p!=null) (kids[p]||(kids[p]=[])).push(k); }
+  const walk=id=>{
+    if(out.nodes[id] || !nodes[id] || (only && !only.has(id))) return;
+    const c={...nodes[id]};
+    delete c.x; delete c.y;
+    out.nodes[id]=c;
+    (kids[id]||[]).forEach(walk);
+  };
+  (rootIds||[]).forEach(id=>{
+    if(!nodes[id] || out.nodes[id]) return;
+    out.roots.push(id);
+    walk(id);
+  });
+  out.roots.forEach(id=>{ if(out.nodes[id]) out.nodes[id].parent=null; });
+  (links||[]).forEach(l=>{ if(l && out.nodes[l.from] && out.nodes[l.to]) out.links.push({...l}); });
+  return out;
+}
+function isNodeClip(clip){
+  return !!(clip && Array.isArray(clip.roots) && clip.roots.length && clip.nodes && typeof clip.nodes==='object'
+    && clip.roots.every(r=>clip.nodes[r]));
+}
+// Clone a clip under `parentId` with fresh ids. Mutates `nodes` (and `links`
+// when given). Returns the new ids in document order; the first is the first root.
+function cloneNodeClipInto(clip, parentId, nodes, makeId, links){
+  if(!isNodeClip(clip) || !nodes || !nodes[parentId]) return [];
+  const parent=nodes[parentId];
+  const parentIsRoot=parent.parent==null;
+  let sideCount=0;
+  if(parentIsRoot) for(const k in nodes) if(nodes[k] && nodes[k].parent===parentId) sideCount++;
+  const kids={};
+  for(const k in clip.nodes){ const p=clip.nodes[k] && clip.nodes[k].parent; if(p!=null) (kids[p]||(kids[p]=[])).push(k); }
+  const idMap={}, created=[], now=Date.now();
+  const place=(oldId, newParent, side)=>{
+    const src=clip.nodes[oldId];
+    if(!src || idMap[oldId]) return;
+    const id=makeId();
+    idMap[oldId]=id;
+    const n={...src, id, parent:newParent, side, x:parent.x||0, y:parent.y||0, created:now, updated:now};
+    nodes[id]=n;
+    created.push(id);
+    (kids[oldId]||[]).forEach(k=>place(k, id, side));
+  };
+  clip.roots.forEach(r=>{
+    const side=parentIsRoot ? (sideCount++%2 ? 'left' : 'right') : (parent.side && parent.side!=='root' ? parent.side : 'right');
+    place(r, parentId, side);
+  });
+  if(parent.collapsed) parent.collapsed=false;
+  if(links && Array.isArray(clip.links)){
+    clip.links.forEach(l=>{ if(l && idMap[l.from] && idMap[l.to]) links.push({...l, from:idMap[l.from], to:idMap[l.to]}); });
+  }
+  return created;
+}
+// Is this clipboard text an outline (bullets / headings / indented lines)
+// rather than one piece of text to put in a node?
+function isOutlineClipboardText(text){
+  const lines=String(text==null?'':text).replace(/\r\n?/g,'\n').split('\n').filter(l=>l.trim());
+  if(lines.length<2) return false;
+  const structural=l=>/^\s*(?:[-*+]|\d+[.)])\s+\S/.test(l) || /^#{1,6}\s+\S/.test(l);
+  const count=lines.filter(structural).length;
+  if(count>=2) return true;
+  if(count>=1 && /^#{1,6}\s+\S/.test(lines[0])) return true;
+  // A plain indented outline (tabs/spaces, no bullets), as other outliners copy it.
+  return count===0 && /^\S/.test(lines[0]) && lines.some(l=>/^[ \t]+\S/.test(l));
+}
+// Parse outline text into a clip (same shape as serializeNodeClip).
+function outlineTextToNodeClip(text){
+  let src=String(text==null?'':text).replace(/\r\n?/g,'\n');
+  const lines=src.split('\n');
+  const anyStructural=lines.some(l=>/^\s*(?:[-*+]|\d+[.)])\s+\S/.test(l) || /^#{1,6}\s+\S/.test(l));
+  if(!anyStructural){
+    src=lines.filter(l=>l.trim()).map(l=>{
+      const ind=(l.match(/^[ \t]*/)||[''])[0].replace(/\t/g,'  ');
+      return ind+'- '+l.trim();
+    }).join('\n');
+  }
+  // "1) item" is a list in most outliners; the Markdown parser wants "1."
+  src=src.replace(/^(\s*)(\d+)\)\s+/gm, '$1$2. ');
+  const SENT='⁣rms-paste';
+  const parsed=parseMarkdownOutline(src, SENT);
+  const nodes=parsed.nodes;
+  const root=nodes[parsed.rootId];
+  let roots;
+  if(root && root.text===SENT){
+    roots=Object.keys(nodes).filter(k=>nodes[k].parent===parsed.rootId);
+    delete nodes[parsed.rootId];
+  } else roots=[parsed.rootId];
+  roots.forEach(r=>{ if(nodes[r]) nodes[r].parent=null; });
+  return {v:1, roots, nodes, links:[]};
+}
+// What ⌘C puts on the clipboard for the node selection (no editor open):
+// the Markdown outline, plus a snapshot that paste can clone from.
+function nodeSelectionClipboard(){
+  if(typeof map==='undefined' || !map || !map.nodes) return {text:'', clip:null};
+  const nodes=map.nodes;
+  if(typeof multiSel!=='undefined' && multiSel && multiSel.size>=2){
+    const ids=[...multiSel].filter(id=>nodes[id]);
+    const text=buildSelectionMarkdown(ids, nodes, map.rootId);
+    const roots=[];
+    if(ids.includes(map.rootId)) roots.push(map.rootId);
+    selectionMoveRoots(orderIdsByNodeKeys(ids, nodes), nodes, map.rootId).forEach(id=>{ if(!roots.includes(id)) roots.push(id); });
+    const clip=serializeNodeClip(roots, nodes, ids, map.links);
+    rememberNodeClip(text, clip);
+    return {text, clip};
+  }
+  if(typeof sel==='undefined' || !sel || !nodes[sel]) return {text:'', clip:null};
+  const clip=serializeNodeClip([sel], nodes, null, map.links);
+  const ids=Object.keys(clip.nodes);
+  const text=ids.length>1 ? buildSelectionMarkdown(ids, nodes, null) : nodeClipboardPlain(nodes[sel]);
+  rememberNodeClip(text, clip);
+  return {text, clip};
+}
+// ⌘V on a selected node with no editor open: paste a copied subtree or a
+// Markdown outline as children. Returns false when the text should go into
+// the node as plain text (today's single-line behavior).
+function pasteNodesAsChildren(text, clip){
+  if(typeof READONLY!=='undefined' && READONLY) return false;
+  if(!map || !map.nodes || !sel || !map.nodes[sel]) return false;
+  const parentId=sel;
+  const parentNode=map.nodes[parentId];
+  if(parentNode.hr) return false;
+  if(!isNodeClip(clip)) clip=lastNodeClipFor(text);
+  if(!isNodeClip(clip)){
+    if(!isOutlineClipboardText(text)) return false;
+    try{ clip=outlineTextToNodeClip(text); }catch(_){ return false; }
+    if(!isNodeClip(clip)) return false;
+  }
+  if(!map.links) map.links=[];
+  const created=cloneNodeClipInto(clip, parentId, map.nodes, uid, map.links);
+  if(!created.length) return false;
+  opLog('pasteNodes', {parent:parentId, count:created.length});
+  pushHistory();
+  autoLayout();
+  select(created[0]);
+  toast(rmsTr('pastedNodes','Pasted {n} nodes').replace('{n}', created.length));
+  return true;
+}
+
+/* ============================================================
    CROSS-LINKS — non-tree edges between any two nodes.
    Press L on a selected node, then click another to link them.
    ============================================================ */
@@ -4163,11 +4364,165 @@ function showNodeHrefMenu(ev, id){
     document.addEventListener('mousedown',off,true);
   },0);
 }
-function onNodeHrefContextMenu(e){
-  const id=nodeHrefContextId(e && e.target);
+// Right-click on a node (not on its handles / buttons / an open editor):
+// the node's own menu. Read-only previews only get "Open link".
+function nodeContextId(target){
+  if(!target || !target.closest) return null;
+  if(target.closest('.handle, .resize-grip, .nodebar, .picker, .notes-mark, .ref-mark, .task-check, .rms-ctx, .row-pop, .node.editing, input, textarea, [contenteditable="true"]')) return null;
+  const el=target.closest('.node');
+  if(!el || !el.dataset) return null;
+  const id=el.dataset.id;
+  if(!id || typeof map==='undefined' || !map || !map.nodes || !map.nodes[id]) return null;
+  return id;
+}
+function closeNodeContextMenu(){
+  document.querySelectorAll('.node-menu').forEach(p=>p.remove());
+}
+// Insert `ids` right after `anchor` in the key order of `nodes` (sibling order
+// follows key order), so a duplicate lands next to its original.
+function insertNodeKeysAfter(nodes, anchor, ids){
+  const set=new Set(ids), out={};
+  let placed=false;
+  for(const k in nodes){
+    if(set.has(k)) continue;
+    out[k]=nodes[k];
+    if(k===anchor){ ids.forEach(i=>{ if(nodes[i]) out[i]=nodes[i]; }); placed=true; }
+  }
+  if(!placed) ids.forEach(i=>{ if(nodes[i]) out[i]=nodes[i]; });
+  return out;
+}
+function duplicateSubtree(id){
+  if(READONLY || !map || !map.nodes[id] || id===map.rootId) return false;
+  flushOpenEditToModel();
+  const src=map.nodes[id];
+  const clip=serializeNodeClip([id], map.nodes, null, map.links);
+  if(!map.links) map.links=[];
+  const created=cloneNodeClipInto(clip, src.parent, map.nodes, uid, map.links);
+  if(!created.length) return false;
+  created.forEach(c=>{ map.nodes[c].side=src.side; });
+  map.nodes=insertNodeKeysAfter(map.nodes, id, created);
+  opLog('duplicate', {id, count:created.length});
+  pushHistory();
+  autoLayout();
+  select(created[0]);
+  toast(rmsTr('duplicatedNodes','Duplicated {n} nodes').replace('{n}', created.length));
+  return true;
+}
+function copyNodeAsMarkdown(id){
+  if(!map || !map.nodes[id]) return false;
+  const ids=Object.keys(serializeNodeClip([id], map.nodes, null).nodes);
+  const text=ids.length>1 ? buildSelectionMarkdown(ids, map.nodes, null) : nodeClipboardPlain(map.nodes[id]);
+  if(!text) return false;
+  rememberNodeClip(text, serializeNodeClip([id], map.nodes, null, map.links));
+  if(writeClipboardText(text)){ toast(rmsTr('copiedAsMd','Copied as Markdown')); return true; }
+  return false;
+}
+function nodeContextMenuItems(id){
+  const n=map.nodes[id];
+  const isRoot=id===map.rootId;
+  const hasKids=childrenOf(id).length>0;
+  const hasNotes=!!String(n.notes||'').trim();
+  const kb=cid=>(typeof window!=='undefined' && window.rmsChordLabel) ? window.rmsChordLabel(cid) : '';
+  const items=[
+    {a:'child', label:rmsTr('scAddChild','Add child'), kbd:kb('addChild')},
+    {a:'sibling', label:rmsTr('scAddSibling','Add sibling'), kbd:kb('addSibling'), off:isRoot},
+    {a:'edit', label:rmsTr('actEdit','Edit node'), kbd:kb('editNode'), off:!!(n.hr)},
+    {sep:true},
+    {a:'notes', label:hasNotes?rmsTr('actNotesEdit','Edit notes'):rmsTr('actNotesAdd','Add notes')},
+    {a:'marker', label:rmsTr('ctxSetMarker','Set marker…')},
+  ];
+  if(n.url) items.push({a:'open-href', label:rmsTr('actOpenHref','Open link')});
+  items.push(
+    {sep:true},
+    {a:'copymd', label:rmsTr('ctxCopyMd','Copy as Markdown')},
+    {a:'dup', label:rmsTr('ctxDuplicate','Duplicate subtree'), off:isRoot},
+  );
+  if(hasKids) items.push({a:'collapse', label:n.collapsed?rmsTr('ctxExpand','Expand'):rmsTr('ctxCollapse','Collapse'), kbd:kb('collapse')});
+  items.push({sep:true}, {a:'del', label:rmsTr('scDeleteNode','Delete node'), kbd:kb('deleteNode'), off:isRoot, danger:true});
+  return items;
+}
+function runNodeContextAction(a, id, anchor){
+  if(!map || !map.nodes[id]) return;
+  if(a==='child') addNode(id,false);
+  else if(a==='sibling') addNode(id,true);
+  else if(a==='edit') startEdit(id);
+  else if(a==='notes') showNotesEditor(id, { sticky:true });
+  else if(a==='marker') showMarkerPicker(anchor, id);
+  else if(a==='open-href') openNodeUrl(id);
+  else if(a==='copymd') copyNodeAsMarkdown(id);
+  else if(a==='dup') duplicateSubtree(id);
+  else if(a==='collapse'){
+    const n=map.nodes[id];
+    n.collapsed=!n.collapsed;
+    opLog(n.collapsed?'collapse':'expand', {id});
+    pushHistory(); autoLayout();
+  }
+  else if(a==='del') deleteNode(id);
+}
+function showNodeContextMenu(ev, id){
+  closeNodeContextMenu();
+  closeNodeHrefMenu();
+  if(sel!==id || (multiSel && multiSel.size)){
+    if(multiSel && multiSel.size && typeof clearMultiSelect==='function') clearMultiSelect();
+    select(id);
+  }
+  const nodeEl=document.querySelector(`.node[data-id="${CSS.escape(id)}"]`);
+  const p=document.createElement('div');
+  p.className='rms-ctx node-menu';
+  p.setAttribute('role','menu');
+  p.style.left=((ev && ev.clientX) || 8)+'px';
+  p.style.top=((ev && ev.clientY) || 8)+'px';
+  p.innerHTML=nodeContextMenuItems(id).map(it=>it.sep
+    ? '<div class="rms-ctx-sep" role="separator"></div>'
+    : `<button type="button" role="menuitem" data-a="${it.a}"${it.off?' disabled':''}${it.danger?' class="danger"':''}><span>${escapeHtml(it.label)}</span>${it.kbd?`<kbd>${escapeHtml(it.kbd)}</kbd>`:''}</button>`
+  ).join('');
+  document.body.appendChild(p);
+  const r=p.getBoundingClientRect();
+  if(r.right>innerWidth-8) p.style.left=Math.max(8, innerWidth-r.width-8)+'px';
+  if(r.bottom>innerHeight-8) p.style.top=Math.max(8, innerHeight-r.height-8)+'px';
+  const buttons=[...p.querySelectorAll('button:not([disabled])')];
+  let off=null;
+  const close=()=>{
+    p.remove();
+    if(off) document.removeEventListener('mousedown', off, true);
+  };
+  p.addEventListener('mousedown', e=>{ e.stopPropagation(); if(e.target.closest('button')) e.preventDefault(); });
+  p.addEventListener('click', e=>{
+    const b=e.target.closest('button[data-a]');
+    if(!b || b.disabled) return;
+    e.stopPropagation();
+    close();
+    runNodeContextAction(b.dataset.a, id, nodeEl && nodeEl.isConnected ? nodeEl : b);
+  });
+  // Keyboard: ↑/↓/Home/End move, Enter/Space run (native button), Esc closes.
+  p.addEventListener('keydown', e=>{
+    const i=buttons.indexOf(document.activeElement);
+    const go=j=>{ if(buttons.length){ buttons[(j+buttons.length)%buttons.length].focus(); } };
+    if(e.key==='ArrowDown'){ go(i+1); }
+    else if(e.key==='ArrowUp'){ go(i<0 ? buttons.length-1 : i-1); }
+    else if(e.key==='Home'){ go(0); }
+    else if(e.key==='End'){ go(buttons.length-1); }
+    else if(e.key==='Escape' || e.key==='Tab'){ close(); }
+    else if(e.key!=='Enter' && e.key!==' ') return;
+    if(e.key!=='Enter' && e.key!==' ') e.preventDefault();
+    e.stopPropagation();
+  });
+  if(buttons.length) buttons[0].focus({preventScroll:true});
+  setTimeout(()=>{
+    off=e=>{ if(!p.contains(e.target)) close(); };
+    if(p.isConnected) document.addEventListener('mousedown', off, true);
+  },0);
+}
+function onNodeContextMenu(e){
+  if(typeof READONLY!=='undefined' && READONLY){
+    const hid=nodeHrefContextId(e && e.target);
+    if(hid){ if(e.stopPropagation) e.stopPropagation(); showNodeHrefMenu(e, hid); }
+    return;
+  }
+  const id=nodeContextId(e && e.target);
   if(!id) return;
   if(e.stopPropagation) e.stopPropagation();
-  showNodeHrefMenu(e, id);
+  showNodeContextMenu(e, id);
 }
 function isRmsWk(){
   return !!(typeof document!=='undefined' && document.documentElement
@@ -4373,6 +4728,82 @@ function formatCitation(c){
 // Import / manage layout presets. Shows the current map's layout as JSON so a
 // user can copy it, tweak it, and paste it back as a new preset — which is the
 // realistic way anyone produces one of these.
+// Shared by the JSON import dialog and the shipped presets: validate, refuse a
+// built-in id, save on this device (re-importing replaces). {preset} or {error}.
+function importLayoutPreset(parsed){
+  const preset = validateLayoutPreset(parsed);
+  if(!preset){
+    return {error:'Not a usable layout. It needs an "id" (letters, digits and dashes), '
+      + 'a "name", and an "engine" that is one of: ' + LAYOUT_ENGINES.join(', ') + '.'};
+  }
+  if(BUILTIN_LAYOUTS.some(b=>b.id===preset.id)){
+    return {error:`"${preset.id}" is a built-in layout name \u2014 please choose another id.`};
+  }
+  const list = loadCustomLayouts().filter(c=>c.id!==preset.id);   // re-importing replaces
+  list.push(preset);
+  if(!saveCustomLayouts(list)) return {error:'Could not save \u2014 this browser\u2019s storage may be full.'};
+  return {preset};
+}
+// The layout presets shipped in public/layouts/ (listed by index.json). Loaded
+// the first time the layout picker opens, then cached for the session.
+let _shippedLayouts=null;
+function loadShippedLayouts(){
+  if(_shippedLayouts) return _shippedLayouts;
+  const get=path=>fetch(path, {cache:'no-cache'}).then(r=>{ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); });
+  _shippedLayouts=get('layouts/index.json').then(idx=>{
+    const files=(idx && Array.isArray(idx.files) ? idx.files : []).filter(f=>/^[a-z0-9-]+\.json$/i.test(f));
+    return Promise.all(files.map(f=>get('layouts/'+f).catch(()=>null)));
+  }).then(list=>list.filter(raw=>raw && validateLayoutPreset(raw)))
+    .catch(e=>{ _shippedLayouts=null; throw e; });
+  return _shippedLayouts;
+}
+// Presets reuse the thumbnail of the layout family they tune.
+function layoutThumbId(raw){
+  if(!raw) return '';
+  if(raw.engine) return raw.engine;
+  const p=raw.params||{};
+  return ({tree: p.axis==='y' ? 'down' : (p.dir===-1 ? 'left' : 'right'), chain:'timeline', radial:'radial', grid:'grid'})[raw.strategy] || raw.id;
+}
+function fillLayoutPresetRow(panel, curLayout){
+  const row=panel && panel.querySelector('.tp-preset-row');
+  if(!row) return;
+  const importTile=`<button class="theme-opt tp-import" data-cat="layout-import" title="${escapeHtml(rmsTr('layoutImportTitle','Paste a layout as JSON'))}">
+      <span class="style-thumb tp-import-thumb">\uFF0B</span><span class="theme-name">${escapeHtml(rmsTr('layoutImport','Import\u2026'))}</span>
+    </button>`;
+  const wire=()=>{
+    const imp=row.querySelector('.tp-import');
+    if(imp) imp.onclick=ev=>{ ev.stopPropagation(); closeThemePanel(); showLayoutImportForm(); };
+  };
+  loadShippedLayouts().then(list=>{
+    if(!row.isConnected) return;
+    const ids=new Set(list.map(raw=>raw.id));
+    // A preset imported earlier would otherwise show twice.
+    panel.querySelectorAll('.theme-opt[data-cat="layout"]').forEach(o=>{ if(ids.has(o.dataset.id)) o.remove(); });
+    row.innerHTML=list.map(raw=>`
+      <button class="theme-opt${raw.id===curLayout?' active':''}" data-cat="layout-preset" data-id="${escapeHtml(raw.id)}" title="${escapeHtml(raw.desc||'')}">
+        ${buildLayoutThumb(layoutThumbId(raw))}<span class="theme-name">${escapeHtml(raw.name)}</span>
+      </button>`).join('')+importTile;
+    row.querySelectorAll('.theme-opt[data-cat="layout-preset"]').forEach((opt,i)=>{
+      opt.onclick=ev=>{
+        ev.stopPropagation();
+        if(!map || READONLY) return;
+        const res=importLayoutPreset(list[i]);
+        if(res.error){ toast(res.error, 6000); return; }
+        applyMapLayout(res.preset.id);
+        panel.querySelectorAll('.theme-opt[data-cat="layout"], .theme-opt[data-cat="layout-preset"]').forEach(o=>o.classList.remove('active'));
+        opt.classList.add('active');
+      };
+    });
+    wire();
+    const act=row.querySelector('.theme-opt.active');
+    if(act) act.scrollIntoView({block:'nearest', inline:'nearest'});
+    row.dispatchEvent(new Event('scroll'));
+  }).catch(()=>{
+    if(!row.isConnected) return;
+    row.innerHTML=`<span class="tp-hint tp-preset-msg">${escapeHtml(rmsTr('layoutPresetsFailed','Could not load the presets'))}</span>`+importTile;
+    wire();
+  });
+}
 function showLayoutImportForm(){
   document.querySelectorAll('.var-form').forEach(p=>p.remove());
   const cur = map ? (findLayout(map.layoutPreset || map.layout) || BUILTIN_LAYOUTS[0]) : BUILTIN_LAYOUTS[0];
@@ -4415,17 +4846,9 @@ function showLayoutImportForm(){
     let parsed;
     try{ parsed = JSON.parse(ta.value); }
     catch(e){ return fail('Not valid JSON: '+e.message); }
-    const preset = validateLayoutPreset(parsed);
-    if(!preset){
-      return fail('Not a usable layout. It needs an "id" (letters, digits and dashes), '
-        + 'a "name", and an "engine" that is one of: ' + LAYOUT_ENGINES.join(', ') + '.');
-    }
-    if(BUILTIN_LAYOUTS.some(b=>b.id===preset.id)){
-      return fail(`"${preset.id}" is a built-in layout name — please choose another id.`);
-    }
-    const list = loadCustomLayouts().filter(c=>c.id!==preset.id);   // re-importing replaces
-    list.push(preset);
-    if(!saveCustomLayouts(list)) return fail('Could not save — this browser\u2019s storage may be full.');
+    const res = importLayoutPreset(parsed);
+    if(res.error) return fail(res.error);
+    const preset = res.preset;
     close(); toast(`Layout \u201c${preset.name}\u201d imported`);
     try{ $('#themeBtn').click(); }catch(_){}   // reopen so the new entry is visible
   };
@@ -4991,7 +5414,7 @@ async function searchAllMaps(query, isStale){
         const src=plain.includes(q)?nodeTextPlain(n.text||''):notes.includes(q)?(n.notes||'').replace(/<[^>]*>/g,' '):(n.url||'');
         const at=src.toLowerCase().indexOf(q);
         const snippet=(at>30?'…':'')+src.slice(Math.max(0,at-30), at+q.length+40).trim()+'…';
-        results.push({ mapId:m.id, mapTitle:m.title||'Untitled', nodeId:n.id, snippet });
+        results.push({ mapId:m.id, mapTitle:m.title||rmsTr('untitled','Untitled map'), nodeId:n.id, snippet });
         if(results.length>=200) return results;
       }
     }
@@ -5319,8 +5742,34 @@ function chordTitle(nameKey, chordId, fallback){
   const chord=(typeof window!=='undefined' && window.rmsChordLabel && chordId) ? window.rmsChordLabel(chordId) : '';
   return chord ? name+' ('+chord+')' : name;
 }
+// Bottom tips bar: keys come from the current (rebindable) chords.
+function hintBarHtml(){
+  const tpl=rmsTr('hintTpl', '<b>⌘+drag</b> box-select · <b>drag</b> move / nest / reorder · <b>{child}</b> child · <b>{sibling}</b> sibling · <b>↑↓←→</b> navigate · <b>{edit}</b>/dbl-click edit · <b>{link}</b> link · <b>{del}</b> remove · <b>{help}</b> all shortcuts');
+  const kb=(id, def)=>{
+    const label=(typeof window!=='undefined' && window.rmsChordLabel) ? window.rmsChordLabel(id) : '';
+    return escapeHtml(label || def);
+  };
+  let html=tpl
+    .replace('{child}', kb('addChild','Tab'))
+    .replace('{sibling}', kb('addSibling','Enter'))
+    .replace('{edit}', kb('editNode','F2'))
+    .replace('{link}', kb('link','L'))
+    .replace('{del}', kb('deleteNode','Del'))
+    .replace('{help}', kb('help','?').replace(/^⇧ \/$/, '?'));
+  const native=(typeof window!=='undefined' && window.__RMS_NATIVE__) || null;
+  if(native && native.toggleDisplay){
+    html+=rmsTr('hintToggle',' · <b>{toggle}</b> show / hide').replace('{toggle}', escapeHtml(native.toggleDisplay));
+  }
+  return html;
+}
+function renderHintBar(){
+  const box=document.getElementById('hintText');
+  if(box) box.innerHTML=hintBarHtml();
+}
+if(typeof window!=='undefined') window.rmsRenderHint=renderHintBar;
 function refreshLocaleChrome(){
   if(typeof window.rmsApplyI18n==='function') window.rmsApplyI18n();
+  renderHintBar();
   const save=$('#saveText');
   if(save) updateMapSaveStatus();
   if(typeof sel!=='undefined' && sel && typeof positionNodeBar==='function') positionNodeBar();
@@ -5871,7 +6320,14 @@ function onEditorClipboardKeydown(e){
   // event; WKWebView then has nowhere to write. The copy/cut listeners
   // write clipboardData, which does not need navigator.clipboard.
   if(act === 'selectAll'){
-    if(!textEl) return;
+    // A prepared-but-untouched WK typing host is not an open editor.
+    if(!textEl || (typeof pendingNodeTyping==='function' && pendingNodeTyping())){
+      if(typeof selectAllNodesOnCanvas==='function' && selectAllNodesOnCanvas()){
+        e.preventDefault();
+        e.stopPropagation();
+      }
+      return;
+    }
     e.preventDefault();
     e.stopPropagation();
     selectEditorContents(textEl);
@@ -5888,11 +6344,16 @@ function onEditorClipboardKeydown(e){
 }
 function editorClipboardPayload(textEl){
   if(textEl){
+    if(typeof rememberNodeClip==='function') rememberNodeClip(null);
     return editorCopyPayload({
       selectedText: editorSelectedText(textEl),
       allText: textEl.value != null && textEl.tagName === 'TEXTAREA' ? textEl.value : (textEl.textContent || ''),
       selectAllPending: peekEditReplaceAll()
     });
+  }
+  if(typeof nodeSelectionClipboard==='function'){
+    const c=nodeSelectionClipboard();
+    if(c.text) return c.text;
   }
   if(typeof selectionMarkdownPayload==='function'){
     const md=selectionMarkdownPayload();
@@ -5910,6 +6371,10 @@ function onEditorCopyCut(e, isCut){
   if(!payload) return;
   if(e.clipboardData){
     try{ e.clipboardData.setData('text/plain', payload); }catch(_){}
+    if(!textEl && typeof lastNodeClipFor==='function'){
+      const clip=lastNodeClipFor(payload);
+      if(clip) try{ e.clipboardData.setData(NODE_CLIP_MIME, JSON.stringify(clip)); }catch(_){}
+    }
     e.preventDefault();
   } else {
     writeClipboardText(payload);
@@ -5948,6 +6413,11 @@ function onEditorPaste(e){
     return;
   }
   if(typeof sel === 'undefined' || !sel || typeof map === 'undefined' || !map || !map.nodes || !map.nodes[sel]) return;
+  if(typeof pasteNodesAsChildren === 'function'){
+    let clip=null;
+    try{ const raw=dt && dt.getData ? dt.getData(NODE_CLIP_MIME) : ''; if(raw) clip=JSON.parse(raw); }catch(_){ clip=null; }
+    if(pasteNodesAsChildren(text, clip)){ e.preventDefault(); return; }
+  }
   if(map.nodes[sel].hr || map.nodes[sel].html) return;
   e.preventDefault();
   if(typeof startEdit === 'function'){
@@ -5972,6 +6442,7 @@ function rmsClipboardCopy(){
   if(valueField) return fieldSelectedText(valueField);
   const target = openClipboardTarget();
   if(target){
+    if(typeof rememberNodeClip==='function') rememberNodeClip(null);
     const inNotes = !!(target.closest && target.closest('.notes-popup'));
     const selected = editorSelectedText(target);
     return editorCopyPayload({
@@ -5979,6 +6450,10 @@ function rmsClipboardCopy(){
       allText: target.textContent || '',
       selectAllPending: inNotes ? !selected : peekEditReplaceAll()
     }) || '';
+  }
+  if(typeof nodeSelectionClipboard==='function' && typeof multiSel!=='undefined' && multiSel && multiSel.size>=2){
+    const c=nodeSelectionClipboard();
+    if(c.text) return c.text;
   }
   if(typeof selectionMarkdownPayload==='function'){
     const md=selectionMarkdownPayload();
@@ -6065,6 +6540,7 @@ function rmsClipboardPaste(text){
     return true;
   }
   if(typeof sel === 'undefined' || !sel || typeof map === 'undefined' || !map || !map.nodes || !map.nodes[sel]) return false;
+  if(typeof pasteNodesAsChildren === 'function' && pasteNodesAsChildren(str, null)) return true;
   if(map.nodes[sel].hr || map.nodes[sel].html) return false;
   if(typeof startEdit === 'function'){
     startEdit(sel);
@@ -6094,7 +6570,7 @@ function rmsClipboardSelectAll(){
     return true;
   }
   const textEl = openClipboardTarget();
-  if(!textEl) return false;
+  if(!textEl) return typeof selectAllNodesOnCanvas==='function' ? selectAllNodesOnCanvas() : false;
   selectEditorContents(textEl);
   return true;
 }
@@ -6274,6 +6750,8 @@ function startEdit(id){
   const textEl=el.querySelector('.node-text')||el;
   const prepared=pendingNodeTyping() && _editFloat.dataset.nodeId===id;
   const raw = map.nodes[id]?.text || '';
+  // ⇧Esc puts these back: the text as it was when editing began.
+  const orig = map.nodes[id] ? { text:map.nodes[id].text, image:map.nodes[id].image, imageAlt:map.nodes[id].imageAlt, updated:map.nodes[id].updated } : null;
   // Preserve any inline formatting (bold/italic/etc.) for the user to edit
   if(INLINE_HTML_RE.test(raw)) textEl.innerHTML = sanitizeInlineHTML(raw);
   else textEl.textContent = raw;
@@ -6397,8 +6875,22 @@ function startEdit(id){
     }
     if(e.key==='Escape'){
       if(!shouldCommitEditOnEscape(e)) return;
-      e.preventDefault();e.stopPropagation();finish(true);host.blur();
+      e.preventDefault();e.stopPropagation();
+      if(e.shiftKey) cancelEdit(); else finish(true);
+      host.blur();
     }
+  };
+  // ⇧Esc: leave the editor and restore the text from before this edit.
+  const cancelEdit=()=>{
+    const n=map.nodes[id];
+    const changed=!!(n && orig && (n.text!==orig.text || n.image!==orig.image));
+    if(n && orig){
+      n.text=orig.text;
+      for(const k of ['image','imageAlt','updated']){ if(orig[k]===undefined) delete n[k]; else n[k]=orig[k]; }
+    }
+    finish(false);
+    opLog('editCancel', {id});
+    if(changed){ syncAutoTitleFromRoot(id); pushHistory(); }
   };
   const onPointer=()=>{ clearEditReplaceAll(); };
   host.addEventListener('mousedown', onPointer);
@@ -6414,6 +6906,20 @@ function startEdit(id){
 const FONT_SIZES = [12,14,15,16,18,20,24,28,32];
 const TEXT_COLORS = ['#23201b','#5b5447','#b8451f','#c98a1a','#5a7d3a','#2f6f6a','#3a6ea5','#9b4f96'];
 const HILITES = ['#fff59d','#ffcdd2','#c8e6c9','#b3e5fc','#e1bee7','#ffe0b2'];
+function themeCssColor(name){
+  try{ return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }catch(_){ return ''; }
+}
+// Dark theme = the node card background is dark (#23201b ink would vanish on it).
+function isDarkNodeTheme(){
+  const bg=themeCssColor('--node-bg');
+  return /^#[0-9a-f]{6}$/i.test(bg) && pickContrast(bg)==='#ffffff';
+}
+// On dark themes the first ("ink") swatch is the theme's own node ink.
+function textColorSwatches(){
+  if(!isDarkNodeTheme()) return TEXT_COLORS;
+  const ink=safeColor(themeCssColor('--node-ink'));
+  return ink ? [ink].concat(TEXT_COLORS.slice(1)) : TEXT_COLORS;
+}
 let activePicker = null;
 
 function showPicker(anchor, kind, current, onPick){
@@ -6438,7 +6944,7 @@ function showPicker(anchor, kind, current, onPick){
     p.innerHTML=opts.map(o=>
       `<button data-v="${o.v}" class="${o.v===current?'on':''}" title="${o.t}"><span class="align-icon align-${o.v}">${o.ic}</span></button>`).join('');
   }else{
-    const list = kind==='text' ? TEXT_COLORS : HILITES;
+    const list = kind==='text' ? textColorSwatches() : HILITES;
     const label = kind==='text' ? rmsTr('actDefault','Default') : rmsTr('actNone','None');
     p.innerHTML =
       `<button class="p-default" data-v="">${label}</button>`+
@@ -6560,8 +7066,9 @@ function positionNodeBar(){
   const isRoot=sel===map.rootId;
   const hasKids=childrenOf(sel).length>0;
   const fs = n.fontSize || (isRoot?19:15);
-  const tc = safeColor(n.textColor) || (isRoot?'#ffffff':'#23201b');
+  const tc = safeColor(n.textColor) || (isRoot?'#ffffff':'var(--node-ink)');
   const hl = safeColor(n.highlight) || 'transparent';
+  const hlInk = hl==='transparent' ? 'inherit' : (safeColor(n.textColor) || '#23201b');
 
   const bar=document.createElement('div'); bar.className='nodebar'; bar.id='nodebar';
   bar.innerHTML=`
@@ -6590,7 +7097,7 @@ function positionNodeBar(){
       <button data-a="ol" class="${n.listType==='ol'?'on':''}" title="${rmsTr('actOl','Numbered list')}">1≡</button>
       <button data-a="align" class="fmt-btn align-btn" title="${rmsTr('actAlign','Text alignment')}"><span class="align-icon align-${n.align||'center'}">≡</span><span class="caret">▾</span></button>
       <button data-a="textColor" class="fmt-btn color-btn" title="${rmsTr('actTextColor','Text color')}"><span class="A-mark" style="border-bottom:3px solid ${tc}">A</span><span class="caret">▾</span></button>
-      <button data-a="highlight" class="fmt-btn color-btn" title="${rmsTr('actHighlight','Highlight')}"><span class="A-mark" style="background:${hl};padding:0 2px;border-radius:2px">A</span><span class="caret">▾</span></button>
+      <button data-a="highlight" class="fmt-btn color-btn" title="${rmsTr('actHighlight','Highlight')}"><span class="A-mark" style="background:${hl};color:${hlInk};padding:0 2px;border-radius:2px">A</span><span class="caret">▾</span></button>
     </div>
     <div class="nb-div"></div>
     <span class="swatches" title="${rmsTr('actCardColor','Card color')}">${(isRoot?PALETTE:NODE_COLORS).map(c=>`<span class="sw" data-c="${c}" style="background:${c};${c==='#ffffff'?'border-color:var(--line)':''}"></span>`).join('')}</span>`;
@@ -7670,6 +8177,10 @@ window.addEventListener('keydown',e=>{
     if(multiSel.size){ e.preventDefault(); clearMultiSelect(); return; }
   }
   if(!sel||!map) return;
+  if((e.metaKey||e.ctrlKey) && e.shiftKey && !e.altKey && (e.code==='KeyA' || (e.key||'').toLowerCase()==='a')){
+    if(selectSiblingsOnCanvas()) e.preventDefault();
+    return;
+  }
   if(rms('addChild', e, e.key==='Tab' && !e.metaKey && !e.ctrlKey && !e.altKey)){e.preventDefault();addNode(sel,false);}
   else if(rms('addSibling', e, e.key==='Enter' && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey)
        || rms('addSiblingMod', e, e.key==='Enter' && (e.metaKey||e.ctrlKey) && !e.shiftKey && !e.altKey)){
@@ -8121,7 +8632,7 @@ function updateBreadcrumb(){
   if(path.length<=1){ bc.style.display='none'; return; }   // nothing to show at the root
   bc.style.display='flex';
   bc.innerHTML=path.map((id,i)=>{
-    const label=nodeTextPlain(map.nodes[id].text||'')||'(untitled)';
+    const label=nodeTextPlain(map.nodes[id].text||'')||rmsTr('untitledNode','(untitled)');
     const short=label.length>22 ? label.slice(0,22)+'…' : label;
     const crumb=`<button class="bc-crumb${id===sel?' current':''}" data-id="${escapeHtml(String(id))}" title="${escapeHtml(label)}">${escapeHtml(short)}</button>`;
     return crumb + (i<path.length-1 ? '<span class="bc-sep">›</span>' : '');
@@ -8551,7 +9062,7 @@ async function duplicateMap(id){
   if(!src){ toast('Could not duplicate'); return; }
   const copy = JSON.parse(JSON.stringify(src));
   copy.id = uid();
-  copy.title = (src.title||'Untitled') + ' (copy)';
+  copy.title = (src.title||rmsTr('untitled','Untitled map')) + rmsTr('copySuffix',' (copy)');
   copy.titleAuto = false;
   copy.updated = Date.now();
   await saveMapNow(copy);
@@ -8707,7 +9218,7 @@ function createMap(){
   ++_mapLoadGeneration;
   resetMapViewState();
   const id=uid(); const rid=uid();
-  const rootText='Central Idea';
+  const rootText=rmsTr('centralIdea','Central Idea');
   const m={id,title:rootText,titleAuto:true,color:PALETTE[Math.floor(Math.random()*PALETTE.length)],rootId:rid,
     nodes:{[rid]:{id:rid,text:rootText,parent:null,x:0,y:0,side:'root',color:'#fff'}}};
   // Show it immediately — never wait on the network to render the UI.
@@ -8814,6 +9325,8 @@ function updateMapSaveStatus(){
   const state=map && _mapSaveStates.get(map.id);
   const busy=state==='saving'||state==='retrying';
   $('#savePill').classList.toggle('saving',busy);
+  $('#savePill').classList.toggle('failed',state==='failed'||state==='failed-terminal');
+  $('#savePill').classList.toggle('failed-terminal',state==='failed-terminal');
   const key=state==='failed-terminal' ? 'saveFailedTerminal' : state==='failed' ? 'saveFailed' : state==='retrying' ? 'saveRetrying' : busy ? 'saving' : 'saved';
   const fallback={saveFailedTerminal:'Save refused',saveFailed:'Save failed',saveRetrying:'Retrying…',saving:'Saving…',saved:'Saved'};
   $('#saveText').textContent=rmsTr(key,fallback[key]);
@@ -8910,7 +9423,7 @@ function exportMenu(){
     <button data-a="astemplate"><span class="ex-ic">⭐</span><span><b>Save as template</b><i>Reuse this structure for new maps</i></span></button>
     <button data-a="json"  ><span class="ex-ic">{}</span><span><b>JSON file</b><i>Full backup, re-importable</i></span></button>
     <div class="ex-grp">Import</div>
-    <button data-a="import"><span class="ex-ic">↑</span><span><b>Import file</b><i>JSON, OPML, or Markdown outline</i></span></button>`;
+    <button data-a="import"><span class="ex-ic">↑</span><span><b>Import file</b><i>${escapeHtml(rmsTr('importFileSub','JSON, OPML, Markdown, GitMind (.gmind), MindMeister (.mind)'))}</i></span></button>`;
   document.body.appendChild(pop);
   positionPopup(pop, $('#menuExport'), {align:'right'});
   pop.addEventListener('mousedown',e=>e.stopPropagation());
@@ -9291,7 +9804,7 @@ function presGo(i){
   const bar=document.querySelector('.pres-bar');
   if(bar){
     bar.querySelector('.pres-count').textContent=`${i+1} / ${_pres.order.length}`;
-    bar.querySelector('.pres-title').textContent=nodeTextPlain(map.nodes[id]?.text||'')||'(untitled)';
+    bar.querySelector('.pres-title').textContent=nodeTextPlain(map.nodes[id]?.text||'')||rmsTr('untitledNode','(untitled)');
     bar.querySelector('.pres-prev').disabled = i===0;
     bar.querySelector('.pres-next').disabled = i===_pres.order.length-1;
   }
@@ -10961,8 +11474,8 @@ function buildDoc(inlined){
 <meta charset="utf-8" />
 <title>${escapeHtml(title)}</title>
 <style>
-  body{font-family:Calibri,"Segoe UI",Arial,sans-serif;color:#23201b;line-height:1.55;max-width:780px;margin:24px auto;padding:0 24px}
-  h1{font-family:Cambria,Georgia,serif;color:#e0613a;margin:0 0 18px;font-size:26pt}
+  body{font-family:"PingFang SC",Calibri,"Segoe UI",Arial,sans-serif;color:#23201b;line-height:1.55;max-width:780px;margin:24px auto;padding:0 24px}
+  h1{font-family:"PingFang SC",Cambria,Georgia,serif;color:#e0613a;margin:0 0 18px;font-size:26pt}
   ul{margin:6px 0 6px 24px;padding-left:18px}
   li{margin:4px 0}
   em{font-style:italic;color:#6a6258}
@@ -11674,7 +12187,25 @@ function roundRect(ctx,x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+
 function download(blob,name){const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);}
 
 /* ---------- toast ---------- */
-let toastT;function toast(msg){const t=$('#toast');t.textContent=msg;t.classList.add('show');clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),2000);}
+// How long a toast stays up: long enough to read (about 50 ms a character,
+// 2–8 s), and at least 6 s for an error. An explicit `ms` wins.
+const TOAST_ERROR_RE=/fail|could not|couldn|error|refused|cannot|can't|not valid|失败|无法|错误|拒绝/i;
+function toastDuration(msg, ms){
+  if(typeof ms==='number' && isFinite(ms) && ms>0) return Math.max(1000, ms);
+  const len=String(msg==null?'':msg).length;
+  let d=Math.min(8000, Math.max(2000, len*50));
+  if(ms==='error' || (ms && ms.error) || TOAST_ERROR_RE.test(String(msg||''))) d=Math.max(d, 6000);
+  return d;
+}
+let toastT;
+function toast(msg, ms){
+  const t=$('#toast');
+  if(!t) return;
+  t.textContent=msg;
+  t.classList.add('show');
+  clearTimeout(toastT);
+  toastT=setTimeout(()=>t.classList.remove('show'), toastDuration(msg, ms));
+}
 
 function textEditContextTarget(target){
   if(!target || !target.closest) return null;
@@ -11790,7 +12321,7 @@ function suppressNativeContextMenu(e){
    WIRE UP
    ============================================================ */
 document.addEventListener('contextmenu', suppressNativeContextMenu, true);
-document.addEventListener('contextmenu', onNodeHrefContextMenu, true);
+document.addEventListener('contextmenu', onNodeContextMenu, true);
 $('#newMap').onclick=createMap;
 $('#newMapMenu')?.addEventListener('click', e => { e.stopPropagation(); showTemplatesMenu(); });
 $('#emptyNew').onclick=createMap;
@@ -12001,7 +12532,19 @@ if(window.matchMedia('(max-width: 720px)').matches){
     }
   });
 }
-$('#hintClose').onclick=()=>$('#hint').style.display='none';
+const HINT_DISMISSED_KEY='rms:hintDismissed';
+(function initHintBar(){
+  const hint=$('#hint');
+  if(!hint) return;
+  let dismissed=false;
+  try{ dismissed=localStorage.getItem(HINT_DISMISSED_KEY)==='1'; }catch(_){}
+  if(dismissed){ hint.style.display='none'; return; }
+  renderHintBar();
+  $('#hintClose').onclick=()=>{
+    hint.style.display='none';
+    try{ localStorage.setItem(HINT_DISMISSED_KEY, '1'); }catch(_){}
+  };
+})();
 
 /* ---------- UI scale (whole-interface zoom, persisted) ---------- */
 // Auto scale by viewport size, continuous rather than stepped: interpolates
@@ -12486,10 +13029,14 @@ $('#themeBtn').onclick=(e)=>{
       </div>
       <div class="tp-grid tp-scroll-row">
         ${allLayouts().map(l=>`
-          <button class="theme-opt${l.id===curLayout?' active':''}" data-cat="layout" data-id="${l.id}" title="${l.desc}">
-            ${buildLayoutThumb(l.id)}<span class="theme-name">${l.name}</span>
+          <button class="theme-opt${l.id===curLayout?' active':''}" data-cat="layout" data-id="${escapeHtml(l.id)}" title="${escapeHtml(l.desc||'')}">
+            ${buildLayoutThumb(l.id)}<span class="theme-name">${escapeHtml(l.name)}</span>
           </button>`).join('')}
       </div>
+    </div>
+    <div class="tp-section">
+      <div class="tp-label">${rmsTr('themeLayoutPresets','Layout presets')}</div>
+      <div class="tp-grid tp-scroll-row tp-preset-row"><span class="tp-hint tp-preset-msg">${rmsTr('layoutPresetsLoading','Loading\u2026')}</span></div>
     </div>
     <div class="tp-section">
       <div class="tp-label">${rmsTr('themeSize','Display size')} <span class="tp-hint">${rmsTr('themeSizeHint','scales the whole interface')}</span></div>
@@ -12514,6 +13061,7 @@ $('#themeBtn').onclick=(e)=>{
   // through the category dispatch below.
   const cog = themePanel.querySelector('.tp-cog');
   if(cog) cog.onclick = ev => { ev.stopPropagation(); closeThemePanel(); showLayoutConfigForm(); };
+  fillLayoutPresetRow(themePanel, curLayout);
 
   themePanel.querySelectorAll('.tp-scroll-row').forEach(row=>{
     const sync=()=>{
@@ -12553,7 +13101,8 @@ $('#themeBtn').onclick=(e)=>{
       // its own category rather than sharing 'theme' — but scoping by
       // data-cat across the whole panel is the more general, robust
       // approach regardless of how many sections a category happens to span.
-      themePanel.querySelectorAll(`.theme-opt[data-cat="${cat}"]`).forEach(o=>o.classList.remove('active'));
+      const sameCat = cat==='layout' ? '.theme-opt[data-cat="layout"], .theme-opt[data-cat="layout-preset"]' : `.theme-opt[data-cat="${cat}"]`;
+      themePanel.querySelectorAll(sameCat).forEach(o=>o.classList.remove('active'));
       opt.classList.add('active');
     };
   });
@@ -12630,57 +13179,81 @@ function toggleFocusMode(){
 $('#focusBtn')?.addEventListener('click', toggleFocusMode);
 
 // ===== Keyboard shortcuts help — press '?' to open =====
+// Key column for rebindable actions comes from the current chord (Settings).
+function helpChordLabel(id, fallback){
+  const label=(typeof window!=='undefined' && window.rmsChordLabel && id) ? window.rmsChordLabel(id) : '';
+  if(id==='help' && (!label || label==='⇧ /')) return '?';
+  return label || fallback;
+}
+function keyboardHelpRows(tr){
+  const ch=helpChordLabel;
+  const or=(...xs)=>xs.filter(Boolean).join(' / ');
+  return [
+    [tr('kbBuilding','Building the map'),[
+      [ch('addChild','Tab'),              tr('kbAddChild','Add a child node')],
+      [ch('addSibling','Enter'),          tr('kbAddSibling','Add a sibling node')],
+      [ch('addSiblingMod','⌘ ↩'),         tr('kbAddSiblingMod','Add a sibling node')],
+      [ch('moveSiblingUp','⌥ ↑')+' / '+ch('moveSiblingDown','⌥ ↓'), tr('kbMoveSibling','Move / swap sibling node up / down')],
+      [ch('moveSiblingUpAlt','⇧ ⌘ ↑')+' / '+ch('moveSiblingDownAlt','⇧ ⌘ ↓'), tr('kbMoveSiblingAlt','Same, if Option is taken by the OS')],
+      [or(ch('editNode','F2'), tr('kbGDblClick','double-click')), tr('kbEdit','Edit the selected node')],
+      [or(ch('deleteNode','⌫'), ch('deleteForward','⌦')), tr('kbRemove','Remove the selected node')],
+      [ch('collapse','Space'),            tr('kbCollapse','Collapse / expand')],
+      [ch('link','L'),                    tr('kbLink','Cross-link to another node')],
+      ['⌘ C',                             tr('kbCopyMd','Copy the selected topic(s) as a Markdown outline')],
+      ['⌘ V',                             tr('kbPasteChildren','Paste a copied subtree or an outline as children')],
+      ['⌘ A',                             tr('kbSelectAll','Select every visible topic')],
+      ['⇧ ⌘ A',                           tr('kbSelectSiblings','Select the topic and its siblings')],
+      [tr('kbGRightClick','right-click a topic'), tr('kbNodeMenu','Topic menu: add, notes, marker, duplicate…')],
+      [tr('kbGDrag','drag'),              tr('kbDrag','Move a topic (subtree follows)')],
+      [tr('kbGDragCentre','drag onto centre'), tr('kbNest','Nest it as a child of that topic')],
+      [tr('kbGDragEdge','drag onto top / bottom'), tr('kbReorder','Insert as a sibling / reorder')],
+      [tr('kbGBoxSel','⌘ + drag canvas'), tr('kbBox','Box-select topics')],
+      [tr('kbGCmdClick','⌘ + click'),     tr('kbMulti','Add / remove a topic from the selection')],
+      [tr('kbGDragSel','drag a selection'), tr('kbDragSel','Move the selected topics together')],
+    ]],
+    [tr('kbNav','Navigation'),[
+      ['↑ ↓ ← →',                         tr('kbArrows','Move selection between nodes')],
+      [tr('kbGScroll','scroll'),          tr('kbScroll','Zoom canvas (mouse) / two-finger pinch (touch)')],
+      [tr('kbGDragCanvas','drag canvas'), tr('kbPan','Pan the map')],
+    ]],
+    [tr('kbEditing','Editing text'),[
+      ['⌘ B / I / U',                     tr('kbFormat','Bold / italic / underline the selection')],
+      [tr('kbGListBtn','select + UL/OL button'), tr('kbLists','Make each selected line a bullet')],
+      ['Tab',                             tr('kbSaveChild','Save and add a child node')],
+      ['↩',                               tr('kbSaveSibling','Save and add a sibling node')],
+      ['⇧ ↩',                             tr('kbNewline','Newline within the node text')],
+      ['Esc',                             tr('kbEsc','Save the edit / close a popup')],
+      ['⇧ Esc',                           tr('kbCancelEdit','Discard the edit and restore the text')],
+    ]],
+    [tr('kbToolsGroup','Find & tools'),[
+      [ch('find','⌘ F'),                  tr('kbFind','Find in this map')],
+      [ch('findReplace','⌘ H'),           tr('kbFindReplace','Find and replace')],
+      [ch('openSettings','⌘ ,'),          tr('kbSettings','Open settings')],
+      [ch('help','?'),                    tr('kbHelp','Show this list')],
+    ]],
+    [tr('kbHistory','History'),[
+      [ch('undo','⌘ Z'),                  tr('kbUndo','Undo')],
+      [ch('redo','⇧ ⌘ Z'),                tr('kbRedo','Redo')],
+    ]]
+  ];
+}
 function showKeyboardHelp(){
   document.querySelectorAll('.kb-help').forEach(m=>m.remove());
   const m = document.createElement('div');
   m.className = 'kb-help';
-  const tr = (k, fallback) => (window.rmsT ? window.rmsT(k) : fallback);
-  const shortcuts = [
-    [tr('kbBuilding','Building the map'),[
-      ['Tab',            tr('kbAddChild','Add a child node')],
-      ['Enter',          tr('kbAddSibling','Add a sibling node')],
-      ['Ctrl/⌘ + Enter', tr('kbAddSiblingMod','Add a sibling node')],
-      ['Alt + ↑ / ↓',    tr('kbMoveSibling','Move / swap sibling node up / down')],
-      ['Ctrl/⌘ + Shift + ↑ / ↓', tr('kbMoveSiblingAlt','Same, if Option is taken by the OS')],
-      ['F2 / double-click', tr('kbEdit','Edit the selected node')],
-      ['Delete',         tr('kbRemove','Remove the selected node')],
-      ['Space',          tr('kbCollapse','Collapse / expand')],
-      ['L',              tr('kbLink','Cross-link to another node')],
-      ['drag',           tr('kbDrag','Move a topic (subtree follows)')],
-      ['drag onto centre', tr('kbNest','Nest it as a child of that topic')],
-      ['drag onto top / bottom', tr('kbReorder','Insert as a sibling / reorder')],
-      ['⌘/Ctrl + drag canvas', tr('kbBox','Box-select topics')],
-      ['⌘/Ctrl + click', tr('kbMulti','Add / remove a topic from the selection')],
-      ['drag a selection', tr('kbDragSel','Move the selected topics together')],
-    ]],
-    [tr('kbNav','Navigation'),[
-      ['↑ ↓ ← →',        tr('kbArrows','Move selection between nodes')],
-      ['scroll',         tr('kbScroll','Zoom canvas (mouse) / two-finger pinch (touch)')],
-      ['drag canvas',    tr('kbPan','Pan the map')],
-    ]],
-    [tr('kbEditing','Editing text'),[
-      ['Ctrl/⌘ + B / I / U', tr('kbFormat','Bold / italic / underline the selection')],
-      ['select + UL/OL btn', tr('kbLists','Make each selected line a bullet')],
-      ['Tab',            tr('kbSaveChild','Save and add a child node')],
-      ['Enter',          tr('kbSaveSibling','Save and add a sibling node')],
-      ['Shift + Enter',  tr('kbNewline','Newline within the node text')],
-      ['Esc',            tr('kbEsc','Save the edit / close a popup')],
-    ]],
-    [tr('kbHistory','History'),[
-      ['Ctrl/⌘ + Z',     tr('kbUndo','Undo')],
-      ['Ctrl/⌘ + Shift + Z',  tr('kbRedo','Redo')],
-    ]]
-  ];
+  const tr = (k, fallback) => rmsTr(k, fallback);
+  const shortcuts = keyboardHelpRows(tr);
   const renderTable = group => `
-    <h3>${group[0]}</h3>
-    <table>${group[1].map(r=>`<tr><td><kbd>${r[0]}</kbd></td><td>${r[1]}</td></tr>`).join('')}</table>`;
+    <h3>${escapeHtml(group[0])}</h3>
+    <table>${group[1].map(r=>`<tr><td><kbd>${escapeHtml(r[0])}</kbd></td><td>${escapeHtml(r[1])}</td></tr>`).join('')}</table>`;
+  const helpKey = escapeHtml(helpChordLabel('help','?'));
   m.innerHTML = `
     <div class="kb-backdrop"></div>
     <div class="kb-card">
       <button class="kb-close" aria-label="${tr('close','Close')}">×</button>
       <h2>${tr('kbTitle','Keyboard shortcuts')}</h2>
       <div class="kb-grid">${shortcuts.map(renderTable).join('')}</div>
-      <p class="kb-foot">${tr('kbFootHtml','Press <kbd>?</kbd> any time to open this list.')}</p>
+      <p class="kb-foot">${tr('kbFootHtml','Press <kbd>?</kbd> any time to open this list.').replace('<kbd>?</kbd>', '<kbd>'+helpKey+'</kbd>')}</p>
     </div>`;
   document.body.appendChild(m);
   const close=()=>m.remove();
@@ -12791,6 +13364,8 @@ async function proceedBoot(){
 // and make the title editable again.
 function resetMapViewState(){
   cancelHistoryPreview();
+  // History and diff belong to the map being left.
+  document.querySelectorAll('.hist-panel, .diff-panel').forEach(p=>p.remove());
   READONLY=false;
   const t=$('#mapTitle'); if(t) t.readOnly=false;
 }
