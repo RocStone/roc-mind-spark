@@ -8102,7 +8102,10 @@ function replaceInNode(id, find, repl){
   const flags='gi';
   const re=new RegExp(find.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'), flags);
   let count=0;
-  if(INLINE_HTML_RE.test(n.text||'')){
+  // Same test nodeSearchText() uses to decide the text is HTML: tags OR
+  // entities. `Tom &amp; Jerry` must be edited as "Tom & Jerry", never as its
+  // source, or searching "&" would corrupt the entity.
+  if(hasInlineMarkup(n.text||'')){
     // Walk text nodes only, preserving tags — parse inertly via <template>.
     const tpl=document.createElement('template'); tpl.innerHTML=n.text||'';
     const walker=document.createTreeWalker(tpl.content, NodeFilter.SHOW_TEXT);
@@ -8125,6 +8128,7 @@ function replaceNext(){
   const id=searchMatches[searchPos] || searchMatches[0];
   const c=replaceInNode(id, find, repl);
   if(c){ pushHistory(); render(); toast(`Replaced ${c} in 1 node`); }
+  else toast(rmsTr('replaceNone','Nothing to replace'));
   doSearch(find);            // refresh matches (node may no longer match)
 }
 function replaceAll(){
@@ -8132,9 +8136,10 @@ function replaceAll(){
   const find=$('#search').value.trim(); const repl=$('#replace').value;
   if(!find) return;
   let total=0, nodes=0;
-  Object.keys(map.nodes).forEach(id=>{ const c=replaceInNode(id, find, repl); if(c){ total+=c; nodes++; } });
+  // Only the nodes the search found — the same set the user sees highlighted.
+  [...searchMatches].forEach(id=>{ const c=replaceInNode(id, find, repl); if(c){ total+=c; nodes++; } });
   if(total){ pushHistory(); render(); toast(`Replaced ${total} occurrence${total>1?'s':''} in ${nodes} node${nodes>1?'s':''}`); }
-  else toast('No matches to replace');
+  else toast(rmsTr('replaceNone','Nothing to replace'));
   doSearch(find);
 }
 // Centre the viewport on a node (used by find-next)
