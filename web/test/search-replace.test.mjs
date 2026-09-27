@@ -47,7 +47,7 @@ test('plain-text node is replaced directly', () => {
 test('focusNextMatch(-1) walks backwards and wraps; from no match it lands on the last', () => {
   const cnt = { textContent: '' };
   const { focusNextMatch } = loadFns(['focusNextMatch'], {
-    searchMatches: ['a', 'b', 'c'], searchPos: -1, searchReveal: null, _searchNavigating: false,
+    searchMatches: ['a', 'b', 'c'], searchPos: -1, searchReveal: null, _searchNavigating: false, _searchInputT: 0, doSearch() {},
     keepSearchFocus() {}, searchLeaveCurrent: () => false, searchEnterExpand: () => false,
     autoLayout() {}, searchNodeFingerprint: () => '', paintSearchHits() {},
     select() {}, centreOn() {}, $: () => cnt,
