@@ -264,7 +264,7 @@ const server = http.createServer(async (req, res) => {
   res.setHeader('X-Frame-Options', 'DENY');
   // Defense-in-depth CSP for the Mac overlay: self, inline bootstrap,
   // DuckDuckGo favicons, Crossref DOI lookup, and LLM providers the user
-  // can trigger. Inherited GitHub cloud/OAuth is not a supported path.
+  // can trigger.
   res.setHeader('Content-Security-Policy', [
     "default-src 'self'",
     "script-src 'self' 'unsafe-inline'",

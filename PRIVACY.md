@@ -61,7 +61,7 @@ The **canvas page** can still make outbound requests from WKWebView:
 | A node URL shows a favicon | `icons.duckduckgo.com` | The site host |
 | You open a node link, a GitHub repo/issue link, or `window.open` | the URL you chose | A normal system open |
 
-The Mac product does **not** enable the inherited GitHub cloud store or OAuth worker. Those UI leftovers in the canvas are not a supported path and are not configured.
+The Mac product has no GitHub cloud store, sign-in, share links, or live collaboration. The inherited code for those was removed from the canvas.
 
 LLM keys are stored in WKWebView `localStorage` (`mindspark:llm:key:…`) and sent **directly** to the provider from the page. They are not stored in SQLite. Do not put a production key on a shared Mac.
 
