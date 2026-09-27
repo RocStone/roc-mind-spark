@@ -4738,15 +4738,14 @@ function formatCitation(c){
 function importLayoutPreset(parsed){
   const preset = validateLayoutPreset(parsed);
   if(!preset){
-    return {error:'Not a usable layout. It needs an "id" (letters, digits and dashes), '
-      + 'a "name", and an "engine" that is one of: ' + LAYOUT_ENGINES.join(', ') + '.'};
+    return {error:rmsTf('layoutErrUnusable','Not a usable layout. It needs an "id" (letters, digits and dashes), a "name", and an "engine" that is one of: %s.', LAYOUT_ENGINES.join(', '))};
   }
   if(BUILTIN_LAYOUTS.some(b=>b.id===preset.id)){
-    return {error:`"${preset.id}" is a built-in layout name \u2014 please choose another id.`};
+    return {error:rmsTf('layoutErrBuiltin','“%s” is a built-in layout name — please choose another id.', preset.id)};
   }
   const list = loadCustomLayouts().filter(c=>c.id!==preset.id);   // re-importing replaces
   list.push(preset);
-  if(!saveCustomLayouts(list)) return {error:'Could not save \u2014 this browser\u2019s storage may be full.'};
+  if(!saveCustomLayouts(list)) return {error:rmsTr('layoutErrStorage','Could not save — this browser’s storage may be full.')};
   return {preset};
 }
 // The layout presets shipped in public/layouts/ (listed by index.json). Loaded
@@ -4822,23 +4821,20 @@ function showLayoutImportForm(){
   m.innerHTML=`
     <div class="vf-backdrop"></div>
     <div class="vf-card">
-      <button class="vf-close" aria-label="Close">\u00d7</button>
-      <h2>Import a layout</h2>
-      <div class="vf-hint">A layout picks one of the built-in engines
-        (${LAYOUT_ENGINES.join(', ')}) and tunes it — it cannot define a new
-        algorithm. Imported layouts are saved on this device; the maps you apply
-        them to stay readable for everyone.</div>
+      <button class="vf-close" aria-label="${rmsTh('close','Close')}">\u00d7</button>
+      <h2>${rmsTh('liTitle','Import a layout')}</h2>
+      <div class="vf-hint">${escapeHtml(rmsTf('liHint','A layout picks one of the built-in engines (%s) and tunes it — it cannot define a new algorithm. Imported layouts are saved on this device; the maps you apply them to stay readable for everyone.', LAYOUT_ENGINES.join(', ')))}</div>
       <div class="vf-fields">
         <textarea class="vf-input vf-json" rows="14" spellcheck="false">${escapeHtml(sample)}</textarea>
       </div>
       <div class="vf-err" hidden></div>
-      ${customs.length ? `<div class="vf-hint" style="margin-top:10px">Saved layouts</div>
+      ${customs.length ? `<div class="vf-hint" style="margin-top:10px">${rmsTh('liSaved','Saved layouts')}</div>
         <div class="li-list">${customs.map(c=>
-          `<span class="li-chip">${escapeHtml(c.name)}<button data-del="${escapeHtml(c.id)}" title="Remove">\u00d7</button></span>`
+          `<span class="li-chip">${escapeHtml(c.name)}<button data-del="${escapeHtml(c.id)}" title="${rmsTh('dlgRemove','Remove')}">\u00d7</button></span>`
         ).join('')}</div>` : ''}
       <div class="vf-actions">
-        <button class="vf-cancel">Cancel</button>
-        <button class="vf-go primary">Import</button>
+        <button class="vf-cancel">${rmsTh('cancel','Cancel')}</button>
+        <button class="vf-go primary">${rmsTh('liImport','Import')}</button>
       </div>
     </div>`;
   document.body.appendChild(m);
@@ -4850,7 +4846,7 @@ function showLayoutImportForm(){
   m.querySelector('.vf-go').onclick=()=>{
     let parsed;
     try{ parsed = JSON.parse(ta.value); }
-    catch(e){ return fail('Not valid JSON: '+e.message); }
+    catch(e){ return fail(rmsTf('errBadJson','Not valid JSON: %s', e.message)); }
     const res = importLayoutPreset(parsed);
     if(res.error) return fail(res.error);
     const preset = res.preset;
@@ -4880,19 +4876,17 @@ function showLayoutConfigForm(){
   m.innerHTML=`
     <div class="vf-backdrop"></div>
     <div class="vf-card">
-      <button class="vf-close" aria-label="Close">\u00d7</button>
-      <h2>Layout settings \u2014 ${escapeHtml((findLayout(map.layoutPreset||engine)||{name:engine}).name)}</h2>
-      <div class="vf-hint">Saved with this map and included in share links. Out-of-range
-        values are clamped and unknown keys ignored, so what you get back may differ
-        from what you type.</div>
+      <button class="vf-close" aria-label="${rmsTh('close','Close')}">\u00d7</button>
+      <h2>${escapeHtml(rmsTf('lcTitle','Layout settings — %s', layoutName(findLayout(map.layoutPreset||engine)||{name:engine})))}</h2>
+      <div class="vf-hint">${rmsTh('lcHint','Saved with this map and included in share links. Out-of-range values are clamped and unknown keys ignored, so what you get back may differ from what you type.')}</div>
       <div class="vf-fields">
         <textarea class="vf-input vf-json" rows="14" spellcheck="false">${escapeHtml(current)}</textarea>
       </div>
       <div class="vf-err" hidden></div>
       <div class="vf-actions">
-        <button class="vf-unref">Reset to defaults</button>
-        <button class="vf-cancel">Cancel</button>
-        <button class="vf-go primary">Apply</button>
+        <button class="vf-unref">${rmsTh('lcReset','Reset to defaults')}</button>
+        <button class="vf-cancel">${rmsTh('cancel','Cancel')}</button>
+        <button class="vf-go primary">${rmsTh('lcApply','Apply')}</button>
       </div>
     </div>`;
   document.body.appendChild(m);
@@ -4917,7 +4911,7 @@ function showLayoutConfigForm(){
   m.querySelector('.vf-go').onclick=()=>{
     let parsed;
     try{ parsed = JSON.parse(ta.value); }
-    catch(e){ err.hidden=false; err.textContent='Not valid JSON: '+e.message; return; }
+    catch(e){ err.hidden=false; err.textContent=rmsTf('errBadJson','Not valid JSON: %s', e.message); return; }
     // Keep only the section for the engine being edited.
     apply(layoutConfigFor(engine, parsed));
   };
@@ -4935,24 +4929,24 @@ function showCitationForm(id){
   m.innerHTML=`
     <div class="vf-backdrop"></div>
     <div class="vf-card">
-      <button class="vf-close" aria-label="Close">×</button>
-      <h2>Reference / citation</h2>
-      <p class="vf-sub">Fill the fields, or paste a full citation into "Authors". The node will show the formatted reference and be included in <b>Export → References</b>.</p>
+      <button class="vf-close" aria-label="${rmsTh('close','Close')}">×</button>
+      <h2>${rmsTh('citeTitle','Reference / citation')}</h2>
+      <p class="vf-sub">${rmsTr('citeSubHtml','Fill the fields, or paste a full citation into “Authors”. The node will show the formatted reference and be included in <b>Export → References</b>.')}</p>
       <div class="vf-doi-lookup">
-        <input class="vf-doi-in" placeholder="Paste a DOI to autofill (e.g. 10.1109/TIM.2026.3659640)">
-        <button class="vf-doi-go">Fetch</button>
+        <input class="vf-doi-in" placeholder="${rmsTh('citeDoiPh','Paste a DOI to autofill (e.g. 10.1109/TIM.2026.3659640)')}">
+        <button class="vf-doi-go">${rmsTh('citeFetch','Fetch')}</button>
       </div>
       <div class="vf-fields">
-        <label class="vf-row"><span class="vf-name">Authors</span><textarea class="vf-input" data-f="authors" rows="1" placeholder="Smith, J. & Doe, A.">${escapeHtml(c.authors||'')}</textarea></label>
-        <label class="vf-row"><span class="vf-name">Title</span><textarea class="vf-input" data-f="title" rows="1" placeholder="A study of …">${escapeHtml(c.title||'')}</textarea></label>
-        <label class="vf-row"><span class="vf-name">Year</span><textarea class="vf-input" data-f="year" rows="1" placeholder="2026">${escapeHtml(c.year||'')}</textarea></label>
-        <label class="vf-row"><span class="vf-name">Source / venue</span><textarea class="vf-input" data-f="source" rows="1" placeholder="Journal / Conference">${escapeHtml(c.source||'')}</textarea></label>
-        <label class="vf-row"><span class="vf-name">DOI / URL</span><textarea class="vf-input" data-f="doi" rows="1" placeholder="10.1109/… or https://…">${escapeHtml(c.doi||'')}</textarea></label>
+        <label class="vf-row"><span class="vf-name">${rmsTh('citeAuthors','Authors')}</span><textarea class="vf-input" data-f="authors" rows="1" placeholder="Smith, J. & Doe, A.">${escapeHtml(c.authors||'')}</textarea></label>
+        <label class="vf-row"><span class="vf-name">${rmsTh('citeTitleField','Title')}</span><textarea class="vf-input" data-f="title" rows="1" placeholder="${rmsTh('citeTitlePh','A study of …')}">${escapeHtml(c.title||'')}</textarea></label>
+        <label class="vf-row"><span class="vf-name">${rmsTh('citeYear','Year')}</span><textarea class="vf-input" data-f="year" rows="1" placeholder="2026">${escapeHtml(c.year||'')}</textarea></label>
+        <label class="vf-row"><span class="vf-name">${rmsTh('citeSource','Source / venue')}</span><textarea class="vf-input" data-f="source" rows="1" placeholder="${rmsTh('citeSourcePh','Journal / Conference')}">${escapeHtml(c.source||'')}</textarea></label>
+        <label class="vf-row"><span class="vf-name">DOI / URL</span><textarea class="vf-input" data-f="doi" rows="1" placeholder="${rmsTh('citeDoiFieldPh','10.1109/… or https://…')}">${escapeHtml(c.doi||'')}</textarea></label>
       </div>
       <div class="vf-actions">
-        ${n.ref?'<button class="vf-unref">Remove reference</button>':''}
-        <button class="vf-cancel">Cancel</button>
-        <button class="vf-go primary">Save reference</button>
+        ${n.ref?`<button class="vf-unref">${rmsTh('citeRemove','Remove reference')}</button>`:''}
+        <button class="vf-cancel">${rmsTh('cancel','Cancel')}</button>
+        <button class="vf-go primary">${rmsTh('citeSave','Save reference')}</button>
       </div>
     </div>`;
   document.body.appendChild(m);
@@ -5748,6 +5742,11 @@ function rmsTf(key, fallback, ...args){
   for(const a of args) s=s.replace('%s', ()=>String(a));
   return s;
 }
+// rmsTr, HTML-escaped — for dictionary strings dropped into template literals.
+function rmsTh(key, fallback){ return escapeHtml(rmsTr(key, fallback)); }
+// Built-in layouts / map styles / presets carry English name+desc as data.
+function layoutName(l){ return l ? (l.id ? rmsTr('layoutName_'+l.id, l.name) : l.name) : ''; }
+function layoutDesc(l){ return l ? (l.id ? rmsTr('layoutDesc_'+l.id, l.desc||'') : (l.desc||'')) : ''; }
 function chordTitle(nameKey, chordId, fallback){
   const name=rmsTr(nameKey, fallback);
   const chord=(typeof window!=='undefined' && window.rmsChordLabel && chordId) ? window.rmsChordLabel(chordId) : '';
@@ -9787,11 +9786,11 @@ function startPresentation(){
   autoLayout(false, {persist:false});   // temporary expand — never saved
   const bar=document.createElement('div');
   bar.className='pres-bar';
-  bar.innerHTML=`<button class="pres-prev" title="Previous (←)">◀</button>
+  bar.innerHTML=`<button class="pres-prev" title="${rmsTh('presPrev','Previous (←)')}">◀</button>
     <span class="pres-count"></span>
     <span class="pres-title"></span>
-    <button class="pres-next" title="Next (→ / Space)">▶</button>
-    <button class="pres-exit" title="Exit (Esc)">✕</button>`;
+    <button class="pres-next" title="${rmsTh('presNext','Next (→ / Space)')}">▶</button>
+    <button class="pres-exit" title="${rmsTh('presExit','Exit (Esc)')}">✕</button>`;
   document.body.appendChild(bar);
   bar.addEventListener('mousedown',e=>e.stopPropagation());
   bar.querySelector('.pres-prev').onclick=()=>presStep(-1);
@@ -11186,20 +11185,20 @@ function showVariableForm(varNames, defaults, mapId, done){
   m.innerHTML = `
     <div class="vf-backdrop"></div>
     <div class="vf-card">
-      <button class="vf-close" aria-label="Close">×</button>
-      <h2>Fill variables</h2>
-      <p class="vf-sub">Found ${varNames.length} placeholder${varNames.length===1?'':'s'} — fill them before exporting the prompt.</p>
+      <button class="vf-close" aria-label="${rmsTh('close','Close')}">×</button>
+      <h2>${rmsTh('vfTitle','Fill variables')}</h2>
+      <p class="vf-sub">${escapeHtml(varNames.length===1 ? rmsTr('vfSubOne','Found 1 placeholder — fill it before exporting the prompt.') : rmsTf('vfSubN','Found %s placeholders — fill them before exporting the prompt.', varNames.length))}</p>
       <div class="vf-fields">
         ${varNames.map(name => `
           <label class="vf-row">
             <span class="vf-name"><code>${escapeHtml(name)}</code></span>
-            <textarea class="vf-input" data-name="${escapeHtml(name)}" rows="1" placeholder="value for ${escapeHtml(name)}">${escapeHtml(defaults[name] || '')}</textarea>
+            <textarea class="vf-input" data-name="${escapeHtml(name)}" rows="1" placeholder="${escapeHtml(rmsTf('vfValueFor','value for %s', name))}">${escapeHtml(defaults[name] || '')}</textarea>
           </label>`).join('')}
       </div>
       <div class="vf-actions">
-        <button class="vf-skip">Skip / use raw</button>
-        <button class="vf-cancel">Cancel</button>
-        <button class="vf-go primary">Export</button>
+        <button class="vf-skip">${rmsTh('vfSkip','Skip / use raw')}</button>
+        <button class="vf-cancel">${rmsTh('cancel','Cancel')}</button>
+        <button class="vf-go primary">${rmsTh('vfExport','Export')}</button>
       </div>
     </div>`;
   document.body.appendChild(m);
@@ -11291,10 +11290,10 @@ function showMapVariables(){
     m.innerHTML = `
       <div class="vf-backdrop"></div>
       <div class="vf-card">
-        <button class="vf-close" aria-label="Close">×</button>
-        <h2>Map variables</h2>
-        <p class="vf-sub">No placeholders found yet. Use <code>{{name}}</code> or <code>$\{name}</code> anywhere in your node text, then set their default values here so every prompt export fills them automatically.</p>
-        <div class="vf-actions"><button class="vf-cancel">Close</button></div>
+        <button class="vf-close" aria-label="${rmsTh('close','Close')}">×</button>
+        <h2>${rmsTh('mvTitle','Map variables')}</h2>
+        <p class="vf-sub">${rmsTr('mvEmptyHtml','No placeholders found yet. Use <code>{{name}}</code> or <code>${name}</code> anywhere in your node text, then set their default values here so every prompt export fills them automatically.')}</p>
+        <div class="vf-actions"><button class="vf-cancel">${rmsTh('close','Close')}</button></div>
       </div>`;
     document.body.appendChild(m);
     m.addEventListener('mousedown', e => e.stopPropagation());
@@ -11307,20 +11306,20 @@ function showMapVariables(){
   m.innerHTML = `
     <div class="vf-backdrop"></div>
     <div class="vf-card">
-      <button class="vf-close" aria-label="Close">×</button>
-      <h2>Map variables</h2>
-      <p class="vf-sub">Set default values for the ${vars.length} placeholder${vars.length===1?'':'s'} in this map. Prompt exports will reuse these without asking — leave one blank to be prompted at export time.</p>
+      <button class="vf-close" aria-label="${rmsTh('close','Close')}">×</button>
+      <h2>${rmsTh('mvTitle','Map variables')}</h2>
+      <p class="vf-sub">${escapeHtml(rmsTf('mvSub','Set default values for the %s placeholder(s) in this map. Prompt exports will reuse these without asking — leave one blank to be prompted at export time.', vars.length))}</p>
       <div class="vf-fields">
         ${vars.map(name => `
           <label class="vf-row">
             <span class="vf-name"><code>${escapeHtml(name)}</code></span>
-            <textarea class="vf-input" data-name="${escapeHtml(name)}" rows="1" placeholder="default for ${escapeHtml(name)}">${escapeHtml(cur[name] || '')}</textarea>
+            <textarea class="vf-input" data-name="${escapeHtml(name)}" rows="1" placeholder="${escapeHtml(rmsTf('mvDefaultFor','default for %s', name))}">${escapeHtml(cur[name] || '')}</textarea>
           </label>`).join('')}
       </div>
       <div class="vf-actions">
-        <button class="vf-clear">Clear all</button>
-        <button class="vf-cancel">Cancel</button>
-        <button class="vf-go primary">Save defaults</button>
+        <button class="vf-clear">${rmsTh('mvClear','Clear all')}</button>
+        <button class="vf-cancel">${rmsTh('cancel','Cancel')}</button>
+        <button class="vf-go primary">${rmsTh('mvSave','Save defaults')}</button>
       </div>
     </div>`;
   document.body.appendChild(m);
