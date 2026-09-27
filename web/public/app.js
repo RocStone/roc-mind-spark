@@ -612,16 +612,6 @@ function _reframeSmooth(cx, cy, W1, H1){
   });
   setTimeout(settle, 280);                       // safety net if transitionend doesn't fire
 }
-function _reframeDuring(ms, cx, cy){
-  const now=()=> (window.performance&&performance.now)?performance.now():Date.now();
-  const t0=now();
-  (function step(){
-    const {w:SW,h:SH}=_stageSize();
-    if(SW>1&&SH>1){ view.x=SW/2-cx*view.k; view.y=SH/2-cy*view.k; applyView(); }
-    if(now()-t0<ms) requestAnimationFrame(step);
-    else { _markStage(); saveMapView(); updateMinimap(); }
-  })();
-}
 function applyMapView(saved){
   view.k = isFinite(saved.k) ? saved.k : 1;
   if(isFinite(saved.cx) && isFinite(saved.cy)){
@@ -1609,34 +1599,6 @@ function containsMath(text){
   if(!text || text.indexOf('$')<0) return false;
   return new RegExp(MATH_DELIM_RE.source).test(text);
 }
-// Render `text` into `container`, converting $...$ / $$...$$ to MathML while
-// passing the surrounding text through the normal (sanitized) rendering path.
-function appendMathAware(container, text){
-  const re=new RegExp(MATH_DELIM_RE.source,'g');
-  let last=0, m;
-  const plain=(str)=>{
-    if(!str) return;
-    if(hasInlineMarkup(str)){
-      const span=document.createElement('span');
-      span.innerHTML=sanitizeInlineHTML(str);
-      autoLinkPlainTextNodes(span);
-      while(span.firstChild) container.appendChild(span.firstChild);
-    } else { appendTextWithLinks(container, str); }
-  };
-  while((m=re.exec(text))){
-    plain(text.slice(last, m.index));
-    const tex = m[1]!=null ? m[1] : m[2];
-    const display = m[1]!=null;
-    let mathml=null; try{ mathml=latexToMathML(tex, display); }catch(e){ mathml=null; }
-    if(mathml){
-      const tmp=document.createElement('span');
-      tmp.innerHTML = mathml;                 // HTML5 parses <math> as MathML foreign content
-      while(tmp.firstChild) container.appendChild(tmp.firstChild);
-    } else { container.appendChild(document.createTextNode(m[0])); }
-    last = m.index + m[0].length;
-  }
-  plain(text.slice(last));
-}
 
 // Render text that may contain BOTH inline formatting/markup AND $...$ math.
 // Math is extracted first into placeholder tokens (so its contents are never
@@ -1822,7 +1784,6 @@ function drawEdges(hidden){
   // Cross-links: non-tree edges (references / dependencies). Drawn as separate
   // dotted paths so they read differently from the structural tree edges.
   let linkPath='';
-  const linkMarkers=[];
   (map.links||[]).forEach(lk=>{
     const a=map.nodes[lk.from], b=map.nodes[lk.to];
     if(!a||!b) return;
@@ -1836,7 +1797,6 @@ function drawEdges(hidden){
     const off=Math.min(60, len*0.18);
     const cx=mx - (dy/len)*off, cy=my + (dx/len)*off;
     linkPath += `M${ax},${ay} Q${cx},${cy} ${bx},${by} `;
-    linkMarkers.push({x:bx,y:by,cx,cy});
   });
   edges.innerHTML =
     `<path d="${path}" fill="none" stroke="var(--edge-color, var(--line-2))" stroke-width="var(--edge-width, 2.2)" stroke-linecap="round"/>` +
@@ -2109,102 +2069,6 @@ function resolveSiblingOverlaps(nodes, opts){
   return moved;
 }
 
-// After a node has been resized, push any siblings whose subtree-bounds now
-// overlap the resized node (or each other) just enough to restore the default
-// gap. We move whole subtrees (children follow), and only nudge — we don't do
-// a full relayout, so the user's manual arrangement is preserved.
-function resolveResizeCollisions(resizedId){
-  if(!map || !map.nodes[resizedId]) return;
-  const r = map.nodes[resizedId];
-  if(!r.parent) return;                       // root: no siblings to nudge
-  const layout = map.layout || 'balanced';
-  const vertical = (layout === 'down');       // down layout stacks horizontally
-  const gap = vertical ? DOWN_HGAP : VGAP;
-
-  // Helper: bounding box of a single node
-  const box = id => {
-    const n = map.nodes[id];
-    return { x: n.x, y: n.y, w: n.w||120, h: n.h||40 };
-  };
-  // Helper: bounding box of a whole subtree (for cleaner collision avoidance —
-  // a node + its descendants behave as one block).
-  const subtreeBox = id => {
-    const ids = [id]; const collect = i => { childrenOf(i).forEach(c => { ids.push(c); collect(c); }); };
-    collect(id);
-    let minX=Infinity, minY=Infinity, maxX=-Infinity, maxY=-Infinity;
-    ids.forEach(i => {
-      const b = box(i);
-      if(b.x < minX) minX = b.x;
-      if(b.y < minY) minY = b.y;
-      if(b.x + b.w > maxX) maxX = b.x + b.w;
-      if(b.y + b.h > maxY) maxY = b.y + b.h;
-    });
-    return { x:minX, y:minY, w:maxX-minX, h:maxY-minY };
-  };
-  // Helper: shift a whole subtree
-  const shift = (id, dx, dy) => {
-    const n = map.nodes[id]; n.x += dx; n.y += dy;
-    childrenOf(id).forEach(c => shift(c, dx, dy));
-  };
-
-  // Only consider siblings on the same side of the parent — those are the
-  // ones that are stacked next to the resized node in the layout direction.
-  const siblings = childrenOf(r.parent).filter(c => c !== resizedId && map.nodes[c].side === r.side);
-  if(!siblings.length) return;
-
-  // Resized-node centre on the stacking axis (y for horizontal layouts, x for down)
-  const rb = box(resizedId);
-  const rCentre = vertical ? rb.x + rb.w/2 : rb.y + rb.h/2;
-  // Separate siblings into "before" (lower coord) and "after" (higher coord) on
-  // the stacking axis. Sort each so we can cascade nudges.
-  const before = [], after = [];
-  siblings.forEach(s => {
-    const sb = subtreeBox(s);
-    const sc = vertical ? sb.x + sb.w/2 : sb.y + sb.h/2;
-    (sc < rCentre ? before : after).push(s);
-  });
-  if(vertical){
-    before.sort((a,b) => subtreeBox(b).x - subtreeBox(a).x);  // closest-to-resized first
-    after.sort((a,b) => subtreeBox(a).x - subtreeBox(b).x);
-  } else {
-    before.sort((a,b) => subtreeBox(b).y - subtreeBox(a).y);
-    after.sort((a,b) => subtreeBox(a).y - subtreeBox(b).y);
-  }
-
-  // "After" pass: ensure each successive sibling sits at least `gap` past the
-  // previous block on the stacking axis. The first comparison uses the resized
-  // node's actual box; subsequent ones use the previous subtree-bounds.
-  let prevEnd = vertical ? (rb.x + rb.w) : (rb.y + rb.h);
-  after.forEach(s => {
-    const sb = subtreeBox(s);
-    const start = vertical ? sb.x : sb.y;
-    const need  = prevEnd + gap;
-    if(start < need){
-      const delta = need - start;
-      if(vertical) shift(s, delta, 0);
-      else         shift(s, 0, delta);
-    }
-    const newSB = subtreeBox(s);
-    prevEnd = vertical ? (newSB.x + newSB.w) : (newSB.y + newSB.h);
-  });
-  // "Before" pass: mirror image — push earlier siblings backwards if they
-  // would overlap with the resized node now (because it grew upward/leftward).
-  let prevStart = vertical ? rb.x : rb.y;
-  before.forEach(s => {
-    const sb = subtreeBox(s);
-    const end = vertical ? (sb.x + sb.w) : (sb.y + sb.h);
-    const need = prevStart - gap;
-    if(end > need){
-      const delta = end - need;
-      if(vertical) shift(s, -delta, 0);
-      else         shift(s, 0, -delta);
-    }
-    const newSB = subtreeBox(s);
-    prevStart = vertical ? newSB.x : newSB.y;
-  });
-
-  render();
-}
 
 // Assign root children to left/right by subtree weight for a balanced split.
 // Used when first building a map (templates) or when explicitly re-balancing;
@@ -2771,9 +2635,6 @@ function autoLayout(noRender, opts){
   const layout = map.layout || 'balanced';
   // Spacing comes from this map's config. Local names, so the module constants
   // stay the defaults and other callers (drag-insertion, FLIP) are unaffected.
-  const _lc = validateLayoutConfig(map.layoutConfig)[layout] || LAYOUT_CONFIG_DEFAULTS.balanced;
-  const LH = (_lc.hGap != null) ? _lc.hGap : HGAP;
-  const LV = (_lc.vGap != null) ? _lc.vGap : VGAP;
 
   // ----- PLACEMENT -----
   // One dispatch for every layout: resolve to a strategy plus a complete
@@ -11646,7 +11507,6 @@ function pickContrast(hex){
   return L > 0.6 ? '#23201b' : '#ffffff';
 }
 function roundRect(ctx,x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();}
-function wrapText(ctx,text,x,y,maxW,lh){const words=text.split(/\s+/);let line='',lines=[];words.forEach(w=>{const t=line?line+' '+w:w;if(ctx.measureText(t).width>maxW&&line){lines.push(line);line=w;}else line=t;});if(line)lines.push(line);const startY=y-(lines.length-1)*lh/2;lines.forEach((l,i)=>ctx.fillText(l,x,startY+i*lh));}
 function download(blob,name){const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);}
 
 /* ---------- toast ---------- */
