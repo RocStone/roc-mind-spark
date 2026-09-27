@@ -71,6 +71,8 @@ const Q = {
   vLatest: db.prepare('SELECT ts, data, COALESCE(started, ts) AS started FROM map_versions WHERE id = ? ORDER BY ts DESC LIMIT 1'),
   vInsert: db.prepare('INSERT OR REPLACE INTO map_versions (id,ts,data,started) VALUES (?,?,?,?)'),
   vDelOne: db.prepare('DELETE FROM map_versions WHERE id = ? AND ts = ?'),
+  // Closes the current coalescing window: the next save opens a new version.
+  vSeal:   db.prepare('UPDATE map_versions SET started = 0 WHERE id = ? AND ts = (SELECT MAX(ts) FROM map_versions WHERE id = ?)'),
   vList:   db.prepare('SELECT ts FROM map_versions WHERE id = ? ORDER BY ts DESC LIMIT 100'),
   vGet:    db.prepare('SELECT data FROM map_versions WHERE id = ? AND ts = ?'),
   vDelOld: db.prepare('DELETE FROM map_versions WHERE id = ? AND ts NOT IN (SELECT ts FROM map_versions WHERE id = ? ORDER BY ts DESC LIMIT ' + VERSION_CAP + ')'),
@@ -358,6 +360,14 @@ const server = http.createServer(async (req, res) => {
     const vListMatch = p.match(/^\/api\/maps\/([\w-]+)\/versions$/);
     if (vListMatch && req.method === 'GET') {
       return send(res, 200, Q.vList.all(vListMatch[1]).map(r => ({ ts: r.ts })));
+    }
+    // Restoring a version must not overwrite the window's newest version
+    // (that would be the state the user is restoring away from).
+    const vSealMatch = p.match(/^\/api\/maps\/([\w-]+)\/versions\/seal$/);
+    if (vSealMatch && req.method === 'POST') {
+      Q.vSeal.run(vSealMatch[1], vSealMatch[1]);
+      res.writeHead(204);
+      return res.end();
     }
     const vGetMatch = p.match(/^\/api\/maps\/([\w-]+)\/versions\/(\d+)$/);
     if (vGetMatch && req.method === 'GET') {

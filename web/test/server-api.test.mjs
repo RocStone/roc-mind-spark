@@ -87,6 +87,18 @@ describe('version history retention', () => {
     assert.deepEqual(await versions('hist'), [T0 + 60 * MIN, T0 + 7 * MIN, T0 + 4 * MIN]);
   });
 
+  test('sealing the window keeps the pre-restore state as its own version', async () => {
+    await put('seal', T0, 'a');
+    await put('seal', T0 + 1 * MIN, 'b');
+    assert.deepEqual(await versions('seal'), [T0 + 1 * MIN]);
+    const seal = await rawRequest(srv.port, { method: 'POST', path: '/api/maps/seal/versions/seal' });
+    assert.equal(seal.status, 204);
+    await put('seal', T0 + 2 * MIN, 'restored');
+    assert.deepEqual(await versions('seal'), [T0 + 2 * MIN, T0 + 1 * MIN], 'the save after sealing is a new version');
+    const kept = (await rawRequest(srv.port, { path: `/api/maps/seal/versions/${T0 + 1 * MIN}` })).json;
+    assert.equal(kept.nodes.r.text, 'b');
+  });
+
   test('an older database without the started column is migrated and still coalesces', async () => {
     const legacyTs = Date.now() - 60 * 1000;
     const legacy = await startApiServer({

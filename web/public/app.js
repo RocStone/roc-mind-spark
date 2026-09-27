@@ -65,7 +65,9 @@ const ServerStore = {
   },
   async remove(id){ await this._j('/api/maps/'+encodeURIComponent(id),{method:'DELETE'}); },
   async history(id){ return this._j('/api/maps/'+encodeURIComponent(id)+'/versions'); },
-  async version(id,ref){ return this._j('/api/maps/'+encodeURIComponent(id)+'/versions/'+encodeURIComponent(ref)); }
+  async version(id,ref){ return this._j('/api/maps/'+encodeURIComponent(id)+'/versions/'+encodeURIComponent(ref)); },
+  // Close the current version window so the next save is its own version.
+  async sealVersion(id){ await this._j('/api/maps/'+encodeURIComponent(id)+'/versions/seal',{method:'POST'}); }
 
 };
 
@@ -9086,6 +9088,9 @@ async function restoreVersion(mapId, ref){
   // editor) so ⌘Z goes back to the pre-restore map.
   pushHistory();
   render(); fit();
+  // Keep the pre-restore state as its own version instead of letting the
+  // restore replace it inside the current coalescing window.
+  if(typeof Store.sealVersion==='function'){ try{ await Store.sealVersion(mapId); }catch(e){ console.warn('seal version failed:',e); } }
   try{ await saveMapNow(restored); }catch(e){ console.warn('save after history restore failed:',e); return; }
   if(map!==restored) return;
   document.querySelectorAll('.hist-banner,.hist-panel').forEach(p=>p.remove());
