@@ -74,7 +74,7 @@ test('uid() never yields an all-digit id (object key order)', () => {
 });
 
 test('normalizeLoadedMap keeps map-level fields it does not know about', () => {
-  const { normalizeLoadedMap } = loadFns(['normalizeLoadedMap']);
+  const { normalizeLoadedMap } = loadFns(['normalizeLoadedMap'], { sanitizeMap: m => m });
   const out = normalizeLoadedMap({
     id: 'm', rootId: 'r', nodes: { r: { id: 'r' } },
     layoutConfig: { balanced: { hGap: 10 } }, layoutParams: { gap: 2 }, layoutPreset: 'p1',
