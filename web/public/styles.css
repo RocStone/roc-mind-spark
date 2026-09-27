@@ -299,7 +299,7 @@
   /* ===== Topbar ===== */
   .topbar{position:absolute;top:calc(14px * var(--ui-zoom,1));left:calc(14px * var(--ui-zoom,1));right:calc(14px * var(--ui-zoom,1));display:flex;align-items:center;gap:calc(8px * var(--ui-zoom,1));z-index:30;pointer-events:none}
   .topbar > *{pointer-events:auto}
-  .tb-group,.save-pill,.token-total,.user-pill{flex-shrink:0}
+  .tb-group,.save-pill,.token-total{flex-shrink:0}
   .tb-group{display:flex;align-items:center;gap:2px;background:var(--chrome);border:1px solid var(--chrome-edge);border-radius:12px;padding:4px;box-shadow:var(--shadow)}
   .tb{border:none;background:none;color:var(--ink);width:calc(36px * var(--ui-zoom,1));height:calc(34px * var(--ui-zoom,1));border-radius:8px;display:grid;place-items:center;font-size:calc(16px * var(--ui-zoom,1))}
   .tb:hover{background:var(--hover)}
@@ -990,99 +990,6 @@
 
   .toast{position:absolute;bottom:64px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--toolbar-bg);color:var(--toolbar-text);padding:11px 20px;border-radius:11px;font-size:13.5px;font-weight:500;box-shadow:var(--shadow-lg);opacity:0;pointer-events:none;transition:.25s;z-index:50}
   .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
-  /* ===== Login overlay (cloud / static-deploy mode only) ===== */
-  .login-overlay{
-    position:fixed; inset:0; z-index:5000;
-    display:flex; align-items:center; justify-content:center;
-    background:var(--paper);
-    font-family:var(--sans);
-  }
-  .login-card{
-    background:var(--node-bg, #fff); color:var(--ink);
-    border-radius:16px; box-shadow:0 22px 70px rgba(0,0,0,.25), 0 1px 3px rgba(0,0,0,.06);
-    padding:32px 36px; width:520px; max-width:92vw;
-    border:1px solid var(--chrome-edge);
-  }
-  .login-brand{display:flex; align-items:center; gap:10px; margin-bottom:18px}
-  .login-brand .mark{flex:0 0 auto; filter:drop-shadow(0 2px 6px rgba(224,97,58,.3))}
-  .login-brand h1{
-    font-family:var(--serif); font-weight:900; font-size:26px; margin:0;
-    color:var(--ink); letter-spacing:-.5px;
-  }
-  .login-brand h1 span{color:var(--accent)}
-  .login-card h2{
-    font-family:var(--serif); font-weight:700; font-size:22px;
-    margin:0 0 10px; color:var(--ink);
-  }
-  .login-card > p{
-    color:var(--ink-soft); line-height:1.55; margin:0 0 14px; font-size:14px;
-  }
-  .login-card code{
-    background:var(--paper-2); padding:1px 6px; border-radius:4px;
-    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:12.5px;
-  }
-  .login-steps{
-    counter-reset:step; list-style:none; padding:0; margin:18px 0;
-  }
-  .login-steps > li{
-    position:relative; padding-left:40px; margin-bottom:18px;
-    counter-increment:step;
-  }
-  .login-steps > li:before{
-    content:counter(step);
-    position:absolute; left:0; top:-2px;
-    width:28px; height:28px; border-radius:50%;
-    background:var(--accent); color:#fff;
-    display:flex; align-items:center; justify-content:center;
-    font-weight:700; font-size:14px;
-  }
-  .login-step-link{
-    color:var(--accent); font-weight:600; text-decoration:none; font-size:15px;
-  }
-  .login-step-link:hover{text-decoration:underline}
-  .login-step-hint{font-size:13px; color:var(--ink-soft); margin-top:6px; line-height:1.5}
-  .login-steps label{display:block; font-size:14px; color:var(--ink); margin-bottom:6px; font-weight:500}
-  .token-input{display:flex; gap:8px}
-  .token-input input{
-    flex:1; padding:10px 12px;
-    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:13px;
-    border:1.5px solid var(--line); border-radius:8px;
-    background:var(--paper); color:var(--ink); outline:none;
-  }
-  .token-input input:focus{border-color:var(--accent); background:var(--node-bg, #fff)}
-  .token-input button{
-    padding:10px 20px; background:var(--accent); color:#fff;
-    border:none; border-radius:8px; font-family:inherit; font-weight:600;
-    cursor:pointer; font-size:14px;
-  }
-  .token-input button:hover{background:var(--accent-deep)}
-  .token-input button:disabled{opacity:.65; cursor:wait}
-  .login-error{
-    color:#c5392a; font-size:13px; margin-top:8px; min-height:16px; line-height:1.4;
-  }
-  .login-extra{margin-top:18px; padding-top:16px; border-top:1px solid var(--chrome-edge)}
-  .login-extra summary{cursor:pointer; color:var(--ink-soft); font-size:13px; font-weight:500}
-  .login-extra summary:hover{color:var(--ink)}
-  .login-extra p{margin:10px 0 0; font-size:13px; color:var(--ink-soft); line-height:1.6}
-  .login-extra a{color:var(--accent)}
-
-  /* User pill — shown in topbar after GitHub sign-in */
-  .user-pill{
-    display:flex; align-items:center; gap:8px;
-    padding:3px 4px 3px 4px;
-    background:var(--chrome); border:1px solid var(--chrome-edge);
-    border-radius:22px; font-size:13px; font-weight:500;
-    color:var(--ink); height:32px;
-  }
-  .user-pill img{width:24px; height:24px; border-radius:50%; background:var(--paper-2)}
-  .user-pill span{padding:0 4px}
-  .user-pill button{
-    background:transparent; border:none; color:var(--ink-soft);
-    cursor:pointer; font-family:inherit; padding:2px 8px;
-    border-radius:6px; font-size:14px; height:26px;
-  }
-  .user-pill button:hover{background:var(--hover); color:var(--ink)}
-
   @keyframes fadeIn{from{opacity:0}to{opacity:1}}
 
   /* ===== MOBILE / TOUCH ===== */
@@ -1117,7 +1024,6 @@
     .tb{width:38px; height:38px; font-size:18px}    /* bigger tap targets */
     .tb.wide{padding:0 10px}
     .save-pill{display:none}                        /* hide on phones to save room */
-    .user-pill span{display:none}                   /* avatar only */
     .search-wrap.open{width:140px}
     .search-wrap.open.replace-mode{width:min(86vw,330px)}
 
@@ -1132,8 +1038,6 @@
     .zoombar button{width:34px; height:34px}
 
     /* Cards fit phone width */
-    .login-card{padding:24px 22px}
-    .login-brand h1{font-size:22px}
     .notes-popup{width:96vw}
 
     /* Theme panel becomes a bottom sheet */
@@ -1148,7 +1052,7 @@
 
   /* Disable browser tap-highlight on interactive UI */
   .tb, .node, .handle, .sw, .theme-opt, .map-item,
-  .nodebar button, .picker button, .login-card button {
+  .nodebar button, .picker button {
     -webkit-tap-highlight-color:transparent;
     touch-action:manipulation;
   }
@@ -1215,7 +1119,6 @@
   body.focus-mode .side,
   body.focus-mode .hint,
   body.focus-mode .save-pill,
-  body.focus-mode .user-pill,
   body.focus-mode .empty .btn-row,
   body.focus-mode .search-wrap{display:none !important}
   body.focus-mode .app{grid-template-columns:1fr}
@@ -1541,7 +1444,7 @@
        Print has no "viewport" in that sense, so drop the constraint entirely here. */
     html, body{ height:auto !important; overflow:visible !important; }
     .topbar, .side, .zoombar, .hint, .save-pill, .token-total,
-    .nodebar, .search-wrap, .user-pill, .bulk-bar, .focus-exit,
+    .nodebar, .search-wrap, .bulk-bar, .focus-exit,
     .picker, .tpl-pop, .export-pop, .theme-panel{ display:none !important; }
     .app{ grid-template-columns:1fr !important; }
     .stage{ width:100% !important; height:auto !important; overflow:visible !important; }
@@ -1810,63 +1713,6 @@
   body.focus-mode .minimap, body.focus-mode .breadcrumb, body.focus-mode .wheel-speed{display:none !important}
   @media (max-width:760px){ .minimap, .wheel-speed{display:none} .breadcrumb{max-width:88vw} }
 
-  /* ===== Read-only shared view ===== */
-  .shared-banner{
-    position:fixed; top:0; left:0; right:0; z-index:300;
-    display:flex; align-items:center; gap:12px;
-    padding:9px 16px; font-family:var(--sans); font-size:13px;
-    background:var(--accent); color:#fff;
-    box-shadow:0 2px 12px rgba(0,0,0,.18);
-  }
-  .shared-banner .sb-eye{font-size:15px}
-  .shared-banner .sb-text{opacity:.96}
-  .shared-banner .sb-text b{font-weight:700}
-  .shared-banner .sb-copy{
-    margin-left:auto; border:1px solid rgba(255,255,255,.6); background:rgba(255,255,255,.16);
-    color:#fff; font-family:inherit; font-size:12.5px; font-weight:600;
-    padding:5px 12px; border-radius:8px; cursor:pointer;
-  }
-  .shared-banner .sb-copy:hover{background:rgba(255,255,255,.28)}
-  .shared-banner .sb-brand{
-    color:#fff; opacity:.85; text-decoration:none; font-weight:700; letter-spacing:.01em;
-  }
-  .shared-banner .sb-brand:hover{opacity:1; text-decoration:underline}
-
-  /* In shared view: hide all editing chrome, keep viewing aids (zoom, minimap) */
-  body.shared-view .side,
-  body.shared-view .new-map-row,
-  body.shared-view #menuExport,
-  body.shared-view #searchBtn,
-  body.shared-view #varsBtn,
-  body.shared-view #focusBtn,
-  body.shared-view #collapseAll,
-  body.shared-view #mdToggle,
-  body.shared-view #undo,
-  body.shared-view #redo,
-  body.shared-view #layout,
-  body.shared-view .hint,
-  body.shared-view .save-pill,
-  body.shared-view .menu-toggle,
-  body.shared-view #addChild,
-  body.shared-view #toggleSide{ display:none !important; }
-  /* Sidebar is hidden in shared view — collapse the grid to one column so the
-     stage fills the full width (otherwise it auto-places into the 0-width track
-     and the canvas clips to nothing). */
-  body.shared-view .app{ grid-template-columns:1fr; }
-  body.shared-view .stage{ top:var(--shared-banner-h, 42px); }   /* clear the banner */
-  body.shared-view .topbar{ top:50px; }
-  body.shared-view .breadcrumb{ top:96px; }
-  body.shared-view #mapTitle{ pointer-events:none; max-width:none; }
-  body.shared-view .node{ cursor:default; }
-  /* Read-only: no node editing affordances (collapse toggle + notes stay). */
-  body.shared-view .handle.h-child,
-  body.shared-view .handle.h-sibling,
-  body.shared-view .resize-grip{ display:none !important; }
-  @media (max-width:760px){
-    .shared-banner{ font-size:12px; gap:8px; padding:8px 10px; }
-    .shared-banner .sb-text{ flex:1; min-width:0; }
-  }
-
   /* ===== Display-size (UI scale) control in theme panel ===== */
   .theme-panel .tp-hint{ font-weight:400; text-transform:none; letter-spacing:0; color:var(--ink-soft); font-size:10.5px; margin-left:6px; }
   .theme-panel .tp-scale{ display:flex; gap:6px; }
@@ -1966,94 +1812,13 @@
   .diff-row .d-arrow{ margin:0 6px; color:var(--ink-soft); }
   .diff-empty{ padding:16px 14px; color:var(--ink-soft); }
 
-  /* OAuth ("Sign in with GitHub") button on the login overlay */
-  .login-oauth{ margin:2px 0 4px; }
-  .oauth-btn{ display:flex; align-items:center; justify-content:center; gap:9px; width:100%; padding:11px 14px;
-    border-radius:11px; border:1px solid var(--chrome-edge); background:var(--ink); color:var(--paper);
-    font-size:14px; font-weight:600; cursor:pointer; transition:opacity .15s; }
-  .oauth-btn:hover{ opacity:.9; }
-  .oauth-btn svg{ width:18px; height:18px; fill:currentColor; }
-  .oauth-or{ display:flex; align-items:center; gap:10px; margin:15px 2px 2px; color:var(--ink-soft); font-size:12px; }
-  .oauth-or::before, .oauth-or::after{ content:''; flex:1; height:1px; background:var(--line); }
-
 /* Pinned maps: small badge before the title in the sidebar list. */
 .map-item.pinned .nm::before{ content:'\1F4CC'; margin-right:6px; font-size:.85em; opacity:.9; }
-
-/* Live collaboration: remote cursors + presence pill. */
-#collabCursors{ position:fixed; inset:0; pointer-events:none; z-index:60; overflow:hidden; }
-.collab-cursor{ position:absolute; top:0; left:0; will-change:transform; transition:transform .08s linear; }
-.collab-cursor svg{ display:block; filter:drop-shadow(0 1px 1px rgba(0,0,0,.3)); }
-.collab-cursor b{ position:absolute; left:15px; top:13px; font-size:11px; font-weight:600; color:#fff; padding:1px 6px; border-radius:8px; white-space:nowrap; }
-#collabPill{ position:fixed; bottom:18px; left:18px; z-index:70; display:flex; align-items:center; gap:8px;
-  background:var(--chrome); border:1px solid var(--chrome-edge); border-radius:999px; padding:5px 8px 5px 12px;
-  box-shadow:var(--shadow); font-size:12px; font-weight:500; }
-#collabPill .cp-dots{ display:flex; }
-#collabPill .cp-dot{ width:13px; height:13px; border-radius:50%; border:2px solid var(--chrome); margin-left:-5px; }
-#collabPill .cp-dot:first-child{ margin-left:0; }
-#collabPill .cp-txt{ color:var(--ink-soft); }
-#collabPill button{ border:none; background:transparent; cursor:pointer; font-size:12px; opacity:.7; padding:2px 5px; border-radius:6px; color:var(--ink-soft); }
-#collabPill button:hover{ opacity:1; background:var(--hover, rgba(127,127,127,.18)); }
-#collabPill .cp-save{ opacity:1; font-weight:600; color:var(--accent); padding:3px 9px; border:1px solid var(--chrome-edge); border-radius:999px; }
-#collabPill .cp-save:hover{ background:var(--accent); color:#fff; border-color:var(--accent); }
 
 /* Export menu: small uppercase section labels grouping the items. */
 .ex-grp{ font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.6px;
   color:var(--ink-soft); opacity:.65; padding:10px 14px 3px; user-select:none; }
 .export-pop > .ex-grp:first-child{ padding-top:6px; }
-
-/* Shared-with-me section in the sidebar. */
-.map-group-label{ font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.6px; color:var(--ink-soft); opacity:.6; padding:12px 12px 4px; user-select:none; }
-.map-item .shared-badge{ font-size:11px; opacity:.7; flex:0 0 auto; margin-right:2px; }
-
-/* Cloud-edit keeps the editing toolbar visible, so push it clear of the shared banner. */
-/* Cloud-edit shows the sidebar AND toolbar, so shift the whole app below the fixed
-   shared banner (measured into --shared-banner-h so it adapts when the banner wraps). */
-body.cloud-edit .app{ padding-top:var(--shared-banner-h, 44px); }
-
-/* ---- Manage-access modal (identity ACLs) ---- */
-.access-modal{ position:fixed; inset:0; background:rgba(0,0,0,.45); display:grid; place-items:center; z-index:600; }
-.access-modal .am-card{ width:min(440px,92vw); max-height:86vh; overflow:auto; background:var(--paper); color:var(--ink);
-  border:1px solid var(--line); border-radius:14px; box-shadow:var(--shadow-lg); padding:16px 18px; }
-.access-modal .am-head{ display:flex; align-items:center; justify-content:space-between; margin-bottom:6px; font-size:16px; font-weight:700; }
-.access-modal .am-x{ background:none; border:none; color:var(--ink-soft); font-size:22px; line-height:1; cursor:pointer; }
-.access-modal .am-x:hover{ color:var(--ink); }
-.access-modal .am-sec{ margin-top:14px; }
-.access-modal .am-lbl{ font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--ink-soft); margin-bottom:8px; }
-.access-modal .am-link label{ display:block; padding:5px 0; font-size:14px; cursor:pointer; }
-.access-modal .am-link input{ margin-right:8px; accent-color:var(--accent); }
-.access-modal .am-auth{ display:flex; align-items:center; gap:8px; margin-top:10px; font-size:13.5px; cursor:pointer; }
-.access-modal .am-auth input{ margin:0; accent-color:var(--accent); }
-.access-modal .am-auth input:disabled{ opacity:.4; }
-.access-modal .am-list{ display:flex; flex-direction:column; gap:6px; margin-bottom:10px; }
-.access-modal .am-row{ display:flex; align-items:center; gap:10px; padding:7px 10px; background:var(--paper-2); border:1px solid var(--line); border-radius:8px; }
-.access-modal .am-who{ flex:1; font-size:14px; }
-.access-modal .am-role{ font-size:12px; color:var(--ink-soft); }
-.access-modal .am-rm{ background:none; border:1px solid var(--line-2); color:var(--ink-soft); border-radius:6px; padding:3px 9px; font-size:12px; cursor:pointer; }
-.access-modal .am-rm:hover{ border-color:var(--accent); color:var(--accent); }
-.access-modal .am-empty{ font-size:13px; color:var(--ink-soft); padding:6px 2px; }
-.access-modal .am-add{ display:flex; gap:8px; }
-.access-modal .am-user{ flex:1; background:var(--paper-2); border:1px solid var(--line); color:var(--ink); border-radius:8px; padding:8px 10px; font-size:14px; }
-.access-modal .am-user::placeholder{ color:var(--ink-soft); }
-.access-modal .am-user:focus{ outline:none; border-color:var(--accent); }
-.access-modal .am-newrole{ background:var(--paper-2); border:1px solid var(--line); color:var(--ink); border-radius:8px; padding:8px; }
-.access-modal .am-addbtn{ background:var(--accent); border:none; color:#fff; border-radius:8px; padding:8px 14px; font-weight:600; cursor:pointer; }
-.access-modal .am-addbtn:hover{ background:var(--accent-deep); }
-.access-modal .am-vis{ display:flex; flex-direction:column; gap:5px; }
-.access-modal .am-visrow{ display:flex; align-items:center; justify-content:space-between; padding:5px 10px; background:var(--paper-2); border:1px solid var(--line); border-radius:8px; font-size:13px; }
-.access-modal .am-vtime{ color:var(--ink-soft); font-size:12px; }
-.access-modal .am-foot{ margin-top:14px; font-size:12px; color:var(--ink-soft); }
-
-/* Contextual note on the login overlay when access requires sign-in (e.g. a shared map) */
-.login-share-note{ margin:0 0 14px; padding:10px 13px; border-radius:10px; font-size:13.5px; line-height:1.4;
-  background:color-mix(in srgb, var(--accent) 14%, transparent); border:1px solid color-mix(in srgb, var(--accent) 40%, transparent); color:var(--ink); }
-
-/* Shared-map indicator: a compact themed pill (replaces the full-width banner). */
-.user-pill.shared-pill{ background:var(--accent); color:#fff; border-color:transparent; font-weight:600; padding:3px 12px; }
-.user-pill.shared-pill img, .user-pill.shared-pill button{ display:none !important; }
-.user-pill.shared-pill span{ display:inline-block !important; padding:0; }
-/* Pill-mode has no banner, so reclaim the space the banner used to reserve. */
-body.no-banner.cloud-edit .app{ padding-top:0; }
-body.no-banner.shared-view .stage{ top:0; }
 
 /* Themed scrollbars — desktop only (mobile keeps native overlay scrollbars) */
 @media (min-width:721px){

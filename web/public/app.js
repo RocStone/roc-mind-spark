@@ -7258,7 +7258,7 @@ stage.addEventListener('touchstart', e=>{
   if(e.touches.length!==1) return;
   const t=e.touches[0];
   // Don't intercept taps on the chrome / overlay UI
-  if(t.target && t.target.closest && t.target.closest('.topbar, .zoombar, .hint, .toast, .nodebar, .empty, .search-wrap, .save-pill, .tb-group, .side, .picker, .notes-popup, .theme-panel, .login-overlay, .user-pill, .minimap, .breadcrumb, .wheel-speed, .edit-float')) return;
+  if(t.target && t.target.closest && t.target.closest('.topbar, .zoombar, .hint, .toast, .nodebar, .empty, .search-wrap, .save-pill, .tb-group, .side, .picker, .notes-popup, .theme-panel, .minimap, .breadcrumb, .wheel-speed, .edit-float')) return;
   const nodeEl=t.target.closest?.('.node');
   // Don't pan / drag when tapping inside a node that's being edited —
   // contentEditable needs to handle the touch for caret placement and selection.
