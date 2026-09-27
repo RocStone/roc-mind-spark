@@ -38,12 +38,20 @@ struct LauncherHUDSnapshot: Equatable, Sendable {
         let infos = (CGWindowListCopyWindowInfo(opts, kCGNullWindowID) as? [[String: Any]]) ?? []
         let statusLevel = Int32(CGWindowLevelForKey(.statusWindow))
 
-        let windows = infos.compactMap { info -> LauncherHUDWindow? in
+        // Most on-screen windows belong to other apps. Rejecting them by
+        // owner name first keeps NSRunningApplication (an XPC round-trip per
+        // pid) off the 150 ms path; the few survivors hit the pid cache.
+        let candidates = infos.filter {
+            isLauncherOwnerName(($0[kCGWindowOwnerName as String] as? String) ?? "")
+        }
+        let bundleIds = bundleCache.lookup(pids: candidates.compactMap {
+            ($0[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value
+        })
+
+        let windows = candidates.compactMap { info -> LauncherHUDWindow? in
             let name = (info[kCGWindowOwnerName as String] as? String) ?? ""
             let pid = (info[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value ?? 0
-            let bundle = pid > 0
-                ? NSRunningApplication(processIdentifier: pid_t(pid))?.bundleIdentifier
-                : nil
+            let bundle = bundleIds[pid] ?? nil
             guard bundle != overlayBundleId,
                   isLauncherHudOwner(name: name, bundleId: bundle),
                   let number = info[kCGWindowNumber as String] as? NSNumber
@@ -83,6 +91,13 @@ struct LauncherHUDSnapshot: Equatable, Sendable {
             if id.contains("alfred") { return true }
             if id == "com.apple.spotlight" { return true }
         }
+        return isLauncherOwnerName(name)
+    }
+
+    /// The owner-name half of `isLauncherHudOwner`. `capture()` uses it as a
+    /// prefilter, so a launcher is recognized only if its window owner name
+    /// matches; the bundle id is looked up only for those windows.
+    static func isLauncherOwnerName(_ name: String) -> Bool {
         let owner = name.lowercased()
         if owner.contains("raycast") { return true }
         if owner.contains("alfred") { return true }
@@ -90,11 +105,44 @@ struct LauncherHUDSnapshot: Equatable, Sendable {
         return false
     }
 
+    static let bundleCache = PIDBundleCache { pid in
+        NSRunningApplication(processIdentifier: pid_t(pid))?.bundleIdentifier
+    }
+
     /// Menu extras are tiny. The search HUD is a wide bar / results list.
     static func isLauncherHudMetrics(width: Double, height: Double, alpha: Double) -> Bool {
         if alpha < 0.05 { return false }
         if width <= 0 || height <= 0 { return false }
         return width >= 280 && height >= 48
+    }
+}
+
+/// pid -> bundle id for launcher windows, so the 150 ms probe does not
+/// create `NSRunningApplication` objects each time. Entries for pids that no
+/// longer own a candidate window are dropped on every lookup, which bounds
+/// the size and keeps a reused pid from inheriting a stale bundle id.
+final class PIDBundleCache: @unchecked Sendable {
+    private let resolve: @Sendable (Int32) -> String?
+    private let lock = NSLock()
+    private var entries: [Int32: String?] = [:]
+
+    init(resolve: @escaping @Sendable (Int32) -> String?) {
+        self.resolve = resolve
+    }
+
+    func lookup(pids: [Int32]) -> [Int32: String?] {
+        lock.lock()
+        defer { lock.unlock() }
+        var next: [Int32: String?] = [:]
+        for pid in pids where pid > 0 && next[pid] == nil {
+            if let cached = entries[pid] {
+                next[pid] = cached
+            } else {
+                next[pid] = .some(resolve(pid))
+            }
+        }
+        entries = next
+        return next
     }
 }
 
