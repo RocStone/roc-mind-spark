@@ -2669,6 +2669,11 @@ function applyMdPaneI18n(pane){
   setTitle('.md-prev-btn','mdPreview','Toggle rendered preview');
   setTitle('.md-close','mdExit','Exit Markdown mode');
   setTitle('.md-resize','mdResize','Drag to resize');
+  const setText=(sel,txt)=>{ const el=pane.querySelector(sel); if(el) el.textContent=txt; };
+  setText('.md-pdf-btn', rmsTr('mdPdfBtn','Download PDF'));
+  setText('.md-wrap-btn', rmsTr('mdWrapBtn','Wrap'));
+  setText('.md-prev-btn', (typeof mdPreview!=='undefined' && mdPreview) ? rmsTr('mdEdit','Edit') : rmsTr('mdPreviewOn','Preview'));
+  const ed=pane.querySelector('#mdEditor'); if(ed) ed.setAttribute('data-placeholder', rmsTr('mdPlaceholder','# Central idea\n- a branch\n  - a leaf'));
   const fmt={
     bold:'actBold', italic:'actItalic', strike:'actStrike', code:'inlineCode',
     h1:'heading1', h2:'heading2', h3:'heading3', quote:'blockquote',
@@ -3208,7 +3213,7 @@ function mdUpdateActive(){
   const ed=document.getElementById('mdEditor'); if(!ed) return;
   const {line, col}=mdLineColFromPos(ed.value, ed.selectionStart, _mdPosCache);
   _mdActiveLine=line;
-  const pos=document.querySelector('#mdPane .md-pos'); if(pos) pos.textContent='Ln '+(line+1)+', Col '+(col+1);
+  const pos=document.querySelector('#mdPane .md-pos'); if(pos) pos.textContent=rmsTf('mdPos','Ln %s, Col %s', line+1, col+1);
 
 }
 function mdRefreshDecorations(){

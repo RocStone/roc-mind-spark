@@ -486,6 +486,10 @@
       tplCat_personal: 'Event & personal',
       tplCat_pro: 'Professional',
       tplCat_mine: 'My templates',
+      mdPdfBtn: 'Download PDF',
+      mdWrapBtn: 'Wrap',
+      mdPlaceholder: '# Central idea\n- a branch\n  - a leaf',
+      mdPos: 'Ln %s, Col %s',
     },
     zh: {
       brand: 'Roc Mind Spark',
@@ -967,6 +971,10 @@
       tplCat_personal: '活动与个人',
       tplCat_pro: '专业领域',
       tplCat_mine: '我的模板',
+      mdPdfBtn: '下载 PDF',
+      mdWrapBtn: '换行',
+      mdPlaceholder: '# 中心主题\n- 一个分支\n  - 一片叶子',
+      mdPos: '第 %s 行，第 %s 列',
     },
   };
 
