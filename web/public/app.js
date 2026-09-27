@@ -8765,6 +8765,7 @@ function showTemplatesMenu(){
   // ----- category view: back + that category's templates -----
   const renderCategory = (catId) => {
     const cat = TEMPLATE_CATEGORIES.find(c=>c.id===catId);
+    if(!cat) return renderRoot();   // e.g. the last "My templates" entry was deleted
     const entries = Object.entries(TEMPLATES).filter(([,t])=>(t.group||'prompt')===catId);
     pop.innerHTML = `
       <button class="tpl-back" data-act="back">‹ All categories</button>
@@ -8780,8 +8781,9 @@ function showTemplatesMenu(){
       if(e.target.classList.contains('tpl-del')){
         e.stopPropagation();
         deleteUserTemplate(e.target.dataset.del);
-        renderCategory(catId);   // refresh; back to root if category now empty
-        if(!TEMPLATE_CATEGORIES.some(c=>c.id===catId)) renderRoot();
+        // Refresh; back to root if the category is now gone.
+        if(TEMPLATE_CATEGORIES.some(c=>c.id===catId)) renderCategory(catId);
+        else renderRoot();
         return;
       }
       close(); createMapFromTemplate(b.dataset.id);
