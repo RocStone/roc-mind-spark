@@ -103,16 +103,18 @@ const uid=()=>'n'+Math.random().toString(36).slice(2,9);
 // NOTE the \u{...} form for anything above U+FFFF: plain \uXXXX takes exactly
 // four hex digits, so '\u1F6A9' silently parses as '\u1F6A' followed by a
 // literal '9' and renders as garbage rather than a flag.
+// labelKey → i18n.js; label is the English fallback. Nodes store only `c`.
 const MARKERS=[
-  {c:'\u2B50',    label:'Star'},     {c:'\u2757',    label:'Important'},
-  {c:'\u2753',    label:'Question'}, {c:'\u{1F6A9}', label:'Flag'},
-  {c:'\u{1F525}', label:'Hot'},      {c:'\u{1F4A1}', label:'Idea'},
-  {c:'\u{1F440}', label:'Review'},   {c:'\u{1F512}', label:'Blocked'},
-  {c:'\u2705',    label:'Approved'}, {c:'\u274C',    label:'Rejected'},
-  {c:'\u26A0',    label:'Risk'},     {c:'\u{1F3AF}', label:'Goal'},
-  {c:'\u{1F4CC}', label:'Pinned'},   {c:'\u23F3',    label:'In progress'},
-  {c:'\u{1F48E}', label:'Finding'},
+  {c:'\u2B50',    label:'Star',     labelKey:'mkStar'},     {c:'\u2757',    label:'Important', labelKey:'mkImportant'},
+  {c:'\u2753',    label:'Question', labelKey:'mkQuestion'}, {c:'\u{1F6A9}', label:'Flag',      labelKey:'mkFlag'},
+  {c:'\u{1F525}', label:'Hot',      labelKey:'mkHot'},      {c:'\u{1F4A1}', label:'Idea',      labelKey:'mkIdea'},
+  {c:'\u{1F440}', label:'Review',   labelKey:'mkReview'},   {c:'\u{1F512}', label:'Blocked',   labelKey:'mkBlocked'},
+  {c:'\u2705',    label:'Approved', labelKey:'mkApproved'}, {c:'\u274C',    label:'Rejected',  labelKey:'mkRejected'},
+  {c:'\u26A0',    label:'Risk',     labelKey:'mkRisk'},     {c:'\u{1F3AF}', label:'Goal',      labelKey:'mkGoal'},
+  {c:'\u{1F4CC}', label:'Pinned',   labelKey:'mkPinned'},   {c:'\u23F3',    label:'In progress', labelKey:'mkInProgress'},
+  {c:'\u{1F48E}', label:'Finding',  labelKey:'mkFinding'},
 ];
+function markerLabel(m){ return m ? rmsTr(m.labelKey, m.label) : ''; }
 const NODE_COLORS=['#ffffff','#ffe2d6','#ffedc2','#dcefce','#cfe9e6','#d8e0fb','#efd9f2','#e9e2d6'];
 const PALETTE=['#e0613a','#2f6f6a','#c98a1a','#5a7d3a','#3a6ea5','#9b4f96','#8a8175'];
 
@@ -607,7 +609,7 @@ function render(){
       const mk=document.createElement('span');
       mk.className='node-marker';
       mk.textContent=n.marker;
-      const mkLabel=(MARKERS.find(m=>m.c===n.marker)||{}).label;
+      const mkLabel=markerLabel(MARKERS.find(m=>m.c===n.marker));
       mk.title=(mkLabel?mkLabel+' — ':'')+rmsTr('markerClick','click to change');
       mk.addEventListener('mousedown',ev=>ev.stopPropagation());
       mk.addEventListener('click',ev=>{ ev.stopPropagation(); showMarkerPicker(mk, id); });
@@ -679,7 +681,7 @@ function render(){
       el.appendChild(mkNodeHandle(
         'h-collapse'+(n.collapsed?' collapsed':''),
         n.collapsed?'+':'−',
-        n.collapsed?`Expand (${roll.desc[id]} hidden)`:'Collapse',
+        n.collapsed?rmsTf('nodeExpandHidden','Expand (%s hidden)', roll.desc[id]):rmsTr('ctxCollapse','Collapse'),
         ()=>{ n.collapsed=!n.collapsed; opLog(n.collapsed?'collapse':'expand', {id}); pushHistory(); autoLayout(); }
       ));
     }
@@ -2669,6 +2671,11 @@ function applyMdPaneI18n(pane){
   setTitle('.md-prev-btn','mdPreview','Toggle rendered preview');
   setTitle('.md-close','mdExit','Exit Markdown mode');
   setTitle('.md-resize','mdResize','Drag to resize');
+  const setText=(sel,txt)=>{ const el=pane.querySelector(sel); if(el) el.textContent=txt; };
+  setText('.md-pdf-btn', rmsTr('mdPdfBtn','Download PDF'));
+  setText('.md-wrap-btn', rmsTr('mdWrapBtn','Wrap'));
+  setText('.md-prev-btn', (typeof mdPreview!=='undefined' && mdPreview) ? rmsTr('mdEdit','Edit') : rmsTr('mdPreviewOn','Preview'));
+  const ed=pane.querySelector('#mdEditor'); if(ed) ed.setAttribute('data-placeholder', rmsTr('mdPlaceholder','# Central idea\n- a branch\n  - a leaf'));
   const fmt={
     bold:'actBold', italic:'actItalic', strike:'actStrike', code:'inlineCode',
     h1:'heading1', h2:'heading2', h3:'heading3', quote:'blockquote',
@@ -3208,7 +3215,7 @@ function mdUpdateActive(){
   const ed=document.getElementById('mdEditor'); if(!ed) return;
   const {line, col}=mdLineColFromPos(ed.value, ed.selectionStart, _mdPosCache);
   _mdActiveLine=line;
-  const pos=document.querySelector('#mdPane .md-pos'); if(pos) pos.textContent='Ln '+(line+1)+', Col '+(col+1);
+  const pos=document.querySelector('#mdPane .md-pos'); if(pos) pos.textContent=rmsTf('mdPos','Ln %s, Col %s', line+1, col+1);
 
 }
 function mdRefreshDecorations(){
@@ -3249,7 +3256,7 @@ function mdCommitVisibleEdit(){
     const freshView=mdBuildView(); _mdView=freshView;
     const freshVis=mdVisibleText(freshView);
     ed.value=freshVis; _mdPrevVisible=freshVis;
-    if(changed) toast('Expanded a folded section — try that edit again');
+    if(changed) toast(rmsTr('tExpandedFold','Expanded a folded section — try that edit again'));
     return;
   }
   const newFullLines=newLines.slice(p,newEnd);
@@ -3482,7 +3489,7 @@ function insertChildNode(parent, extra){
   // Pick a random soft color from the palette (skip plain white at index 0)
   const palette=NODE_COLORS.slice(1);
   const color=palette[Math.floor(Math.random()*palette.length)];
-  const node={id,text:'New topic',parent:pn.id,
+  const node={id,text:rmsTr('newTopic','New topic'),parent:pn.id,
     x:pn.x+(side==='left'?-180:180),y:pn.y+40,side, color, created:Date.now()};
   if(extra) Object.assign(node, extra);
   map.nodes[id]=node;
@@ -3739,7 +3746,7 @@ function bulkCycleAlign(){
   const next = order[(order.indexOf(cur)+1) % order.length];
   ids.forEach(id => { map.nodes[id].align = next; });
   pushHistory(); render(); updateMultiSelUI();
-  toast('Aligned '+next);
+  toast(rmsTf('tAligned','Aligned %s', rmsTr('align_'+next, next)));
 }
 function showBulkSizePicker(anchorBtn){
   document.querySelectorAll('.picker').forEach(p=>p.remove());
@@ -3780,7 +3787,7 @@ function showBulkColorPicker(anchorBtn, kind){
 function bulkDelete(){
   if(READONLY) return;
   const targets = [...multiSel].filter(id => id !== map.rootId);
-  if(!targets.length){ toast('Can’t delete the root'); return; }
+  if(!targets.length){ toast(rmsTr('tCantDeleteRoot','Can’t delete the root')); return; }
   const removed = new Set();
   targets.forEach(id=>{
     if(!map.nodes[id]) return;
@@ -3792,7 +3799,7 @@ function bulkDelete(){
   clearMultiSelect();
   opLog('bulkDel', {text:String(removed.size)});
   pushHistory(); autoLayout();
-  toast(`Deleted ${removed.size} node${removed.size===1?'':'s'}`);
+  toast(removed.size===1 ? rmsTr('tDeletedOne','Deleted 1 node') : rmsTf('tDeletedN','Deleted %s nodes', removed.size));
 }
 function startBulkReparent(){
   reparentMode = true;
@@ -3813,7 +3820,7 @@ function copySelectionAsMarkdown(){
   if(typeof navigator!=='undefined' && navigator.clipboard && navigator.clipboard.writeText){
     navigator.clipboard.writeText(md).then(
       ()=>toast(rmsTr('copiedAsMd','Copied as Markdown')),
-      ()=>toast('Copy failed')
+      ()=>toast(rmsTr('tCopyFailed','Copy failed'))
     );
     return true;
   }
@@ -3826,7 +3833,7 @@ function bulkReparent(targetId){
   reparentMode = false;
   if(did) clearMultiSelect();
   else updateMultiSelUI();
-  toast(did ? `Moved ${roots.length} node${roots.length===1?'':'s'}` : 'Nothing moved');
+  toast(did ? (roots.length===1 ? rmsTr('tMovedOne','Moved 1 node') : rmsTf('tMovedN','Moved %s nodes', roots.length)) : rmsTr('tNothingMoved','Nothing moved'));
 }
 
 // Axis-aligned boxes. Used by ⌘-marquee hit-testing.
@@ -4219,7 +4226,7 @@ function startLinkMode(sourceId){
   if(READONLY || !sourceId){ return; }
   linkMode = true; linkSource = sourceId;
   document.querySelector(`.node[data-id="${sourceId}"]`)?.classList.add('link-source');
-  toast('Link mode — click another node (Esc to cancel)');
+  toast(rmsTr('tLinkMode','Link mode — click another node (Esc to cancel)'));
 }
 function cancelLinkMode(){
   linkMode = false; linkSource = null;
@@ -4236,10 +4243,10 @@ function completeLink(targetId){
     (l.from===from && l.to===targetId) || (l.from===targetId && l.to===from));
   if(existsIdx >= 0){
     map.links.splice(existsIdx, 1);
-    toast('Cross-link removed');
+    toast(rmsTr('tLinkRemoved','Cross-link removed'));
   } else {
     map.links.push({ from, to: targetId });
-    toast('Cross-link added');
+    toast(rmsTr('tLinkAdded','Cross-link added'));
   }
   pushHistory(); render(); scheduleSave();
 }
@@ -4263,7 +4270,7 @@ function showMarkerPicker(anchor, id){
   const p=document.createElement('div');
   p.className='picker marker-picker'; p._anchor=anchor;
   p.innerHTML = MARKERS.map(m=>
-      `<button data-v="${m.c}" title="${escapeHtml(m.label)}" class="${m.c===cur?'on':''}">${m.c}</button>`
+      `<button data-v="${m.c}" title="${escapeHtml(markerLabel(m))}" class="${m.c===cur?'on':''}">${m.c}</button>`
     ).join('') +
     `<button data-v="" title="${rmsTr('markerRemove','Remove marker')}" class="mk-none">\u2716</button>`;
   document.body.appendChild(p);
@@ -4547,7 +4554,7 @@ function openExternalUrl(url){
 function openNodeUrl(id){
   const n=map.nodes[id]; if(!n) return;
   const url=normalizeNodeUrl(n.url);
-  if(!url){ toast('No valid URL on this node'); return; }
+  if(!url){ toast(rmsTr('tNoUrl','No valid URL on this node')); return; }
   openExternalUrl(url);
 }
 function setNodeUrl(id, raw){
@@ -4555,7 +4562,7 @@ function setNodeUrl(id, raw){
   flushOpenEditToModel();
   const trimmed=String(raw==null?'':raw).trim();
   const url=normalizeNodeUrl(trimmed);
-  if(trimmed && !url){ toast('Need a valid http(s) URL'); return false; }
+  if(trimmed && !url){ toast(rmsTr('tNeedUrl','Need a valid http(s) URL')); return false; }
   if(url) n.url=url; else delete n.url;
   n.updated=Date.now();
   pushHistory(); render(); autoLayout();
@@ -4733,15 +4740,14 @@ function formatCitation(c){
 function importLayoutPreset(parsed){
   const preset = validateLayoutPreset(parsed);
   if(!preset){
-    return {error:'Not a usable layout. It needs an "id" (letters, digits and dashes), '
-      + 'a "name", and an "engine" that is one of: ' + LAYOUT_ENGINES.join(', ') + '.'};
+    return {error:rmsTf('layoutErrUnusable','Not a usable layout. It needs an "id" (letters, digits and dashes), a "name", and an "engine" that is one of: %s.', LAYOUT_ENGINES.join(', '))};
   }
   if(BUILTIN_LAYOUTS.some(b=>b.id===preset.id)){
-    return {error:`"${preset.id}" is a built-in layout name \u2014 please choose another id.`};
+    return {error:rmsTf('layoutErrBuiltin','“%s” is a built-in layout name — please choose another id.', preset.id)};
   }
   const list = loadCustomLayouts().filter(c=>c.id!==preset.id);   // re-importing replaces
   list.push(preset);
-  if(!saveCustomLayouts(list)) return {error:'Could not save \u2014 this browser\u2019s storage may be full.'};
+  if(!saveCustomLayouts(list)) return {error:rmsTr('layoutErrStorage','Could not save — this browser’s storage may be full.')};
   return {preset};
 }
 // The layout presets shipped in public/layouts/ (listed by index.json). Loaded
@@ -4780,8 +4786,8 @@ function fillLayoutPresetRow(panel, curLayout){
     // A preset imported earlier would otherwise show twice.
     panel.querySelectorAll('.theme-opt[data-cat="layout"]').forEach(o=>{ if(ids.has(o.dataset.id)) o.remove(); });
     row.innerHTML=list.map(raw=>`
-      <button class="theme-opt${raw.id===curLayout?' active':''}" data-cat="layout-preset" data-id="${escapeHtml(raw.id)}" title="${escapeHtml(raw.desc||'')}">
-        ${buildLayoutThumb(layoutThumbId(raw))}<span class="theme-name">${escapeHtml(raw.name)}</span>
+      <button class="theme-opt${raw.id===curLayout?' active':''}" data-cat="layout-preset" data-id="${escapeHtml(raw.id)}" title="${escapeHtml(layoutDesc(raw))}">
+        ${buildLayoutThumb(layoutThumbId(raw))}<span class="theme-name">${escapeHtml(layoutName(raw))}</span>
       </button>`).join('')+importTile;
     row.querySelectorAll('.theme-opt[data-cat="layout-preset"]').forEach((opt,i)=>{
       opt.onclick=ev=>{
@@ -4817,23 +4823,20 @@ function showLayoutImportForm(){
   m.innerHTML=`
     <div class="vf-backdrop"></div>
     <div class="vf-card">
-      <button class="vf-close" aria-label="Close">\u00d7</button>
-      <h2>Import a layout</h2>
-      <div class="vf-hint">A layout picks one of the built-in engines
-        (${LAYOUT_ENGINES.join(', ')}) and tunes it — it cannot define a new
-        algorithm. Imported layouts are saved on this device; the maps you apply
-        them to stay readable for everyone.</div>
+      <button class="vf-close" aria-label="${rmsTh('close','Close')}">\u00d7</button>
+      <h2>${rmsTh('liTitle','Import a layout')}</h2>
+      <div class="vf-hint">${escapeHtml(rmsTf('liHint','A layout picks one of the built-in engines (%s) and tunes it — it cannot define a new algorithm. Imported layouts are saved on this device; the maps you apply them to stay readable for everyone.', LAYOUT_ENGINES.join(', ')))}</div>
       <div class="vf-fields">
         <textarea class="vf-input vf-json" rows="14" spellcheck="false">${escapeHtml(sample)}</textarea>
       </div>
       <div class="vf-err" hidden></div>
-      ${customs.length ? `<div class="vf-hint" style="margin-top:10px">Saved layouts</div>
+      ${customs.length ? `<div class="vf-hint" style="margin-top:10px">${rmsTh('liSaved','Saved layouts')}</div>
         <div class="li-list">${customs.map(c=>
-          `<span class="li-chip">${escapeHtml(c.name)}<button data-del="${escapeHtml(c.id)}" title="Remove">\u00d7</button></span>`
+          `<span class="li-chip">${escapeHtml(layoutName(c))}<button data-del="${escapeHtml(c.id)}" title="${rmsTh('dlgRemove','Remove')}">\u00d7</button></span>`
         ).join('')}</div>` : ''}
       <div class="vf-actions">
-        <button class="vf-cancel">Cancel</button>
-        <button class="vf-go primary">Import</button>
+        <button class="vf-cancel">${rmsTh('cancel','Cancel')}</button>
+        <button class="vf-go primary">${rmsTh('liImport','Import')}</button>
       </div>
     </div>`;
   document.body.appendChild(m);
@@ -4845,18 +4848,18 @@ function showLayoutImportForm(){
   m.querySelector('.vf-go').onclick=()=>{
     let parsed;
     try{ parsed = JSON.parse(ta.value); }
-    catch(e){ return fail('Not valid JSON: '+e.message); }
+    catch(e){ return fail(rmsTf('errBadJson','Not valid JSON: %s', e.message)); }
     const res = importLayoutPreset(parsed);
     if(res.error) return fail(res.error);
     const preset = res.preset;
-    close(); toast(`Layout \u201c${preset.name}\u201d imported`);
+    close(); toast(rmsTf('tLayoutImported','Layout “%s” imported', layoutName(preset)));
     try{ $('#themeBtn').click(); }catch(_){}   // reopen so the new entry is visible
   };
   m.querySelectorAll('[data-del]').forEach(b=> b.onclick=()=>{
     const id=b.dataset.del;
     saveCustomLayouts(loadCustomLayouts().filter(c=>c.id!==id));
     // A map already using it keeps working: engine and options live on the map.
-    close(); toast('Layout removed');
+    close(); toast(rmsTr('tLayoutRemoved','Layout removed'));
     try{ $('#themeBtn').click(); }catch(_){}
   });
   m.querySelector('.vf-cancel').onclick=close;
@@ -4875,19 +4878,17 @@ function showLayoutConfigForm(){
   m.innerHTML=`
     <div class="vf-backdrop"></div>
     <div class="vf-card">
-      <button class="vf-close" aria-label="Close">\u00d7</button>
-      <h2>Layout settings \u2014 ${escapeHtml((findLayout(map.layoutPreset||engine)||{name:engine}).name)}</h2>
-      <div class="vf-hint">Saved with this map and included in share links. Out-of-range
-        values are clamped and unknown keys ignored, so what you get back may differ
-        from what you type.</div>
+      <button class="vf-close" aria-label="${rmsTh('close','Close')}">\u00d7</button>
+      <h2>${escapeHtml(rmsTf('lcTitle','Layout settings — %s', layoutName(findLayout(map.layoutPreset||engine)||{name:engine})))}</h2>
+      <div class="vf-hint">${rmsTh('lcHint','Saved with this map and included in share links. Out-of-range values are clamped and unknown keys ignored, so what you get back may differ from what you type.')}</div>
       <div class="vf-fields">
         <textarea class="vf-input vf-json" rows="14" spellcheck="false">${escapeHtml(current)}</textarea>
       </div>
       <div class="vf-err" hidden></div>
       <div class="vf-actions">
-        <button class="vf-unref">Reset to defaults</button>
-        <button class="vf-cancel">Cancel</button>
-        <button class="vf-go primary">Apply</button>
+        <button class="vf-unref">${rmsTh('lcReset','Reset to defaults')}</button>
+        <button class="vf-cancel">${rmsTh('cancel','Cancel')}</button>
+        <button class="vf-go primary">${rmsTh('lcApply','Apply')}</button>
       </div>
     </div>`;
   document.body.appendChild(m);
@@ -4907,12 +4908,12 @@ function showLayoutConfigForm(){
     // config and the node positions it produced.
     render(); autoLayout(); pushHistory();
     try{ scheduleSave(); }catch(e){ console.warn('saving layout settings failed:', e.message); }
-    close(); toast('Layout settings saved');
+    close(); toast(rmsTr('tLayoutSaved','Layout settings saved'));
   };
   m.querySelector('.vf-go').onclick=()=>{
     let parsed;
     try{ parsed = JSON.parse(ta.value); }
-    catch(e){ err.hidden=false; err.textContent='Not valid JSON: '+e.message; return; }
+    catch(e){ err.hidden=false; err.textContent=rmsTf('errBadJson','Not valid JSON: %s', e.message); return; }
     // Keep only the section for the engine being edited.
     apply(layoutConfigFor(engine, parsed));
   };
@@ -4930,24 +4931,24 @@ function showCitationForm(id){
   m.innerHTML=`
     <div class="vf-backdrop"></div>
     <div class="vf-card">
-      <button class="vf-close" aria-label="Close">×</button>
-      <h2>Reference / citation</h2>
-      <p class="vf-sub">Fill the fields, or paste a full citation into "Authors". The node will show the formatted reference and be included in <b>Export → References</b>.</p>
+      <button class="vf-close" aria-label="${rmsTh('close','Close')}">×</button>
+      <h2>${rmsTh('citeTitle','Reference / citation')}</h2>
+      <p class="vf-sub">${rmsTr('citeSubHtml','Fill the fields, or paste a full citation into “Authors”. The node will show the formatted reference and be included in <b>Export → References</b>.')}</p>
       <div class="vf-doi-lookup">
-        <input class="vf-doi-in" placeholder="Paste a DOI to autofill (e.g. 10.1109/TIM.2026.3659640)">
-        <button class="vf-doi-go">Fetch</button>
+        <input class="vf-doi-in" placeholder="${rmsTh('citeDoiPh','Paste a DOI to autofill (e.g. 10.1109/TIM.2026.3659640)')}">
+        <button class="vf-doi-go">${rmsTh('citeFetch','Fetch')}</button>
       </div>
       <div class="vf-fields">
-        <label class="vf-row"><span class="vf-name">Authors</span><textarea class="vf-input" data-f="authors" rows="1" placeholder="Smith, J. & Doe, A.">${escapeHtml(c.authors||'')}</textarea></label>
-        <label class="vf-row"><span class="vf-name">Title</span><textarea class="vf-input" data-f="title" rows="1" placeholder="A study of …">${escapeHtml(c.title||'')}</textarea></label>
-        <label class="vf-row"><span class="vf-name">Year</span><textarea class="vf-input" data-f="year" rows="1" placeholder="2026">${escapeHtml(c.year||'')}</textarea></label>
-        <label class="vf-row"><span class="vf-name">Source / venue</span><textarea class="vf-input" data-f="source" rows="1" placeholder="Journal / Conference">${escapeHtml(c.source||'')}</textarea></label>
-        <label class="vf-row"><span class="vf-name">DOI / URL</span><textarea class="vf-input" data-f="doi" rows="1" placeholder="10.1109/… or https://…">${escapeHtml(c.doi||'')}</textarea></label>
+        <label class="vf-row"><span class="vf-name">${rmsTh('citeAuthors','Authors')}</span><textarea class="vf-input" data-f="authors" rows="1" placeholder="Smith, J. & Doe, A.">${escapeHtml(c.authors||'')}</textarea></label>
+        <label class="vf-row"><span class="vf-name">${rmsTh('citeTitleField','Title')}</span><textarea class="vf-input" data-f="title" rows="1" placeholder="${rmsTh('citeTitlePh','A study of …')}">${escapeHtml(c.title||'')}</textarea></label>
+        <label class="vf-row"><span class="vf-name">${rmsTh('citeYear','Year')}</span><textarea class="vf-input" data-f="year" rows="1" placeholder="2026">${escapeHtml(c.year||'')}</textarea></label>
+        <label class="vf-row"><span class="vf-name">${rmsTh('citeSource','Source / venue')}</span><textarea class="vf-input" data-f="source" rows="1" placeholder="${rmsTh('citeSourcePh','Journal / Conference')}">${escapeHtml(c.source||'')}</textarea></label>
+        <label class="vf-row"><span class="vf-name">DOI / URL</span><textarea class="vf-input" data-f="doi" rows="1" placeholder="${rmsTh('citeDoiFieldPh','10.1109/… or https://…')}">${escapeHtml(c.doi||'')}</textarea></label>
       </div>
       <div class="vf-actions">
-        ${n.ref?'<button class="vf-unref">Remove reference</button>':''}
-        <button class="vf-cancel">Cancel</button>
-        <button class="vf-go primary">Save reference</button>
+        ${n.ref?`<button class="vf-unref">${rmsTh('citeRemove','Remove reference')}</button>`:''}
+        <button class="vf-cancel">${rmsTh('cancel','Cancel')}</button>
+        <button class="vf-go primary">${rmsTh('citeSave','Save reference')}</button>
       </div>
     </div>`;
   document.body.appendChild(m);
@@ -4960,7 +4961,7 @@ function showCitationForm(id){
   const setField=(f,val)=>{ const ta=m.querySelector(`.vf-input[data-f="${f}"]`); if(ta && val){ ta.value=val; ta.dispatchEvent(new Event('input')); } };
   const fetchDoi=async()=>{
     let doi=(doiIn.value||'').trim();
-    if(!doi){ toast('Paste a DOI first'); return; }
+    if(!doi){ toast(rmsTr('tPasteDoi','Paste a DOI first')); return; }
     doi=doi.replace(/^https?:\/\/(dx\.)?doi\.org\//i,'').replace(/^doi:/i,'').trim();
     doiGo.disabled=true; const old=doiGo.textContent; doiGo.textContent='…';
     try{
@@ -4976,8 +4977,8 @@ function showCitationForm(id){
       if(yr) setField('year',String(yr));
       if(source) setField('source',source);
       setField('doi', msg.DOI ? 'https://doi.org/'+msg.DOI : doi);
-      toast('Citation autofilled');
-    }catch(e){ toast('DOI lookup failed — check the DOI or fill manually'); }
+      toast(rmsTr('tCiteFilled','Citation autofilled'));
+    }catch(e){ toast(rmsTr('tDoiFailed','DOI lookup failed — check the DOI or fill manually')); }
     finally{ doiGo.disabled=false; doiGo.textContent=old; }
   };
   doiGo.onclick=fetchDoi;
@@ -4987,9 +4988,9 @@ function showCitationForm(id){
     n.citation=cit; n.ref=true;
     const formatted=formatCitation(cit);
     if(formatted) n.text=formatted;
-    pushHistory(); render(); close(); toast('Reference saved');
+    pushHistory(); render(); close(); toast(rmsTr('tRefSaved','Reference saved'));
   };
-  m.querySelector('.vf-unref')?.addEventListener('click',()=>{ delete n.ref; delete n.citation; pushHistory(); render(); close(); toast('Reference removed'); });
+  m.querySelector('.vf-unref')?.addEventListener('click',()=>{ delete n.ref; delete n.citation; pushHistory(); render(); close(); toast(rmsTr('tRefRemoved','Reference removed')); });
   m.querySelector('.vf-cancel').onclick=close;
   m.querySelector('.vf-close').onclick=close;
   m.querySelector('.vf-backdrop').onclick=close;
@@ -4999,13 +5000,13 @@ function showCitationForm(id){
 function exportReferences(){
   if(!map) return;
   const refs=Object.values(map.nodes).filter(n=>n.ref).map(n=>formatCitation(n.citation)||nodeTextPlain(n.text));
-  if(!refs.length){ toast('No reference nodes yet — mark a node with 📖'); return; }
+  if(!refs.length){ toast(rmsTr('tNoRefs','No reference nodes yet — mark a node with 📖')); return; }
   refs.sort((a,b)=>a.localeCompare(b));
   const text='References\n\n'+refs.map((r,i)=>`[${i+1}] ${r}`).join('\n')+'\n';
   if(navigator.clipboard?.writeText){
-    navigator.clipboard.writeText(text).then(()=>toast(`${refs.length} references copied`),
-      ()=>{ download(new Blob([text],{type:'text/plain'}),(map.title||'references')+'.txt'); toast('Downloaded references'); });
-  } else { download(new Blob([text],{type:'text/plain'}),(map.title||'references')+'.txt'); toast('Downloaded references'); }
+    navigator.clipboard.writeText(text).then(()=>toast(rmsTf('tRefsCopied','%s references copied', refs.length)),
+      ()=>{ download(new Blob([text],{type:'text/plain'}),(map.title||'references')+'.txt'); toast(rmsTr('tRefsDownloaded','Downloaded references')); });
+  } else { download(new Blob([text],{type:'text/plain'}),(map.title||'references')+'.txt'); toast(rmsTr('tRefsDownloaded','Downloaded references')); }
 }
 
 /* ============================================================
@@ -5065,7 +5066,7 @@ function detachImageFromNode(id){
   return true;
 }
 function failImageAttach(id){
-  toast('Could not read image');
+  toast(rmsTr('tImgReadFail','Could not read image'));
   const n=map && map.nodes && map.nodes[id];
   if(!n || n.image) return;
   if(n.text && !n.imagePending) return;
@@ -5097,7 +5098,7 @@ async function uploadMapImage(blob, mime){
   return j.name;
 }
 function readImageFile(file,id){
-  if(!file || !file.type || !file.type.startsWith('image/')){ toast('Not an image file'); return; }
+  if(!file || !file.type || !file.type.startsWith('image/')){ toast(rmsTr('tNotImage','Not an image file')); return; }
   Promise.resolve(uploadMapImage(file, file.type)).then(
     name => commitImageData(id, name),
     () => failImageAttach(id)
@@ -5143,7 +5144,7 @@ function pasteImageAsChild(file, dataUrl, fileName){
   if(typeof document!=='undefined' && typeof isAppTextField==='function' && isAppTextField(document.activeElement)
      && !(typeof openClipboardTarget==='function' && openClipboardTarget())) return false;
   const parentId=resolveImagePasteParentId();
-  if(!parentId){ toast('Select a topic first, then paste the image'); return false; }
+  if(!parentId){ toast(rmsTr('tSelectForImage','Select a topic first, then paste the image')); return false; }
   const id=beginImagePasteAsChild(parentId);
   if(!id) return false;
   if(fileName) commitImageData(id, fileName);
@@ -5224,10 +5225,10 @@ if(stage){
     e.preventDefault();
     setFileDropTarget(null);
     const id = nodeIdAtPoint(e.clientX, e.clientY);
-    if(!id){ toast('Drop an image onto a topic card to attach it'); return; }
+    if(!id){ toast(rmsTr('tDropOnCard','Drop an image onto a topic card to attach it')); return; }
     const file = firstImageFile(e.dataTransfer);
-    if(!file){ toast('Only image files can be attached'); return; }
-    if(e.dataTransfer.files && e.dataTransfer.files.length > 1) toast('Attaching the first image only');
+    if(!file){ toast(rmsTr('tOnlyImages','Only image files can be attached')); return; }
+    if(e.dataTransfer.files && e.dataTransfer.files.length > 1) toast(rmsTr('tFirstImageOnly','Attaching the first image only'));
     // Same commit-first reasoning as the paste handler below.
     const editingEl = document.querySelector('.node.editing');
     if(editingEl){
@@ -5682,7 +5683,7 @@ function updateFormulaAutocomplete(textEl, nodeId){
   _formulaAC.el.innerHTML='';
   matches.forEach(f=>{
     const row=document.createElement('div'); row.className='formula-ac-row';
-    row.innerHTML='<span class="formula-ac-sig">'+f.sig+'</span><span class="formula-ac-desc">'+f.desc+'</span>';
+    row.innerHTML='<span class="formula-ac-sig">'+f.sig+'</span><span class="formula-ac-desc">'+escapeHtml(rmsTr('fx_'+f.name, f.desc))+'</span>';
     row.addEventListener('mousedown', e=>{ e.preventDefault(); _insertFormulaSuggestion(); });
     _formulaAC.el.appendChild(row);
   });
@@ -5737,6 +5738,17 @@ function rmsTr(key, fallback){
   }
   return fallback!=null ? fallback : key;
 }
+// rmsTr + fill each %s in order. A replacer function keeps `$&` etc. literal.
+function rmsTf(key, fallback, ...args){
+  let s=rmsTr(key, fallback);
+  for(const a of args) s=s.replace('%s', ()=>String(a));
+  return s;
+}
+// rmsTr, HTML-escaped — for dictionary strings dropped into template literals.
+function rmsTh(key, fallback){ return escapeHtml(rmsTr(key, fallback)); }
+// Built-in layouts / map styles / presets carry English name+desc as data.
+function layoutName(l){ return l ? (l.id ? rmsTr('layoutName_'+l.id, l.name) : l.name) : ''; }
+function layoutDesc(l){ return l ? (l.id ? rmsTr('layoutDesc_'+l.id, l.desc||'') : (l.desc||'')) : ''; }
 function chordTitle(nameKey, chordId, fallback){
   const name=rmsTr(nameKey, fallback);
   const chord=(typeof window!=='undefined' && window.rmsChordLabel && chordId) ? window.rmsChordLabel(chordId) : '';
@@ -7363,7 +7375,7 @@ function moveSibling(id, dir){
 // Re-parent a node and propagate the new side down its subtree
 function reparent(childId, newParentId){
   const did=applySelectionMove([childId], newParentId, 'on');
-  if(did) toast('Re-parented to "'+(map.nodes[newParentId].text||'…')+'"');
+  if(did) toast(rmsTf('tReparented','Moved under “%s”', nodeTextPlain(map.nodes[newParentId].text)||'…'));
   return did;
 }
 function applySelectionMove(dragIds, targetId, mode){
@@ -7503,8 +7515,8 @@ function finishNodeDrop(){
     did=applySelectionMove(roots, dropTarget.id, dropTarget.mode);
     if(!did && moved) autoLayout();
     if(did){
-      if(roots.length>1) toast(`Moved ${roots.length} topics`);
-      else if(dropTarget.mode==='on') toast('Re-parented to "'+(map.nodes[dropTarget.id].text||'…')+'"');
+      if(roots.length>1) toast(rmsTf('tMovedTopics','Moved %s topics', roots.length));
+      else if(dropTarget.mode==='on') toast(rmsTf('tReparented','Moved under “%s”', nodeTextPlain(map.nodes[dropTarget.id].text)||'…'));
     }
   } else if(moved){
     autoLayout();
@@ -8536,7 +8548,7 @@ function replaceNext(){
   if(searchPos<0) searchPos=0;
   const id=searchMatches[searchPos] || searchMatches[0];
   const c=replaceInNode(id, find, repl);
-  if(c){ pushHistory(); render(); toast(`Replaced ${c} in 1 node`); }
+  if(c){ pushHistory(); render(); toast(rmsTf('tReplacedOne','Replaced %s in 1 node', c)); }
   else toast(rmsTr('replaceNone','Nothing to replace'));
   doSearch(find);            // refresh matches (node may no longer match)
 }
@@ -8547,7 +8559,7 @@ function replaceAll(){
   let total=0, nodes=0;
   // Only the nodes the search found — the same set the user sees highlighted.
   [...searchMatches].forEach(id=>{ const c=replaceInNode(id, find, repl); if(c){ total+=c; nodes++; } });
-  if(total){ pushHistory(); render(); toast(`Replaced ${total} occurrence${total>1?'s':''} in ${nodes} node${nodes>1?'s':''}`); }
+  if(total){ pushHistory(); render(); toast(rmsTf('tReplacedN','Replaced %s occurrence(s) in %s node(s)', total, nodes)); }
   else toast(rmsTr('replaceNone','Nothing to replace'));
   doSearch(find);
 }
@@ -8739,7 +8751,7 @@ async function togglePin(id){
   const now = !target.pinned;
   if(now) target.pinned = true; else delete target.pinned;
   try{ await saveMapNow(target); }
-  catch(e){ toast('Could not update pin'); return; }
+  catch(e){ toast(rmsTr('tPinFailed','Could not update pin')); return; }
   if(map && map.id===id){ if(now) map.pinned=true; else delete map.pinned; }
   refreshList();
   toast(now ? rmsTr('pinnedToTop','Pinned to top') : rmsTr('unpinned','Unpinned'));
@@ -9059,7 +9071,7 @@ async function createMapFromTemplate(templateId){
 async function duplicateMap(id){
   let src = (map && map.id===id) ? map : null;
   if(!src){ try{ src = await Store.get(id); }catch(e){} }
-  if(!src){ toast('Could not duplicate'); return; }
+  if(!src){ toast(rmsTr('tDupFailed','Could not duplicate')); return; }
   const copy = JSON.parse(JSON.stringify(src));
   copy.id = uid();
   copy.title = (src.title||rmsTr('untitled','Untitled map')) + rmsTr('copySuffix',' (copy)');
@@ -9076,13 +9088,13 @@ async function duplicateMap(id){
   }catch(_){ imgOk = false; }
   await loadMap(copy.id);
   refreshList();
-  toast(imgOk ? 'Map duplicated' : 'Map copied, but images could not be copied');
+  toast(imgOk ? rmsTr('tMapDuplicated','Map duplicated') : rmsTr('tMapCopiedNoImg','Map copied, but images could not be copied'));
 }
 
 // ===== Save current map as a reusable template =====
 async function saveAsTemplate(){
   if(!map){ return; }
-  const name = ((await rmsPrompt(rmsTr('templateNamePrompt','Name this template:'), map.title||'My template'))||'').trim();
+  const name = ((await rmsPrompt(rmsTr('templateNamePrompt','Name this template:'), map.title||rmsTr('tplDefaultName','My template')))||'').trim();
   if(!name || !map) return;
   const idToK = {}; let i=0;
   Object.keys(map.nodes).forEach(nid=>{ idToK[nid] = (nid===map.rootId) ? 'root' : ('n'+(i++)); });
@@ -9095,9 +9107,9 @@ async function saveAsTemplate(){
   const tpl = { id:'user_'+uid(), name, desc:'Your saved template', color: map.color||'#e0613a', group:'mine', icon:'⭐', nodes, _user:true };
   let store=[]; try{ store=JSON.parse(localStorage.getItem('mindspark:userTemplates')||'[]'); }catch(e){}
   store.push(tpl);
-  try{ localStorage.setItem('mindspark:userTemplates', JSON.stringify(store)); }catch(e){ toast('Could not save (storage full?)'); return; }
+  try{ localStorage.setItem('mindspark:userTemplates', JSON.stringify(store)); }catch(e){ toast(rmsTr('tSaveStorageFull','Could not save (storage full?)')); return; }
   loadUserTemplates();
-  toast('Saved to "My templates"');
+  toast(rmsTr('tSavedToMyTpl','Saved to “My templates”'));
 }
 function deleteUserTemplate(tid){
   let store=[]; try{ store=JSON.parse(localStorage.getItem('mindspark:userTemplates')||'[]'); }catch(e){}
@@ -9130,6 +9142,10 @@ function closeAllMenus(){
   try{ if(typeof closeThemePanel==='function') closeThemePanel(); }catch(_){}
   if(typeof activePicker!=='undefined' && activePicker){ try{activePicker.remove();}catch(_){} activePicker=null; }
 }
+// Category labels in templates.js are English data; show them in the UI language.
+function tplCatLabel(c){ return rmsTr('tplCat_'+c.id, c.label); }
+// User templates store desc:'Your saved template' in localStorage; translate at render.
+function tplDesc(t){ return (t._user && t.desc==='Your saved template') ? rmsTr('tplUserDesc', t.desc) : (t.desc||''); }
 function showTemplatesMenu(){
   if(document.querySelector('.tpl-pop')){ closeAllMenus(); return; }      // click again closes it
   closeAllMenus();
@@ -9153,17 +9169,17 @@ function showTemplatesMenu(){
   // ----- root view: blank + category list -----
   const renderRoot = () => {
     pop.innerHTML = `
-      <div class="tpl-head">Start from a template</div>
+      <div class="tpl-head">${escapeHtml(rmsTr('newMapMenu','Start from a template'))}</div>
       <button class="tpl-item" data-act="blank">
         <span class="tpl-ic" style="background:#e0613a">⊕</span>
-        <span><b>Blank map</b><i>Just a root node</i></span>
+        <span><b>${escapeHtml(rmsTr('tplBlank','Blank map'))}</b><i>${escapeHtml(rmsTr('tplBlankSub','Just a root node'))}</i></span>
       </button>
       <div class="tpl-divider"></div>
       ${TEMPLATE_CATEGORIES.map(c=>{
         const count = Object.values(TEMPLATES).filter(t=>(t.group||'prompt')===c.id).length;
         return `<button class="tpl-item tpl-cat" data-cat="${c.id}">
             <span class="tpl-ic" style="background:${c.color}">${c.icon}</span>
-            <span><b>${escapeHtml(c.label)}</b><i>${count} template${count===1?'':'s'}</i></span>
+            <span><b>${escapeHtml(tplCatLabel(c))}</b><i>${escapeHtml(count===1?rmsTr('tplCountOne','1 template'):rmsTf('tplCountN','%s templates',count))}</i></span>
             <span class="tpl-chev">›</span>
           </button>`;
       }).join('')}`;
@@ -9178,13 +9194,13 @@ function showTemplatesMenu(){
     if(!cat) return renderRoot();   // e.g. the last "My templates" entry was deleted
     const entries = Object.entries(TEMPLATES).filter(([,t])=>(t.group||'prompt')===catId);
     pop.innerHTML = `
-      <button class="tpl-back" data-act="back">‹ All categories</button>
-      <div class="tpl-head" style="padding-top:2px">${escapeHtml(cat.label)}</div>
+      <button class="tpl-back" data-act="back">‹ ${escapeHtml(rmsTr('tplAllCats','All categories'))}</button>
+      <div class="tpl-head" style="padding-top:2px">${escapeHtml(tplCatLabel(cat))}</div>
       ${entries.map(([id,t])=>`
         <button class="tpl-item" data-id="${id}">
           <span class="tpl-ic" style="background:${t.color}">${t.icon || '⊟'}</span>
-          <span><b>${escapeHtml(t.name)}</b><i>${escapeHtml(t.desc)}</i></span>
-          ${t._user?`<span class="tpl-del" data-del="${id}" title="Delete template">✕</span>`:''}
+          <span><b>${escapeHtml(t.name)}</b><i>${escapeHtml(tplDesc(t))}</i></span>
+          ${t._user?`<span class="tpl-del" data-del="${id}" title="${escapeHtml(rmsTr('tplDelete','Delete template'))}">✕</span>`:''}
         </button>`).join('')}`;
     pop.querySelector('[data-act="back"]').onclick = renderRoot;
     pop.querySelectorAll('.tpl-item[data-id]').forEach(b => b.onclick = (e) => {
@@ -9247,7 +9263,7 @@ async function loadMap(id){
   try{ await _mapSaves.flush(id); m=await Store.get(id); }
   catch(e){ if(generation===_mapLoadGeneration) toast(rmsTr('couldNotOpenMap','Could not open map')); return false; }
   if(generation!==_mapLoadGeneration) return false;
-  if(!m){ toast('Map not found'); return false; }
+  if(!m){ toast(rmsTr('tMapNotFound','Map not found')); return false; }
   sanitizeMap(m);
   // Legacy migration: old maps may still store `comment` — promote it to `notes`
   for(const n of Object.values(m.nodes||{})){
@@ -9405,25 +9421,28 @@ function exportMenu(){
   closeAllMenus();
   const pop=document.createElement('div');
   pop.className='export-pop';
-  pop.innerHTML=`
-    <div class="ex-grp">Tools</div>
-    <button data-a="history"><span class="ex-ic">🕘</span><span><b>Version history</b><i>Browse & restore past versions</i></span></button>
-    <button data-a="present"><span class="ex-ic">▶</span><span><b>Presentation mode</b><i>Step through the map one topic at a time</i></span></button>
-    <button data-a="buildprompt"><span class="ex-ic">✨</span><span><b>Compile subtree → prompt</b><i>Assemble the selected branch into a prompt</i></span></button>
-    <div class="ex-grp">Export</div>
-    <button data-a="png"   ><span class="ex-ic">🖼</span><span><b>PNG image</b><i>Themed export, honors map style</i></span></button>
-    <button data-a="prompt"><span class="ex-ic">⚡</span><span><b>Export as prompt</b><i>Fill variables, then copy clean text</i></span></button>
-    <button data-a="mdrich"><span class="ex-ic">📝</span><span><b>Markdown</b><i>Formatting, tasks, tables, code</i></span></button>
-    <button data-a="copy"  ><span class="ex-ic">⎘</span><span><b>Copy as text (clipboard)</b><i>Plain outline, no download</i></span></button>
-    <button data-a="word"  ><span class="ex-ic">📄</span><span><b>Word document (.doc)</b><i>Opens in Word, Google Docs, LibreOffice</i></span></button>
-    <button data-a="mermaid"><span class="ex-ic">🧜</span><span><b>Mermaid diagram</b><i>Renders in GitHub, Notion, Obsidian</i></span></button>
-    <button data-a="refs"><span class="ex-ic">📖</span><span><b>References list</b><i>All citation nodes, formatted</i></span></button>
-    <div class="ex-grp">Manage</div>
-    <button data-a="duplicate"><span class="ex-ic">⎘</span><span><b>Duplicate this map</b><i>Make an editable copy</i></span></button>
-    <button data-a="astemplate"><span class="ex-ic">⭐</span><span><b>Save as template</b><i>Reuse this structure for new maps</i></span></button>
-    <button data-a="json"  ><span class="ex-ic">{}</span><span><b>JSON file</b><i>Full backup, re-importable</i></span></button>
-    <div class="ex-grp">Import</div>
-    <button data-a="import"><span class="ex-ic">↑</span><span><b>Import file</b><i>${escapeHtml(rmsTr('importFileSub','JSON, OPML, Markdown, GitMind (.gmind), MindMeister (.mind)'))}</i></span></button>`;
+  const exGrp=(k,en)=>`<div class="ex-grp">${escapeHtml(rmsTr(k,en))}</div>`;
+  const exBtn=(a,ic,k,en,sen)=>`<button data-a="${a}"><span class="ex-ic">${ic}</span><span><b>${escapeHtml(rmsTr(k,en))}</b><i>${escapeHtml(rmsTr(k+'Sub',sen))}</i></span></button>`;
+  pop.innerHTML=[
+    exGrp('exGrpTools','Tools'),
+    exBtn('history','🕘','exHistory','Version history','Browse & restore past versions'),
+    exBtn('present','▶','exPresent','Presentation mode','Step through the map one topic at a time'),
+    exBtn('buildprompt','✨','exBuildPrompt','Compile subtree → prompt','Assemble the selected branch into a prompt'),
+    exGrp('exGrpExport','Export'),
+    exBtn('png','🖼','exPng','PNG image','Themed export, honors map style'),
+    exBtn('prompt','⚡','exPrompt','Export as prompt','Fill variables, then copy clean text'),
+    exBtn('mdrich','📝','exMd','Markdown','Formatting, tasks, tables, code'),
+    exBtn('copy','⎘','exCopy','Copy as text (clipboard)','Plain outline, no download'),
+    exBtn('word','📄','exWord','Word document (.doc)','Opens in Word, Google Docs, LibreOffice'),
+    exBtn('mermaid','🧜','exMermaid','Mermaid diagram','Renders in GitHub, Notion, Obsidian'),
+    exBtn('refs','📖','exRefs','References list','All citation nodes, formatted'),
+    exGrp('exGrpManage','Manage'),
+    exBtn('duplicate','⎘','exDuplicate','Duplicate this map','Make an editable copy'),
+    exBtn('astemplate','⭐','exAsTemplate','Save as template','Reuse this structure for new maps'),
+    exBtn('json','{}','exJson','JSON file','Full backup, re-importable'),
+    exGrp('exGrpImport','Import'),
+    `<button data-a="import"><span class="ex-ic">↑</span><span><b>${escapeHtml(rmsTr('exImport','Import file'))}</b><i>${escapeHtml(rmsTr('importFileSub','JSON, OPML, Markdown, GitMind (.gmind), MindMeister (.mind)'))}</i></span></button>`,
+  ].join('');
   document.body.appendChild(pop);
   positionPopup(pop, $('#menuExport'), {align:'right'});
   pop.addEventListener('mousedown',e=>e.stopPropagation());
@@ -9458,21 +9477,21 @@ let _historyRequestGeneration=0;
 let _historyPreview = null;   // {original} while previewing a past version
 function relTime(ts){
   const s=Math.floor((Date.now()-ts)/1000);
-  if(s<60) return 'just now';
-  if(s<3600) return Math.floor(s/60)+' min ago';
-  if(s<86400) return Math.floor(s/3600)+' h ago';
+  if(s<60) return rmsTr('relJustNow','just now');
+  if(s<3600) return rmsTf('relMinAgo','%s min ago', Math.floor(s/60));
+  if(s<86400) return rmsTf('relHourAgo','%s h ago', Math.floor(s/3600));
   const d=Math.floor(s/86400);
-  if(d<30) return d+' day'+(d===1?'':'s')+' ago';
+  if(d<30) return d===1 ? rmsTr('relDayAgo','1 day ago') : rmsTf('relDaysAgo','%s days ago', d);
   return new Date(ts).toLocaleDateString();
 }
 async function showVersionHistory(){
-  if(!map){ toast('Open a map first'); return; }
-  if(typeof Store.history !== 'function'){ toast('History not available'); return; }
+  if(!map){ toast(rmsTr('tOpenMapFirst','Open a map first')); return; }
+  if(typeof Store.history !== 'function'){ toast(rmsTr('tHistoryNA','History not available')); return; }
   document.querySelectorAll('.hist-panel,.export-pop').forEach(p=>p.remove());
   const panel=document.createElement('div');
   panel.className='hist-panel';
-  panel.innerHTML=`<div class="hist-head"><b>Version history</b><button class="hist-x" title="Close">×</button></div>
-    <div class="hist-list"><div class="hist-status">Loading…</div></div>`;
+  panel.innerHTML=`<div class="hist-head"><b>${escapeHtml(rmsTr('exHistory','Version history'))}</b><button class="hist-x" title="${escapeHtml(rmsTr('close','Close'))}">×</button></div>
+    <div class="hist-list"><div class="hist-status">${escapeHtml(rmsTr('layoutPresetsLoading','Loading…'))}</div></div>`;
   document.body.appendChild(panel);
   panel.addEventListener('mousedown',e=>e.stopPropagation());
   panel.querySelector('.hist-x').onclick=()=>{ cancelHistoryPreview(); panel.remove(); };
@@ -9483,16 +9502,16 @@ async function showVersionHistory(){
   catch(e){ list.textContent=rmsTr('storageUnavailable','Could not load your maps.'); return; }
   if(!panel.isConnected || !map || map.id!==mapId) return;
   if(!versions || !versions.length){
-    list.innerHTML=`<div class="hist-status">No earlier versions yet.<br><span class="hist-sub">Versions are recorded each time the map changes. Make an edit, then check back.</span></div>`;
+    list.innerHTML=`<div class="hist-status">${escapeHtml(rmsTr('histEmpty','No earlier versions yet.'))}<br><span class="hist-sub">${escapeHtml(rmsTr('histEmptySub','Versions are recorded each time the map changes. Make an edit, then check back.'))}</span></div>`;
     return;
   }
   list.innerHTML = versions.map((v,i)=>`
     <div class="hist-row" data-ref="${escapeHtml(String(v.ref!=null?v.ref:v.ts))}">
-      <div class="hist-when"><b>${i===0?'Latest':relTime(v.ts)}</b><i>${new Date(v.ts).toLocaleString()}</i></div>
+      <div class="hist-when"><b>${escapeHtml(i===0?rmsTr('histLatest','Latest'):relTime(v.ts))}</b><i>${new Date(v.ts).toLocaleString()}</i></div>
       <div class="hist-actions">
-        <button class="hist-prev">Preview</button>
-        <button class="hist-diff">Diff</button>
-        <button class="hist-restore${i===0?' disabled':''}"${i===0?' disabled':''}>Restore</button>
+        <button class="hist-prev">${escapeHtml(rmsTr('histPreview','Preview'))}</button>
+        <button class="hist-diff">${escapeHtml(rmsTr('histDiff','Diff'))}</button>
+        <button class="hist-restore${i===0?' disabled':''}"${i===0?' disabled':''}>${escapeHtml(rmsTr('histRestore','Restore'))}</button>
       </div>
     </div>`).join('');
   list.querySelectorAll('.hist-row').forEach(row=>{
@@ -9519,10 +9538,10 @@ async function loadHistoryVersion(mapId,ref){
     await flushPendingSave();
     const data=await Store.version(mapId,ref);
     if(generation!==_historyRequestGeneration || mapGeneration!==_mapLoadGeneration || !map || map.id!==mapId) return null;
-    if(!data) toast('Could not load that version');
+    if(!data) toast(rmsTr('tVersionLoadFail','Could not load that version'));
     return data;
   }catch(error){
-    if(generation===_historyRequestGeneration && mapGeneration===_mapLoadGeneration) toast('Could not load that version');
+    if(generation===_historyRequestGeneration && mapGeneration===_mapLoadGeneration) toast(rmsTr('tVersionLoadFail','Could not load that version'));
     return null;
   }
 }
@@ -9536,17 +9555,18 @@ async function diffVersion(mapId, ref){
 function showDiffPanel(d){
   document.querySelectorAll('.diff-panel').forEach(p=>p.remove());
   const e=escapeHtml;
+  const empty=rmsTr('diffEmptyText','(empty)');
   const sec=(title,items,cls)=> !items.length ? '' :
-    `<div class="diff-sec"><div class="diff-h ${cls}">${title} (${items.length})</div>`+
+    `<div class="diff-sec"><div class="diff-h ${cls}">${e(title)} (${items.length})</div>`+
     items.map(it=> typeof it==='string'
-      ? `<div class="diff-row ${cls}">${e(it||'(empty)')}</div>`
-      : `<div class="diff-row chg"><span class="d-from">${e(it.from||'(empty)')}</span><span class="d-arrow">\u2192</span><span class="d-to">${e(it.to||'(empty)')}</span></div>`
+      ? `<div class="diff-row ${cls}">${e(it||empty)}</div>`
+      : `<div class="diff-row chg"><span class="d-from">${e(it.from||empty)}</span><span class="d-arrow">\u2192</span><span class="d-to">${e(it.to||empty)}</span></div>`
     ).join('')+`</div>`;
   const total=d.added.length+d.removed.length+d.changed.length;
   const panel=document.createElement('div'); panel.className='diff-panel';
-  panel.innerHTML=`<div class="diff-head"><b>Changes since this version</b><button class="diff-x" title="Close">\u00d7</button></div>`+
-    (total ? sec('Added',d.added,'add')+sec('Removed',d.removed,'del')+sec('Edited',d.changed,'chg')
-           : `<div class="diff-empty">No differences \u2014 identical to the current map.</div>`);
+  panel.innerHTML=`<div class="diff-head"><b>${e(rmsTr('diffTitle','Changes since this version'))}</b><button class="diff-x" title="${e(rmsTr('close','Close'))}">\u00d7</button></div>`+
+    (total ? sec(rmsTr('diffAdded','Added'),d.added,'add')+sec(rmsTr('diffRemoved','Removed'),d.removed,'del')+sec(rmsTr('diffEdited','Edited'),d.changed,'chg')
+           : `<div class="diff-empty">${e(rmsTr('diffNone','No differences — identical to the current map.'))}</div>`);
   document.body.appendChild(panel);
   panel.querySelector('.diff-x').onclick=()=>panel.remove();
 }
@@ -9567,9 +9587,9 @@ function showPreviewBanner(mapId, ref){
   document.querySelectorAll('.hist-banner').forEach(b=>b.remove());
   const b=document.createElement('div');
   b.className='hist-banner';
-  b.innerHTML=`<span>👁 Previewing an earlier version (read-only)</span>
-    <button class="hb-restore">Restore this version</button>
-    <button class="hb-cancel">Back to current</button>`;
+  b.innerHTML=`<span>👁 ${escapeHtml(rmsTr('histBanner','Previewing an earlier version (read-only)'))}</span>
+    <button class="hb-restore">${escapeHtml(rmsTr('histRestoreThis','Restore this version'))}</button>
+    <button class="hb-cancel">${escapeHtml(rmsTr('histBackCurrent','Back to current'))}</button>`;
   document.body.appendChild(b);
   b.querySelector('.hb-restore').onclick=()=>restoreVersion(mapId, ref);
   b.querySelector('.hb-cancel').onclick=()=>{ cancelHistoryPreview(); };
@@ -9608,7 +9628,7 @@ async function restoreVersion(mapId, ref){
   if(map!==restored) return;
   document.querySelectorAll('.hist-banner,.hist-panel').forEach(p=>p.remove());
   refreshList();
-  toast('Version restored');
+  toast(rmsTr('tVersionRestored','Version restored'));
 }
 // Normalize a loaded/decoded map object to the current shape (defensive defaults).
 // Unknown top-level fields (layoutConfig, layoutParams, layoutPreset,
@@ -9661,7 +9681,7 @@ const LLM_PROVIDERS = {
   }
 };
 function showBuildPrompt(nodeId){
-  if(!map){ toast('Open a map first'); return; }
+  if(!map){ toast(rmsTr('tOpenMapFirst','Open a map first')); return; }
   nodeId = nodeId && map.nodes[nodeId] ? nodeId : map.rootId;
   document.querySelectorAll('.bp-panel,.export-pop').forEach(p=>p.remove());
   const prompt=assemblePrompt(nodeId);
@@ -9671,30 +9691,30 @@ function showBuildPrompt(nodeId){
   const panel=document.createElement('div');
   panel.className='bp-panel';
   panel.innerHTML=`
-    <div class="bp-head"><b>Build prompt from “${escapeHtml(nodeTextPlain(map.nodes[nodeId].text||'').slice(0,40)||'branch')}”</b><button class="bp-x" title="Close">×</button></div>
+    <div class="bp-head"><b>${escapeHtml(rmsTf('bpTitle','Build prompt from “%s”', nodeTextPlain(map.nodes[nodeId].text||'').slice(0,40)||rmsTr('bpBranch','branch')))}</b><button class="bp-x" title="${escapeHtml(rmsTr('close','Close'))}">×</button></div>
     <textarea class="bp-text" spellcheck="false">${escapeHtml(prompt)}</textarea>
-    <div class="bp-meta"><span class="bp-tok">~${tok} tokens</span></div>
+    <div class="bp-meta"><span class="bp-tok">${escapeHtml(rmsTf('bpTokens','~%s tokens', tok))}</span></div>
     <div class="bp-row">
-      <button class="bp-copy primary">Copy prompt</button>
-      <button class="bp-toggle">Run with API ▾</button>
+      <button class="bp-copy primary">${escapeHtml(rmsTr('bpCopy','Copy prompt'))}</button>
+      <button class="bp-toggle">${escapeHtml(rmsTr('bpRunApi','Run with API'))} ▾</button>
     </div>
     <div class="bp-run" style="display:none">
       <div class="bp-run-row">
         <select class="bp-provider">
           ${Object.entries(LLM_PROVIDERS).map(([k,v])=>`<option value="${k}"${k===provider?' selected':''}>${v.label}</option>`).join('')}
         </select>
-        <input class="bp-model" placeholder="model" value="${escapeHtml(model)}">
+        <input class="bp-model" placeholder="${escapeHtml(rmsTr('bpModel','model'))}" value="${escapeHtml(model)}">
       </div>
-      <input class="bp-key" type="password" placeholder="API key (stored only in this browser)" value="${escapeHtml(localStorage.getItem('mindspark:llm:key:'+provider)||'')}">
-      <div class="bp-warn">⚠ Your key is stored in this browser's localStorage and sent directly to the provider. Use a scoped key; don't use this on a shared machine.</div>
-      <button class="bp-send primary">Send →</button>
+      <input class="bp-key" type="password" placeholder="${escapeHtml(rmsTr('bpKeyPh','API key (stored only in this browser)'))}" value="${escapeHtml(localStorage.getItem('mindspark:llm:key:'+provider)||'')}">
+      <div class="bp-warn">⚠ ${escapeHtml(rmsTr('bpWarn','Your key is stored in this browser’s localStorage and sent directly to the provider. Use a scoped key; don’t use this on a shared machine.'))}</div>
+      <button class="bp-send primary">${escapeHtml(rmsTr('bpSend','Send'))} →</button>
       <div class="bp-result" style="display:none"></div>
     </div>`;
   document.body.appendChild(panel);
   panel.addEventListener('mousedown',e=>e.stopPropagation());
   const $$=s=>panel.querySelector(s);
   $$('.bp-x').onclick=()=>panel.remove();
-  $$('.bp-copy').onclick=()=>{ navigator.clipboard?.writeText($$('.bp-text').value).then(()=>toast('Prompt copied'),()=>toast('Copy failed')); };
+  $$('.bp-copy').onclick=()=>{ navigator.clipboard?.writeText($$('.bp-text').value).then(()=>toast(rmsTr('tPromptCopied','Prompt copied')),()=>toast(rmsTr('tCopyFailed','Copy failed'))); };
   $$('.bp-toggle').onclick=()=>{ const r=$$('.bp-run'); r.style.display = r.style.display==='none'?'block':'none'; };
   const provSel=$$('.bp-provider'), modelIn=$$('.bp-model'), keyIn=$$('.bp-key');
   provSel.onchange=()=>{ const pv=provSel.value;
@@ -9702,29 +9722,29 @@ function showBuildPrompt(nodeId){
     keyIn.value=localStorage.getItem('mindspark:llm:key:'+pv)||''; };
   $$('.bp-send').onclick=async()=>{
     const pv=provSel.value, key=keyIn.value.trim(), mdl=modelIn.value.trim()||LLM_PROVIDERS[pv].defaultModel;
-    if(!key){ toast('Enter an API key'); return; }
+    if(!key){ toast(rmsTr('tEnterApiKey','Enter an API key')); return; }
     localStorage.setItem('mindspark:llm:provider',pv);
     localStorage.setItem('mindspark:llm:model:'+pv,mdl);
     localStorage.setItem('mindspark:llm:key:'+pv,key);
-    const res=$$('.bp-result'); res.style.display='block'; res.textContent='Running…';
+    const res=$$('.bp-result'); res.style.display='block'; res.textContent=rmsTr('bpRunning','Running…');
     const send=$$('.bp-send'); send.disabled=true;
     try{
       const cfg=LLM_PROVIDERS[pv];
       const r=await fetch(cfg.url,{method:'POST',headers:cfg.headers(key),body:cfg.body(mdl,$$('.bp-text').value)});
       if(!r.ok){ const t=await r.text(); throw new Error('HTTP '+r.status+' — '+t.slice(0,200)); }
       const data=await r.json();
-      const answer=cfg.extract(data)||'(empty response)';
+      const answer=cfg.extract(data)||rmsTr('bpEmptyResp','(empty response)');
       res.innerHTML='';
       const pre=document.createElement('div'); pre.className='bp-answer'; pre.textContent=answer;
       const acts=document.createElement('div'); acts.className='bp-answer-acts';
-      const cp=document.createElement('button'); cp.textContent='Copy answer';
-      cp.onclick=()=>navigator.clipboard?.writeText(answer).then(()=>toast('Answer copied'));
-      const add=document.createElement('button'); add.className='primary'; add.textContent='Add as child nodes';
-      add.onclick=()=>{ addResponseAsNodes(nodeId, answer); panel.remove(); toast('Added to map'); };
+      const cp=document.createElement('button'); cp.textContent=rmsTr('bpCopyAnswer','Copy answer');
+      cp.onclick=()=>navigator.clipboard?.writeText(answer).then(()=>toast(rmsTr('tAnswerCopied','Answer copied')));
+      const add=document.createElement('button'); add.className='primary'; add.textContent=rmsTr('bpAddChildren','Add as child nodes');
+      add.onclick=()=>{ addResponseAsNodes(nodeId, answer); panel.remove(); toast(rmsTr('tAddedToMap','Added to map')); };
       acts.appendChild(cp); acts.appendChild(add);
       res.appendChild(pre); res.appendChild(acts);
     }catch(e){
-      res.textContent='Error: '+e.message;
+      res.textContent=rmsTf('bpError','Error: %s', e.message);
     } finally { send.disabled=false; }
   };
 }
@@ -9754,7 +9774,7 @@ function addResponseAsNodes(parentId, answer){
 let _pres = null;   // {order, idx, collapsed} while presenting
 function startPresentation(){
   if(_pres) return;
-  if(!map || !map.nodes[map.rootId]){ toast('Open a map first'); return; }
+  if(!map || !map.nodes[map.rootId]){ toast(rmsTr('tOpenMapFirst','Open a map first')); return; }
   document.querySelectorAll('.export-pop').forEach(p=>p.remove());
   // Expand everything so the whole map is walkable; remember what to restore.
   const wasCollapsed = Object.keys(map.nodes).filter(id=>map.nodes[id].collapsed);
@@ -9768,11 +9788,11 @@ function startPresentation(){
   autoLayout(false, {persist:false});   // temporary expand — never saved
   const bar=document.createElement('div');
   bar.className='pres-bar';
-  bar.innerHTML=`<button class="pres-prev" title="Previous (←)">◀</button>
+  bar.innerHTML=`<button class="pres-prev" title="${rmsTh('presPrev','Previous (←)')}">◀</button>
     <span class="pres-count"></span>
     <span class="pres-title"></span>
-    <button class="pres-next" title="Next (→ / Space)">▶</button>
-    <button class="pres-exit" title="Exit (Esc)">✕</button>`;
+    <button class="pres-next" title="${rmsTh('presNext','Next (→ / Space)')}">▶</button>
+    <button class="pres-exit" title="${rmsTh('presExit','Exit (Esc)')}">✕</button>`;
   document.body.appendChild(bar);
   bar.addEventListener('mousedown',e=>e.stopPropagation());
   bar.querySelector('.pres-prev').onclick=()=>presStep(-1);
@@ -9823,7 +9843,7 @@ function endPresentation(){
 
 function exportJSON(){
   const blob=new Blob([JSON.stringify(map,null,2)],{type:'application/json'});
-  download(blob,(map.title||'mindmap')+'.json'); toast('JSON exported');
+  download(blob,(map.title||'mindmap')+'.json'); toast(rmsTr('tJsonExported','JSON exported'));
 }
 function importJSON(){ importFile(); }   // back-compat alias
 // ---- GitMind (.gmind) import ----------------------------------------------
@@ -10019,7 +10039,7 @@ function importFile(){
       // proper tree, then frame the result.
       autoLayout(); fit();
       refreshList();
-      toast('Imported '+f.name + (preserveState?'':' (collapsed — click ＋ to expand)'));
+      toast(preserveState ? rmsTf('tImported','Imported %s', f.name) : rmsTf('tImportedCollapsed','Imported %s (collapsed — click ＋ to expand)', f.name));
     }catch(e){ console.error(e); rmsAlert(rmsTr('importFailed','Could not import this file:\n%s').replace('%s', e.message)); }
   };
   inp.click();
@@ -10436,14 +10456,14 @@ const FORMULA_FUNCS = {
   SUM:     args => args.reduce((a,b)=>a+b, 0),
   AVERAGE: args => args.length ? args.reduce((a,b)=>a+b,0)/args.length : 0,
   AVG:     args => FORMULA_FUNCS.AVERAGE(args),
-  MIN:     args => { if(!args.length) throw new FormulaError('MIN needs at least one value'); return Math.min(...args); },
-  MAX:     args => { if(!args.length) throw new FormulaError('MAX needs at least one value'); return Math.max(...args); },
+  MIN:     args => { if(!args.length) throw new FormulaError(rmsTf('fxErrNeedOne','%s needs at least one value','MIN')); return Math.min(...args); },
+  MAX:     args => { if(!args.length) throw new FormulaError(rmsTf('fxErrNeedOne','%s needs at least one value','MAX')); return Math.max(...args); },
   COUNT:   args => args.length,
   ROUND:   args => { const x=args[0], n=args.length>1?args[1]:0; const f=Math.pow(10,n); return Math.round(x*f)/f; },
   ABS:     args => Math.abs(args[0]),
-  SQRT:    args => { if(args[0]<0) throw new FormulaError('SQRT of a negative number'); return Math.sqrt(args[0]); },
+  SQRT:    args => { if(args[0]<0) throw new FormulaError(rmsTr('fxErrSqrtNeg','SQRT of a negative number')); return Math.sqrt(args[0]); },
   POW:     args => Math.pow(args[0], args[1]),
-  MOD:     args => { if(args[1]===0) throw new FormulaError('Division by zero'); return args[0] % args[1]; },
+  MOD:     args => { if(args[1]===0) throw new FormulaError(rmsTr('fxErrDivZero','Division by zero')); return args[0] % args[1]; },
   FLOOR:   args => Math.floor(args[0]),
   CEIL:    args => Math.ceil(args[0]),
   CEILING: args => Math.ceil(args[0]),
@@ -10481,7 +10501,7 @@ function _formulaTokenize(src){
     if(/\s/.test(c)){ i++; continue; }
     if(c==='{'){
       const j=src.indexOf('}', i+1);
-      if(j<0) throw new FormulaError('Unclosed { reference');
+      if(j<0) throw new FormulaError(rmsTr('fxErrUnclosed','Unclosed { reference'));
       toks.push({t:'ref', v:src.slice(i+1,j).trim()}); i=j+1; continue;
     }
     if(/[0-9]/.test(c) || (c==='.' && /[0-9]/.test(src[i+1]||''))){
@@ -10505,7 +10525,7 @@ function _formulaTokenize(src){
     if(c==='('){ toks.push({t:'('}); i++; continue; }
     if(c===')'){ toks.push({t:')'}); i++; continue; }
     if(c===','){ toks.push({t:','}); i++; continue; }
-    throw new FormulaError('Unexpected character: "'+c+'"');
+    throw new FormulaError(rmsTf('fxErrChar','Unexpected character: “%s”', c));
   }
   toks.push({t:'eof'});
   return toks;
@@ -10514,7 +10534,7 @@ function _formulaParse(toks){
   let p=0;
   const peek=()=>toks[p];
   const next=()=>toks[p++];
-  function expect(t){ const tok=next(); if(tok.t!==t) throw new FormulaError('Expected "'+t+'"'); return tok; }
+  function expect(t){ const tok=next(); if(tok.t!==t) throw new FormulaError(rmsTf('fxErrExpected','Expected “%s”', t)); return tok; }
   function parseExpression(){ return parseComparison(); }
   function parseComparison(){
     let left=parseAdd();
@@ -10580,15 +10600,15 @@ function _formulaParse(toks){
       if(name==='CHILDREN') return {type:'children'};
       return {type:'const', name};
     }
-    throw new FormulaError('Unexpected token in formula');
+    throw new FormulaError(rmsTr('fxErrToken','Unexpected token in formula'));
   }
   const ast=parseExpression();
-  if(peek().t!=='eof') throw new FormulaError('Unexpected trailing input');
+  if(peek().t!=='eof') throw new FormulaError(rmsTr('fxErrTrailing','Unexpected trailing input'));
   return ast;
 }
 function _assertNum(v, where){
-  if(v && typeof v==='object' && '__children' in v) throw new FormulaError('children can only be used as a whole function argument, e.g. SUM(children)');
-  if(typeof v!=='number' || !isFinite(v)) throw new FormulaError('Expected a number'+(where?(' ('+where+')'):''));
+  if(v && typeof v==='object' && '__children' in v) throw new FormulaError(rmsTr('fxErrChildren','children can only be used as a whole function argument, e.g. SUM(children)'));
+  if(typeof v!=='number' || !isFinite(v)) throw new FormulaError(where ? rmsTf('fxErrNumberAt','Expected a number (%s)', where) : rmsTr('fxErrNumber','Expected a number'));
 }
 function _formulaEval(node, ctx){
   switch(node.type){
@@ -10596,11 +10616,11 @@ function _formulaEval(node, ctx){
     case 'const':
       if(node.name==='PI') return Math.PI;
       if(node.name==='E') return Math.E;
-      throw new FormulaError('Unknown name: '+node.name);
+      throw new FormulaError(rmsTf('fxErrName','Unknown name: %s', node.name));
     case 'children': return { __children: ctx.children() };
     case 'ref': {
       const v = ctx.resolveRef(node.label);
-      if(v==null) throw new FormulaError('Cannot resolve {'+node.label+'}');
+      if(v==null) throw new FormulaError(rmsTf('fxErrResolve','Cannot resolve {%s}', node.label));
       _assertNum(v, '{'+node.label+'}');
       return v;
     }
@@ -10615,8 +10635,8 @@ function _formulaEval(node, ctx){
         case '+': return l+r;
         case '-': return l-r;
         case '*': return l*r;
-        case '/': if(r===0) throw new FormulaError('Division by zero'); return l/r;
-        case '%': if(r===0) throw new FormulaError('Division by zero'); return l%r;
+        case '/': if(r===0) throw new FormulaError(rmsTr('fxErrDivZero','Division by zero')); return l/r;
+        case '%': if(r===0) throw new FormulaError(rmsTr('fxErrDivZero','Division by zero')); return l%r;
         case '^': return Math.pow(l,r);
       }
       break;
@@ -10633,13 +10653,13 @@ function _formulaEval(node, ctx){
     }
     case 'call': {
       if(node.name==='IF'){
-        if(node.args.length!==3) throw new FormulaError('IF needs 3 arguments: IF(cond, then, else)');
+        if(node.args.length!==3) throw new FormulaError(rmsTr('fxErrIf','IF needs 3 arguments: IF(cond, then, else)'));
         const cond=_formulaEval(node.args[0], ctx); _assertNum(cond, 'IF condition');
         return cond ? _formulaEval(node.args[1], ctx) : _formulaEval(node.args[2], ctx);
       }
       if(node.name==='PI' && node.args.length===0) return Math.PI;
       const fn=FORMULA_FUNCS[node.name];
-      if(!fn) throw new FormulaError('Unknown function: '+node.name+'()');
+      if(!fn) throw new FormulaError(rmsTf('fxErrFunc','Unknown function: %s()', node.name));
       const flat=[];
       for(const a of node.args){
         const v=_formulaEval(a, ctx);
@@ -10649,7 +10669,7 @@ function _formulaEval(node, ctx){
       return fn(flat);
     }
   }
-  throw new FormulaError('Malformed formula');
+  throw new FormulaError(rmsTr('fxErrMalformed','Malformed formula'));
 }
 function evalFormula(src, ctx){
   const toks=_formulaTokenize(src);
@@ -10702,7 +10722,7 @@ function formulaLabelIndex(){
 function computeNodeValue(nodeId, visiting){
   if(_formulaCache.has(nodeId)) return _formulaCache.get(nodeId);
   if(!visiting) visiting=new Set();
-  if(visiting.has(nodeId)) return {error:'Circular reference'};
+  if(visiting.has(nodeId)) return {error:rmsTr('fxErrCircular','Circular reference')};
   const n = map && map.nodes[nodeId];
   if(!n) return null;
   const plain = nodeTextPlain(n.text||'').trim();
@@ -10739,7 +10759,7 @@ function computeNodeValue(nodeId, visiting){
   };
   let result;
   try{ result = evalFormula(plain.slice(1), ctx); }
-  catch(e){ result = { error: (e && e.message) || 'Formula error' }; }
+  catch(e){ result = { error: (e && e.message) || rmsTr('fxErrGeneric','Formula error') }; }
   _formulaCache.set(nodeId, result);
   return result;
 }
@@ -10848,12 +10868,12 @@ function exportMermaid(){
   const fenced = '```mermaid\n' + code + '\n```\n';
   if(navigator.clipboard?.writeText){
     navigator.clipboard.writeText(fenced).then(
-      () => toast('Mermaid diagram copied'),
-      () => { download(new Blob([fenced],{type:'text/plain'}), (map.title||'mindmap')+'.mmd.md'); toast('Clipboard blocked — downloaded instead'); }
+      () => toast(rmsTr('tMermaidCopied','Mermaid diagram copied')),
+      () => { download(new Blob([fenced],{type:'text/plain'}), (map.title||'mindmap')+'.mmd.md'); toast(rmsTr('tClipBlocked','Clipboard blocked — downloaded instead')); }
     );
   } else {
     download(new Blob([fenced],{type:'text/plain'}), (map.title||'mindmap')+'.mmd.md');
-    toast('Mermaid diagram downloaded');
+    toast(rmsTr('tMermaidDownloaded','Mermaid diagram downloaded'));
   }
 }
 
@@ -11167,20 +11187,20 @@ function showVariableForm(varNames, defaults, mapId, done){
   m.innerHTML = `
     <div class="vf-backdrop"></div>
     <div class="vf-card">
-      <button class="vf-close" aria-label="Close">×</button>
-      <h2>Fill variables</h2>
-      <p class="vf-sub">Found ${varNames.length} placeholder${varNames.length===1?'':'s'} — fill them before exporting the prompt.</p>
+      <button class="vf-close" aria-label="${rmsTh('close','Close')}">×</button>
+      <h2>${rmsTh('vfTitle','Fill variables')}</h2>
+      <p class="vf-sub">${escapeHtml(varNames.length===1 ? rmsTr('vfSubOne','Found 1 placeholder — fill it before exporting the prompt.') : rmsTf('vfSubN','Found %s placeholders — fill them before exporting the prompt.', varNames.length))}</p>
       <div class="vf-fields">
         ${varNames.map(name => `
           <label class="vf-row">
             <span class="vf-name"><code>${escapeHtml(name)}</code></span>
-            <textarea class="vf-input" data-name="${escapeHtml(name)}" rows="1" placeholder="value for ${escapeHtml(name)}">${escapeHtml(defaults[name] || '')}</textarea>
+            <textarea class="vf-input" data-name="${escapeHtml(name)}" rows="1" placeholder="${escapeHtml(rmsTf('vfValueFor','value for %s', name))}">${escapeHtml(defaults[name] || '')}</textarea>
           </label>`).join('')}
       </div>
       <div class="vf-actions">
-        <button class="vf-skip">Skip / use raw</button>
-        <button class="vf-cancel">Cancel</button>
-        <button class="vf-go primary">Export</button>
+        <button class="vf-skip">${rmsTh('vfSkip','Skip / use raw')}</button>
+        <button class="vf-cancel">${rmsTh('cancel','Cancel')}</button>
+        <button class="vf-go primary">${rmsTh('vfExport','Export')}</button>
       </div>
     </div>`;
   document.body.appendChild(m);
@@ -11222,12 +11242,12 @@ function exportAsPrompt(){
     const text = buildPrompt(startId, values);
     if(navigator.clipboard?.writeText){
       navigator.clipboard.writeText(text).then(
-        () => toast(`Prompt copied (${text.length} chars)`),
-        () => { download(new Blob([text],{type:'text/plain'}), (map.title||'prompt')+'.txt'); toast('Clipboard blocked — downloaded instead'); }
+        () => toast(rmsTf('tPromptCopiedChars','Prompt copied (%s chars)', text.length)),
+        () => { download(new Blob([text],{type:'text/plain'}), (map.title||'prompt')+'.txt'); toast(rmsTr('tClipBlocked','Clipboard blocked — downloaded instead')); }
       );
     } else {
       download(new Blob([text],{type:'text/plain'}), (map.title||'prompt')+'.txt');
-      toast('Prompt downloaded');
+      toast(rmsTr('tPromptDownloaded','Prompt downloaded'));
     }
   };
   if(vars.length === 0){
@@ -11250,7 +11270,7 @@ function exportAsPrompt(){
   const allCovered = vars.every(v => (map.vars||{})[v] != null && String((map.vars||{})[v]).trim() !== '');
   if(allCovered){
     finish(defaults);
-    toast('Used saved map variables');
+    toast(rmsTr('tUsedVars','Used saved map variables'));
     return;
   }
   showVariableForm(vars, defaults, map.id, (values) => {
@@ -11272,10 +11292,10 @@ function showMapVariables(){
     m.innerHTML = `
       <div class="vf-backdrop"></div>
       <div class="vf-card">
-        <button class="vf-close" aria-label="Close">×</button>
-        <h2>Map variables</h2>
-        <p class="vf-sub">No placeholders found yet. Use <code>{{name}}</code> or <code>$\{name}</code> anywhere in your node text, then set their default values here so every prompt export fills them automatically.</p>
-        <div class="vf-actions"><button class="vf-cancel">Close</button></div>
+        <button class="vf-close" aria-label="${rmsTh('close','Close')}">×</button>
+        <h2>${rmsTh('mvTitle','Map variables')}</h2>
+        <p class="vf-sub">${rmsTr('mvEmptyHtml','No placeholders found yet. Use <code>{{name}}</code> or <code>${name}</code> anywhere in your node text, then set their default values here so every prompt export fills them automatically.')}</p>
+        <div class="vf-actions"><button class="vf-cancel">${rmsTh('close','Close')}</button></div>
       </div>`;
     document.body.appendChild(m);
     m.addEventListener('mousedown', e => e.stopPropagation());
@@ -11288,20 +11308,20 @@ function showMapVariables(){
   m.innerHTML = `
     <div class="vf-backdrop"></div>
     <div class="vf-card">
-      <button class="vf-close" aria-label="Close">×</button>
-      <h2>Map variables</h2>
-      <p class="vf-sub">Set default values for the ${vars.length} placeholder${vars.length===1?'':'s'} in this map. Prompt exports will reuse these without asking — leave one blank to be prompted at export time.</p>
+      <button class="vf-close" aria-label="${rmsTh('close','Close')}">×</button>
+      <h2>${rmsTh('mvTitle','Map variables')}</h2>
+      <p class="vf-sub">${escapeHtml(rmsTf('mvSub','Set default values for the %s placeholder(s) in this map. Prompt exports will reuse these without asking — leave one blank to be prompted at export time.', vars.length))}</p>
       <div class="vf-fields">
         ${vars.map(name => `
           <label class="vf-row">
             <span class="vf-name"><code>${escapeHtml(name)}</code></span>
-            <textarea class="vf-input" data-name="${escapeHtml(name)}" rows="1" placeholder="default for ${escapeHtml(name)}">${escapeHtml(cur[name] || '')}</textarea>
+            <textarea class="vf-input" data-name="${escapeHtml(name)}" rows="1" placeholder="${escapeHtml(rmsTf('mvDefaultFor','default for %s', name))}">${escapeHtml(cur[name] || '')}</textarea>
           </label>`).join('')}
       </div>
       <div class="vf-actions">
-        <button class="vf-clear">Clear all</button>
-        <button class="vf-cancel">Cancel</button>
-        <button class="vf-go primary">Save defaults</button>
+        <button class="vf-clear">${rmsTh('mvClear','Clear all')}</button>
+        <button class="vf-cancel">${rmsTh('cancel','Cancel')}</button>
+        <button class="vf-go primary">${rmsTh('mvSave','Save defaults')}</button>
       </div>
     </div>`;
   document.body.appendChild(m);
@@ -11318,7 +11338,7 @@ function showMapVariables(){
     map.vars = out;
     pushHistory(); scheduleSave();
     close();
-    toast('Map variables saved');
+    toast(rmsTr('tVarsSaved','Map variables saved'));
   };
   m.querySelector('.vf-clear').onclick = () => { m.querySelectorAll('.vf-input').forEach(ta=>{ta.value='';ta.dispatchEvent(new Event('input'));}); };
   m.querySelector('.vf-cancel').onclick = close;
@@ -11335,21 +11355,21 @@ function exportMarkdown(toClipboard, rich){
   // pulling out a single prompt or section from a larger map.
   const startId = (sel && sel !== map.rootId) ? sel : map.rootId;
   const md = buildMarkdown(startId, {rich:!!rich, meta:!!rich});
-  const scope = startId === map.rootId ? '' : ' (selected branch)';
+  const scope = startId === map.rootId ? '' : rmsTr('tScopeBranch',' (selected branch)');
   if(toClipboard){
     if(navigator.clipboard?.writeText){
       navigator.clipboard.writeText(md).then(
-        ()=>toast('Copied to clipboard'+scope),
-        ()=>{ download(new Blob([md],{type:'text/markdown'}),(map.title||'mindmap')+'.md'); toast('Clipboard blocked — downloaded instead'); }
+        ()=>toast(rmsTr('tCopiedClip','Copied to clipboard')+scope),
+        ()=>{ download(new Blob([md],{type:'text/markdown'}),(map.title||'mindmap')+'.md'); toast(rmsTr('tClipBlocked','Clipboard blocked — downloaded instead')); }
       );
     } else {
       download(new Blob([md],{type:'text/markdown'}),(map.title||'mindmap')+'.md');
-      toast('Clipboard unavailable — downloaded');
+      toast(rmsTr('tClipUnavailable','Clipboard unavailable — downloaded'));
     }
   } else {
     const name = startId === map.rootId ? map.title : nodeTextPlain(map.nodes[startId]?.text);
     download(new Blob([md],{type:'text/markdown'}), (name||'mindmap')+'.md');
-    toast('Markdown exported'+scope);
+    toast(rmsTr('tMdExported','Markdown exported')+scope);
   }
 }
 // Build a Word-compatible HTML document (saved with .doc extension —
@@ -11493,7 +11513,7 @@ async function exportDoc(){
   const filename = (map.title||'mindmap')+'.doc';
   const blob = new Blob(['\ufeff', html], {type:'application/msword'});
   download(blob, filename);
-  toast('Word document exported');
+  toast(rmsTr('tWordExported','Word document exported'));
 }
 // --- Canvas math rendering (for PNG export) --------------------------------
 // A small layout engine that draws the MathML subset produced by latexToMathML
@@ -11940,11 +11960,11 @@ async function exportPNG(){
   });
 
   try{
-    cv.toBlob(b=>{download(b,(map.title||'mindmap')+'.png');toast('PNG exported');});
+    cv.toBlob(b=>{download(b,(map.title||'mindmap')+'.png');toast(rmsTr('tPngExported','PNG exported'));});
   }catch(e){
     // Only reachable if the canvas got tainted despite the CORS guard above.
     console.warn('PNG export failed:', e.message);
-    toast('Could not export the PNG');
+    toast(rmsTr('tPngFailed','Could not export the PNG'));
   }
 }
 
@@ -12597,12 +12617,12 @@ function setUiScale(v){
   v = Math.min(2, Math.max(0.5, v||1));
   try{ localStorage.setItem('mindspark:uiScale', String(v)); }catch(e){}
   applyUiScale(v);
-  toast('Interface scale: '+Math.round(v*100)+'%');
+  toast(rmsTf('tUiScale','Interface scale: %s%', Math.round(v*100)));
 }
 function setUiScaleAuto(){
   try{ localStorage.removeItem('mindspark:uiScale'); }catch(e){}
   applyUiScale(getUiScale());
-  toast('Interface scale: Auto ('+Math.round(getUiScale()*100)+'%)');
+  toast(rmsTf('tUiScaleAuto','Interface scale: Auto (%s%)', Math.round(getUiScale()*100)));
 }
 // Keeps auto-scale genuinely responsive to the browser window instead of a
 // snapshot frozen at whichever size the page happened to load at. Only acts
@@ -12648,10 +12668,10 @@ const LOOKS = [
   {id:'handwritten', name:'back to<br>School', font:'"PingFang SC",sans-serif'}
 ];
 const MAP_STYLES = [
-  {id:'modern',  name:'Modern',  desc:'Soft cards, curved branches'},
-  {id:'classic', name:'Classic', desc:'Rectangles, right-angle branches'},
-  {id:'bubble',  name:'Bubble',  desc:'Pill cards, thick curves'},
-  {id:'sketch',  name:'Sketch',  desc:'Outlined cards, straight lines'}
+  {id:'modern',  name:'Modern',  desc:'Soft cards, curved branches',      nameKey:'styleModern',  descKey:'styleModernDesc'},
+  {id:'classic', name:'Classic', desc:'Rectangles, right-angle branches', nameKey:'styleClassic', descKey:'styleClassicDesc'},
+  {id:'bubble',  name:'Bubble',  desc:'Pill cards, thick curves',         nameKey:'styleBubble',  descKey:'styleBubbleDesc'},
+  {id:'sketch',  name:'Sketch',  desc:'Outlined cards, straight lines',   nameKey:'styleSketch',  descKey:'styleSketchDesc'}
 ];
 /* ------------------------------------------------------------
    Layout presets.
@@ -13001,7 +13021,7 @@ $('#themeBtn').onclick=(e)=>{
       <div class="tp-grid">
         ${THEMES.map(t=>`
           <button class="theme-opt${t.id===curTheme?' active':''}" data-cat="theme" data-id="${t.id}">
-            ${buildSwatchHTML(t)}<span class="theme-name">${t.name}</span>
+            ${buildSwatchHTML(t)}<span class="theme-name">${rmsTr('themeName_'+t.id, t.name)}</span>
           </button>`).join('')}
       </div>
     </div>
@@ -13018,8 +13038,8 @@ $('#themeBtn').onclick=(e)=>{
       <div class="tp-label">${rmsTr('themeStyle','Map style')}</div>
       <div class="tp-grid">
         ${MAP_STYLES.map(s=>`
-          <button class="theme-opt${s.id===curStyle?' active':''}" data-cat="style" data-id="${s.id}" title="${s.desc}">
-            ${buildStyleThumb(s.id)}<span class="theme-name">${s.name}</span>
+          <button class="theme-opt${s.id===curStyle?' active':''}" data-cat="style" data-id="${s.id}" title="${rmsTh(s.descKey, s.desc)}">
+            ${buildStyleThumb(s.id)}<span class="theme-name">${rmsTh(s.nameKey, s.name)}</span>
           </button>`).join('')}
       </div>
     </div>
@@ -13029,8 +13049,8 @@ $('#themeBtn').onclick=(e)=>{
       </div>
       <div class="tp-grid tp-scroll-row">
         ${allLayouts().map(l=>`
-          <button class="theme-opt${l.id===curLayout?' active':''}" data-cat="layout" data-id="${escapeHtml(l.id)}" title="${escapeHtml(l.desc||'')}">
-            ${buildLayoutThumb(l.id)}<span class="theme-name">${escapeHtml(l.name)}</span>
+          <button class="theme-opt${l.id===curLayout?' active':''}" data-cat="layout" data-id="${escapeHtml(l.id)}" title="${escapeHtml(layoutDesc(l))}">
+            ${buildLayoutThumb(l.id)}<span class="theme-name">${escapeHtml(layoutName(l))}</span>
           </button>`).join('')}
       </div>
     </div>
@@ -13197,7 +13217,7 @@ function keyboardHelpRows(tr){
       [ch('moveSiblingUpAlt','⇧ ⌘ ↑')+' / '+ch('moveSiblingDownAlt','⇧ ⌘ ↓'), tr('kbMoveSiblingAlt','Same, if Option is taken by the OS')],
       [or(ch('editNode','F2'), tr('kbGDblClick','double-click')), tr('kbEdit','Edit the selected node')],
       [or(ch('deleteNode','⌫'), ch('deleteForward','⌦')), tr('kbRemove','Remove the selected node')],
-      [ch('collapse','Space'),            tr('kbCollapse','Collapse / expand')],
+      [ch('collapse',tr('keySpace','Space')),            tr('kbCollapse','Collapse / expand')],
       [ch('link','L'),                    tr('kbLink','Cross-link to another node')],
       ['⌘ C',                             tr('kbCopyMd','Copy the selected topic(s) as a Markdown outline')],
       ['⌘ V',                             tr('kbPasteChildren','Paste a copied subtree or an outline as children')],

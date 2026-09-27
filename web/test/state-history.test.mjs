@@ -15,6 +15,7 @@ function historyScope(initial) {
     const childrenOf = id => Object.values(map.nodes).filter(n => n.parent === id).map(n => n.id);
     let uidN = 0; const uid = () => 'n' + (++uidN);
     const autoLayout = () => {}, scheduleSave = () => {}, syncTextFromMap = () => {};
+    const rmsTr = (k, d) => d;
     let bulkBarHidden = 0; const hideBulkBar = () => { bulkBarHidden++; };
     ${extractFunction('mapHistorySnapshot')}
     ${extractFunction('restore')}
