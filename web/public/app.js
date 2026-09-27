@@ -1215,13 +1215,28 @@ const ENTITY_RE = /&(#\d+|#x[0-9a-fA-F]+|[a-zA-Z][a-zA-Z0-9]+);/;
 const hasInlineMarkup = t => INLINE_HTML_RE.test(t||'') || ENTITY_RE.test(t||'');
 // Sanitize HTML: keep only a small inline-formatting whitelist; strip everything else
 const SAFE_TAGS = new Set(['b','i','u','s','strong','em','br','a','span','font','div','ul','ol','li','p','sub','sup','code','kbd','mark','ins','del','small','abbr']);
-function sanitizeInlineHTML(html, extraTags){
+// Only these link schemes may become clickable (<a href>) or be handed to the
+// native opener: javascript:/file:/custom app schemes render as plain text.
+function isSafeLinkUrl(url, allowMailto){
+  const u=String(url==null?'':url).trim();
+  if(/^https?:\/\/[^\s]/i.test(u)) return true;
+  return allowMailto!==false && /^mailto:[^\s]/i.test(u);
+}
+// opts (all optional): { img:true } keeps <img> src/alt when the src is http(s),
+// data:image/ or a same-origin /api/ path; { mailto:true } also accepts mailto: links;
+// { classes:RegExp } keeps class names matching it; { style:RegExp } narrows the
+// allowed inline-style properties (default: the formatting set below).
+function sanitizeInlineHTML(html, extraTags, opts){
   // Parse INERTLY via <template>: its contents live in a document with no
   // browsing context, so smuggled resource-loaders like <img src=x onerror=…>
   // never fetch/fire during parsing. (A detached <div>.innerHTML still would.)
   const tpl = document.createElement('template');
   tpl.innerHTML = html || '';
+  const o = opts || {};
   const allow = extraTags ? new Set([...SAFE_TAGS, ...extraTags]) : SAFE_TAGS;
+  const styleRe = o.style || /^(color|background-color|font-weight|font-style|text-decoration|font-size|text-align)$/i;
+  const hrefOk = v => isSafeLinkUrl(v, !!o.mailto);
+  const srcOk = v => /^(https?:\/\/|data:image\/|\/api\/)/i.test(String(v||'').trim());
   const walk = (node) => {
     [...node.childNodes].forEach(child => {
       if(child.nodeType === 1){
@@ -1238,19 +1253,28 @@ function sanitizeInlineHTML(html, extraTags){
         [...child.attributes].forEach(attr => {
           const n = attr.name.toLowerCase();
           if(n.startsWith('on')) child.removeAttribute(attr.name);
-          else if(tag==='a' && n==='href'){
-            if(!/^https?:\/\//i.test(attr.value)) child.removeAttribute(attr.name);
+          else if(n==='href'){
+            if(tag!=='a' || !hrefOk(attr.value)) child.removeAttribute(attr.name);
+          }
+          else if(tag==='img' && o.img && (n==='src' || n==='alt')){
+            if(n==='src' && !srcOk(attr.value)) child.removeAttribute(attr.name);
+          }
+          else if(n==='class' && o.classes){
+            const keep = attr.value.split(/\s+/).filter(c => c && o.classes.test(c)).join(' ');
+            if(keep) child.setAttribute('class', keep); else child.removeAttribute('class');
           }
           else if(n==='style'){
             // Allow only color / background-color / font-weight / font-style / text-decoration / font-size / text-align
+            // (or the narrower opts.style set); url()/expression() values are never kept.
             const safe = attr.value
               .split(';').map(s=>s.trim()).filter(Boolean)
-              .filter(s=>/^(color|background-color|font-weight|font-style|text-decoration|font-size|text-align)\s*:/i.test(s))
+              .filter(s=>{ const i=s.indexOf(':'); return i>0 && styleRe.test(s.slice(0,i).trim()) && !/url\s*\(|expression\s*\(|[\\<>]/i.test(s.slice(i+1)); })
               .join('; ');
             if(safe) child.setAttribute('style', safe); else child.removeAttribute('style');
           }
-          else if(!['href','target','rel','color','face','size'].includes(n)) child.removeAttribute(attr.name);   // note: class removed — pasted HTML must not claim app CSS classes
+          else if(!['target','rel','color','face','size'].includes(n)) child.removeAttribute(attr.name);   // note: class removed — pasted HTML must not claim app CSS classes
         });
+        if(tag==='img' && !(o.img && child.getAttribute('src'))){ node.removeChild(child); return; }
         if(tag==='a'){ child.setAttribute('target','_blank'); child.setAttribute('rel','noopener noreferrer'); }
         walk(child);
       } else if(child.nodeType === 8){
@@ -3120,16 +3144,17 @@ function renderMdList(items, itemFn){
 // (via the existing dependency-free latexToMathML(), same one the canvas nodes use). Used by
 // mdToHtml() for the Markdown preview and PDF export — NOT by the parser: node text must keep
 // math as literal $...$ source (see htmlToInlineMd's comment) so it stays editable/round-trips.
-function mdInlineToHtmlWithMath(txt){
+function mdInlineToHtmlWithMath(txt, slotsOut){
   if(!txt || txt.indexOf('$')<0) return mdInlineToHtml(txt);
   const re=new RegExp(MATH_DELIM_RE.source,'g');
-  const slots=[];
+  const slots=slotsOut || [];
   const masked = txt.replace(re, (full,dd,inl)=>{
     const tex = dd!=null ? dd : inl, display = dd!=null;
     let mathml=null; try{ mathml=latexToMathML(tex, display); }catch(e){ mathml=null; }
     slots.push(mathml!=null ? mathml : escapeHtml(full));   // fall back to the raw text if it doesn't parse as LaTeX
     return '\uE000'+(slots.length-1)+'\uE001';               // PUA placeholder survives markdown/HTML processing untouched
   });
+  if(slotsOut) return mdInlineToHtml(masked);   // caller substitutes after sanitizing (see mdToHtml)
   return mdInlineToHtml(masked).replace(/\uE000(\d+)\uE001/g, (m,idx)=> slots[+idx]!=null ? slots[+idx] : '');
 }
 function mdToHtml(md){
@@ -3146,19 +3171,21 @@ function mdToHtml(md){
     break;
   }
   const L=md.split('\n'); const out=frontHtml?[frontHtml]:[]; let i=0;
+  const mathSlots=[];   // rendered MathML, spliced back in only after sanitizing (see end)
+  const inl=x=>mdInlineToHtmlWithMath(x, mathSlots);
   const esc=x=>x.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-  const item=x=>mdInlineToHtmlWithMath(x.replace(/^\s*([-*+]|\d+\.)\s+/,'').replace(/^\[[ ]\]\s/,'\u2610 ').replace(/^\[[xX]\]\s/,'\u2611 '));
+  const item=x=>inl(x.replace(/^\s*([-*+]|\d+\.)\s+/,'').replace(/^\[[ ]\]\s/,'\u2610 ').replace(/^\[[xX]\]\s/,'\u2611 '));
   const cells=r=>r.replace(/^\s*\|?/,'').replace(/\|?\s*$/,'').split('|').map(c=>c.trim());
-  const tbl=rows=>'<table><thead><tr>'+cells(rows[0]).map(h=>'<th>'+mdInlineToHtmlWithMath(h)+'</th>').join('')+'</tr></thead><tbody>'+rows.slice(2).map(r=>'<tr>'+cells(r).map(c=>'<td>'+mdInlineToHtmlWithMath(c)+'</td>').join('')+'</tr>').join('')+'</tbody></table>';
+  const tbl=rows=>'<table><thead><tr>'+cells(rows[0]).map(h=>'<th>'+inl(h)+'</th>').join('')+'</tr></thead><tbody>'+rows.slice(2).map(r=>'<tr>'+cells(r).map(c=>'<td>'+inl(c)+'</td>').join('')+'</tr>').join('')+'</tbody></table>';
   while(i<L.length){
     let line=L[i];
     if(!line.trim()){ i++; continue; }
     let fm=line.match(/^\s*(```+|~~~+)(.*)$/);
     if(fm){ const buf=[]; let j=i+1; while(j<L.length && !/^\s*(```+|~~~+)\s*$/.test(L[j])){ buf.push(L[j]); j++; } out.push('<pre class="mp-code"><code>'+esc(buf.join('\n'))+'</code></pre>'); i=j+1; continue; }
     let h=line.match(/^(#{1,6})\s+(.*)$/);
-    if(h){ out.push('<h'+h[1].length+'>'+mdInlineToHtmlWithMath(h[2])+'</h'+h[1].length+'>'); i++; continue; }
+    if(h){ out.push('<h'+h[1].length+'>'+inl(h[2])+'</h'+h[1].length+'>'); i++; continue; }
     if(/^\s*([-*_])(?:[ \t]*\1){2,}[ \t]*$/.test(line)){ out.push('<hr>'); i++; continue; }
-    if(/^\s*>/.test(line)){ const buf=[]; while(i<L.length && /^\s*>/.test(L[i])){ buf.push(L[i].replace(/^\s*>\s?/,'')); i++; } out.push('<blockquote>'+mdInlineToHtmlWithMath(buf.join('<br>'))+'</blockquote>'); continue; }
+    if(/^\s*>/.test(line)){ const buf=[]; while(i<L.length && /^\s*>/.test(L[i])){ buf.push(L[i].replace(/^\s*>\s?/,'')); i++; } out.push('<blockquote>'+inl(buf.join('<br>'))+'</blockquote>'); continue; }
     if(line.includes('|') && i+1<L.length && /-/.test(L[i+1]) && /^[\s|:\-]+$/.test(L[i+1])){ const rows=[]; while(i<L.length && L[i].includes('|') && L[i].trim()){ rows.push(L[i]); i++; } out.push(tbl(rows)); continue; }
     if(/^\s*<(table|div|details|figure|section|img|hr|blockquote|p|h[1-6]|ul|ol)\b/i.test(line)){ const tm=line.match(/^\s*<([a-z0-9]+)/i), tag=tm?tm[1].toLowerCase():''; const buf=[line];
       const VOID=/^(img|hr|br|input|source|col|area|embed|track|wbr|link|meta)$/;
@@ -3168,10 +3195,42 @@ function mdToHtml(md){
     if(im){ out.push('<img alt="'+esc(im[1])+'" src="'+esc(im[2])+'">'); i++; continue; }
     if(/^\s*([-*+]|\d+\.)\s+/.test(line)){ const items=[]; while(i<L.length && (/^\s*([-*+]|\d+\.)\s+/.test(L[i]) || (L[i].trim() && /^\s{2,}\S/.test(L[i])))){ items.push(L[i]); i++; } out.push(renderMdList(items,item)); continue; }
     const buf=[line]; i++; while(i<L.length && L[i].trim() && !/^\s*(#{1,6}\s|[-*+]\s|\d+\.\s|>|```|~~~|\||<)/.test(L[i])){ buf.push(L[i]); i++; }
-    out.push('<p>'+mdInlineToHtmlWithMath(buf.join(' '))+'</p>');
+    out.push('<p>'+inl(buf.join(' '))+'</p>');
   }
-  // final safety: strip event handlers / javascript: URLs
-  return out.join('\n').replace(/\son\w+="[^"]*"/gi,'').replace(/javascript:/gi,'');
+  // Final safety: whitelist-sanitize everything (raw HTML blocks included). A regex
+  // blacklist missed unquoted handlers like <img/src=x/onerror=1>.
+  return mdPreviewSanitize(out.join('\n'), mathSlots);
+}
+// Tags/attributes the Markdown preview and PDF may contain. Everything else is
+// unwrapped or dropped by sanitizeInlineHTML; <img> keeps only a safe src.
+const MD_PREVIEW_TAGS = ['h1','h2','h3','h4','h5','h6','blockquote','pre','code','hr','img',
+  'table','thead','tbody','tr','th','td','details','summary','figure','figcaption'];
+function mdPreviewSanitize(html, mathSlots){
+  const safe = sanitizeInlineHTML(html, MD_PREVIEW_TAGS,
+    { img:true, mailto:true, classes:/^mp-code$/, style:/^text-align$/i });
+  if(!mathSlots || !mathSlots.length || safe.indexOf('\uE000')<0) return safe;
+  // Math placeholders (\uE000n\uE001) survive sanitizing as plain text. Swap them for
+  // the MathML built by latexToMathML (every literal escaped there), but only inside
+  // text nodes, never inside an attribute value.
+  const PH=/\uE000(\d+)\uE001/g;
+  const tpl=document.createElement('template'); tpl.innerHTML=safe;
+  const walk=node=>{
+    [...node.childNodes].forEach(ch=>{
+      if(ch.nodeType===3){
+        const v=ch.nodeValue||''; if(v.indexOf('\uE000')<0) return;
+        const parts=v.split(/\uE000(\d+)\uE001/);
+        const htmlPart=parts.map((p,k)=> k%2 ? (mathSlots[+p]!=null ? mathSlots[+p] : '') : escapeHtml(p)).join('');
+        const t2=document.createElement('template'); t2.innerHTML=htmlPart;
+        node.insertBefore(t2.content, ch); node.removeChild(ch);
+      } else if(ch.nodeType===1){
+        [...ch.attributes].forEach(at=>{ if(at.value.indexOf('\uE000')>=0) ch.setAttribute(at.name, at.value.replace(PH,'')); });
+        walk(ch);
+      }
+    });
+  };
+  walk(tpl.content);
+  const outEl=document.createElement('div'); outEl.appendChild(tpl.content);
+  return outEl.innerHTML;
 }
 function mdWrapSel(before, after){ const ed=document.getElementById('mdEditor'); if(!ed) return; const s=ed.selectionStart,e=ed.selectionEnd,sel=ed.value.slice(s,e);
   ed.value=ed.value.slice(0,s)+before+sel+after+ed.value.slice(e);
@@ -9546,7 +9605,10 @@ function importFile(){
 function mdInlineToHtml(t){
   const hasHtml = INLINE_HTML_RE.test(t);    // raw inline HTML (<b>, <sub>, <a>, ...) present?
   const hasMd = /!\[[^\]]*\]\([^)]+\)|\*\*[^*]+\*\*|(?:^|[^*])\*[^*]+\*|~~[^~]+~~|`[^`]+`|(?:^|[^!])\[[^\]]+\]\([^)]+\)/.test(t);
-  if(!hasHtml && !hasMd) return t;            // plain text stays plain
+  // Plain text stays plain, except a literal "<" is escaped: callers put this output
+  // into innerHTML (Markdown preview/PDF) or store it as node HTML, so "<img onerror>"
+  // typed as text must never turn into a tag. Text without "<" is returned unchanged.
+  if(!hasHtml && !hasMd) return String(t==null?'':t).replace(/</g,'&lt;');
   // keep any raw formatting HTML (sanitized) rather than escaping it to literal text
   let s = hasHtml ? sanitizeInlineHTML(t) : escapeHtml(t);
   // Code spans are masked out before the other inline rules run, and restored verbatim
@@ -9561,7 +9623,12 @@ function mdInlineToHtml(t){
   s = s.replace(/(^|[^*])\*([^*]+)\*/g, '$1<i>$2</i>');
   s = s.replace(/~~([^~]+)~~/g, '<s>$1</s>');
   s = s.replace(/!\[([^\]]*)\]\(([^)\s]+)[^)]*\)/g, (m,alt,src)=>'<img alt="'+alt.replace(/"/g,'&quot;')+'" src="'+src.replace(/"/g,'&quot;')+'" loading="lazy">');   // inline image
-  s = s.replace(/(^|[^!])\[([^\]]+)\]\(([^)]+)\)/g, '$1<a href="$3" target="_blank" rel="noopener noreferrer">$2</a>');
+  // Links: only http(s)/mailto become <a>; any other scheme (javascript:, file:, app
+  // schemes) stays visible as its literal Markdown text. Quotes are escaped so a crafted
+  // URL cannot close the href attribute and add its own.
+  s = s.replace(/(^|[^!])\[([^\]]+)\]\(([^)]+)\)/g, (m,p,label,url)=> isSafeLinkUrl(url.replace(/&amp;/g,'&'))
+    ? p+'<a href="'+url.trim().replace(/"/g,'&quot;')+'" target="_blank" rel="noopener noreferrer">'+label+'</a>'
+    : m);
   s = s.replace(/\uE010(\d+)\uE011/g, (m,idx)=>'<code>'+codeSlots[+idx]+'</code>');
   return s;
 }
