@@ -949,7 +949,7 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
     ) async -> URL? {
         let save = NSSavePanel()
         save.nameFieldStringValue = suggestedFilename
-        save.directoryURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+        save.directoryURL = DownloadLocation.initialDirectory()
         save.canCreateDirectories = true
         save.isExtensionHidden = false
         let result = await presentSavePanel(save)
@@ -958,6 +958,7 @@ final class OverlayController: NSObject, WKNavigationDelegate, WKUIDelegate, WKS
             activeDownloads.remove(download)
             return nil
         }
+        DownloadLocation.remember(savedFile: url)
         // NSSavePanel already asked about replacing. WKDownload refuses to
         // write over an existing file, so remove it now.
         if FileManager.default.fileExists(atPath: url.path) {
