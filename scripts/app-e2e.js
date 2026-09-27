@@ -5,7 +5,7 @@ const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 function check(condition,message){ if(!condition) throw new Error(message); results.push(message); }
 for(let i=0;i<150 && !(typeof map!=='undefined' && map && map.id==='eval-a');i++) await sleep(40);
 check(map?.id==='eval-a','real app booted with the isolated SQLite map');
-check(MODE==='server','production ServerStore is active');
+check(Store===ServerStore,'production ServerStore is active');
 
 // Exercise the same lifted text host used by the installed macOS shell.
 document.documentElement.classList.add('rms-wk');
