@@ -103,16 +103,18 @@ const uid=()=>'n'+Math.random().toString(36).slice(2,9);
 // NOTE the \u{...} form for anything above U+FFFF: plain \uXXXX takes exactly
 // four hex digits, so '\u1F6A9' silently parses as '\u1F6A' followed by a
 // literal '9' and renders as garbage rather than a flag.
+// labelKey → i18n.js; label is the English fallback. Nodes store only `c`.
 const MARKERS=[
-  {c:'\u2B50',    label:'Star'},     {c:'\u2757',    label:'Important'},
-  {c:'\u2753',    label:'Question'}, {c:'\u{1F6A9}', label:'Flag'},
-  {c:'\u{1F525}', label:'Hot'},      {c:'\u{1F4A1}', label:'Idea'},
-  {c:'\u{1F440}', label:'Review'},   {c:'\u{1F512}', label:'Blocked'},
-  {c:'\u2705',    label:'Approved'}, {c:'\u274C',    label:'Rejected'},
-  {c:'\u26A0',    label:'Risk'},     {c:'\u{1F3AF}', label:'Goal'},
-  {c:'\u{1F4CC}', label:'Pinned'},   {c:'\u23F3',    label:'In progress'},
-  {c:'\u{1F48E}', label:'Finding'},
+  {c:'\u2B50',    label:'Star',     labelKey:'mkStar'},     {c:'\u2757',    label:'Important', labelKey:'mkImportant'},
+  {c:'\u2753',    label:'Question', labelKey:'mkQuestion'}, {c:'\u{1F6A9}', label:'Flag',      labelKey:'mkFlag'},
+  {c:'\u{1F525}', label:'Hot',      labelKey:'mkHot'},      {c:'\u{1F4A1}', label:'Idea',      labelKey:'mkIdea'},
+  {c:'\u{1F440}', label:'Review',   labelKey:'mkReview'},   {c:'\u{1F512}', label:'Blocked',   labelKey:'mkBlocked'},
+  {c:'\u2705',    label:'Approved', labelKey:'mkApproved'}, {c:'\u274C',    label:'Rejected',  labelKey:'mkRejected'},
+  {c:'\u26A0',    label:'Risk',     labelKey:'mkRisk'},     {c:'\u{1F3AF}', label:'Goal',      labelKey:'mkGoal'},
+  {c:'\u{1F4CC}', label:'Pinned',   labelKey:'mkPinned'},   {c:'\u23F3',    label:'In progress', labelKey:'mkInProgress'},
+  {c:'\u{1F48E}', label:'Finding',  labelKey:'mkFinding'},
 ];
+function markerLabel(m){ return m ? rmsTr(m.labelKey, m.label) : ''; }
 const NODE_COLORS=['#ffffff','#ffe2d6','#ffedc2','#dcefce','#cfe9e6','#d8e0fb','#efd9f2','#e9e2d6'];
 const PALETTE=['#e0613a','#2f6f6a','#c98a1a','#5a7d3a','#3a6ea5','#9b4f96','#8a8175'];
 
@@ -607,7 +609,7 @@ function render(){
       const mk=document.createElement('span');
       mk.className='node-marker';
       mk.textContent=n.marker;
-      const mkLabel=(MARKERS.find(m=>m.c===n.marker)||{}).label;
+      const mkLabel=markerLabel(MARKERS.find(m=>m.c===n.marker));
       mk.title=(mkLabel?mkLabel+' — ':'')+rmsTr('markerClick','click to change');
       mk.addEventListener('mousedown',ev=>ev.stopPropagation());
       mk.addEventListener('click',ev=>{ ev.stopPropagation(); showMarkerPicker(mk, id); });
@@ -679,7 +681,7 @@ function render(){
       el.appendChild(mkNodeHandle(
         'h-collapse'+(n.collapsed?' collapsed':''),
         n.collapsed?'+':'−',
-        n.collapsed?`Expand (${roll.desc[id]} hidden)`:'Collapse',
+        n.collapsed?rmsTf('nodeExpandHidden','Expand (%s hidden)', roll.desc[id]):rmsTr('ctxCollapse','Collapse'),
         ()=>{ n.collapsed=!n.collapsed; opLog(n.collapsed?'collapse':'expand', {id}); pushHistory(); autoLayout(); }
       ));
     }
@@ -4268,7 +4270,7 @@ function showMarkerPicker(anchor, id){
   const p=document.createElement('div');
   p.className='picker marker-picker'; p._anchor=anchor;
   p.innerHTML = MARKERS.map(m=>
-      `<button data-v="${m.c}" title="${escapeHtml(m.label)}" class="${m.c===cur?'on':''}">${m.c}</button>`
+      `<button data-v="${m.c}" title="${escapeHtml(markerLabel(m))}" class="${m.c===cur?'on':''}">${m.c}</button>`
     ).join('') +
     `<button data-v="" title="${rmsTr('markerRemove','Remove marker')}" class="mk-none">\u2716</button>`;
   document.body.appendChild(p);
@@ -4784,8 +4786,8 @@ function fillLayoutPresetRow(panel, curLayout){
     // A preset imported earlier would otherwise show twice.
     panel.querySelectorAll('.theme-opt[data-cat="layout"]').forEach(o=>{ if(ids.has(o.dataset.id)) o.remove(); });
     row.innerHTML=list.map(raw=>`
-      <button class="theme-opt${raw.id===curLayout?' active':''}" data-cat="layout-preset" data-id="${escapeHtml(raw.id)}" title="${escapeHtml(raw.desc||'')}">
-        ${buildLayoutThumb(layoutThumbId(raw))}<span class="theme-name">${escapeHtml(raw.name)}</span>
+      <button class="theme-opt${raw.id===curLayout?' active':''}" data-cat="layout-preset" data-id="${escapeHtml(raw.id)}" title="${escapeHtml(layoutDesc(raw))}">
+        ${buildLayoutThumb(layoutThumbId(raw))}<span class="theme-name">${escapeHtml(layoutName(raw))}</span>
       </button>`).join('')+importTile;
     row.querySelectorAll('.theme-opt[data-cat="layout-preset"]').forEach((opt,i)=>{
       opt.onclick=ev=>{
@@ -4830,7 +4832,7 @@ function showLayoutImportForm(){
       <div class="vf-err" hidden></div>
       ${customs.length ? `<div class="vf-hint" style="margin-top:10px">${rmsTh('liSaved','Saved layouts')}</div>
         <div class="li-list">${customs.map(c=>
-          `<span class="li-chip">${escapeHtml(c.name)}<button data-del="${escapeHtml(c.id)}" title="${rmsTh('dlgRemove','Remove')}">\u00d7</button></span>`
+          `<span class="li-chip">${escapeHtml(layoutName(c))}<button data-del="${escapeHtml(c.id)}" title="${rmsTh('dlgRemove','Remove')}">\u00d7</button></span>`
         ).join('')}</div>` : ''}
       <div class="vf-actions">
         <button class="vf-cancel">${rmsTh('cancel','Cancel')}</button>
@@ -4850,7 +4852,7 @@ function showLayoutImportForm(){
     const res = importLayoutPreset(parsed);
     if(res.error) return fail(res.error);
     const preset = res.preset;
-    close(); toast(rmsTf('tLayoutImported','Layout “%s” imported', preset.name));
+    close(); toast(rmsTf('tLayoutImported','Layout “%s” imported', layoutName(preset)));
     try{ $('#themeBtn').click(); }catch(_){}   // reopen so the new entry is visible
   };
   m.querySelectorAll('[data-del]').forEach(b=> b.onclick=()=>{
@@ -12666,10 +12668,10 @@ const LOOKS = [
   {id:'handwritten', name:'back to<br>School', font:'"PingFang SC",sans-serif'}
 ];
 const MAP_STYLES = [
-  {id:'modern',  name:'Modern',  desc:'Soft cards, curved branches'},
-  {id:'classic', name:'Classic', desc:'Rectangles, right-angle branches'},
-  {id:'bubble',  name:'Bubble',  desc:'Pill cards, thick curves'},
-  {id:'sketch',  name:'Sketch',  desc:'Outlined cards, straight lines'}
+  {id:'modern',  name:'Modern',  desc:'Soft cards, curved branches',      nameKey:'styleModern',  descKey:'styleModernDesc'},
+  {id:'classic', name:'Classic', desc:'Rectangles, right-angle branches', nameKey:'styleClassic', descKey:'styleClassicDesc'},
+  {id:'bubble',  name:'Bubble',  desc:'Pill cards, thick curves',         nameKey:'styleBubble',  descKey:'styleBubbleDesc'},
+  {id:'sketch',  name:'Sketch',  desc:'Outlined cards, straight lines',   nameKey:'styleSketch',  descKey:'styleSketchDesc'}
 ];
 /* ------------------------------------------------------------
    Layout presets.
@@ -13019,7 +13021,7 @@ $('#themeBtn').onclick=(e)=>{
       <div class="tp-grid">
         ${THEMES.map(t=>`
           <button class="theme-opt${t.id===curTheme?' active':''}" data-cat="theme" data-id="${t.id}">
-            ${buildSwatchHTML(t)}<span class="theme-name">${t.name}</span>
+            ${buildSwatchHTML(t)}<span class="theme-name">${rmsTr('themeName_'+t.id, t.name)}</span>
           </button>`).join('')}
       </div>
     </div>
@@ -13036,8 +13038,8 @@ $('#themeBtn').onclick=(e)=>{
       <div class="tp-label">${rmsTr('themeStyle','Map style')}</div>
       <div class="tp-grid">
         ${MAP_STYLES.map(s=>`
-          <button class="theme-opt${s.id===curStyle?' active':''}" data-cat="style" data-id="${s.id}" title="${s.desc}">
-            ${buildStyleThumb(s.id)}<span class="theme-name">${s.name}</span>
+          <button class="theme-opt${s.id===curStyle?' active':''}" data-cat="style" data-id="${s.id}" title="${rmsTh(s.descKey, s.desc)}">
+            ${buildStyleThumb(s.id)}<span class="theme-name">${rmsTh(s.nameKey, s.name)}</span>
           </button>`).join('')}
       </div>
     </div>
@@ -13047,8 +13049,8 @@ $('#themeBtn').onclick=(e)=>{
       </div>
       <div class="tp-grid tp-scroll-row">
         ${allLayouts().map(l=>`
-          <button class="theme-opt${l.id===curLayout?' active':''}" data-cat="layout" data-id="${escapeHtml(l.id)}" title="${escapeHtml(l.desc||'')}">
-            ${buildLayoutThumb(l.id)}<span class="theme-name">${escapeHtml(l.name)}</span>
+          <button class="theme-opt${l.id===curLayout?' active':''}" data-cat="layout" data-id="${escapeHtml(l.id)}" title="${escapeHtml(layoutDesc(l))}">
+            ${buildLayoutThumb(l.id)}<span class="theme-name">${escapeHtml(layoutName(l))}</span>
           </button>`).join('')}
       </div>
     </div>
