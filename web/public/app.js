@@ -5225,14 +5225,36 @@ if(typeof document!=='undefined' && document.addEventListener){
 /* ============================================================
    SEARCH ACROSS ALL MAPS
    ============================================================ */
-async function searchAllMaps(query){
+// Map contents keyed by id; reused while the index still reports the same
+// `updated`, so retyping a query does not refetch every unchanged map.
+const _searchMapCache=new Map();
+const SEARCH_FETCH_CONCURRENCY=4;
+// isStale(): true once a newer search has started — this run then stops and
+// returns null instead of finishing work nobody will look at.
+async function searchAllMaps(query, isStale){
   const q=(query||'').trim().toLowerCase();
   if(!q) return [];
+  const stale=()=>typeof isStale==='function' && isStale();
   let idx=[]; try{ idx=await Store.list(); }catch(e){ idx=[]; }
-  const results=[];
-  for(const meta of idx){
+  if(stale()) return null;
+  idx=Array.isArray(idx)?idx:[];
+  const live=new Set(idx.map(meta=>meta&&meta.id));
+  for(const id of _searchMapCache.keys()) if(!live.has(id)) _searchMapCache.delete(id);
+  const load=async meta=>{
+    if(!meta) return null;
+    if(meta.id===(map&&map.id)) return map;
+    const hit=_searchMapCache.get(meta.id);
+    if(hit && meta.updated!=null && hit.updated===meta.updated) return hit.m;
     let m=null;
-    try{ m = (meta.id===(map&&map.id)) ? map : await Store.get(meta.id); }catch(e){ continue; }
+    try{ m=await Store.get(meta.id); }catch(e){ return null; }
+    if(m && meta.updated!=null) _searchMapCache.set(meta.id, {updated:meta.updated, m});
+    return m;
+  };
+  const results=[];
+  for(let b=0;b<idx.length;b+=SEARCH_FETCH_CONCURRENCY){
+    const batch=await Promise.all(idx.slice(b, b+SEARCH_FETCH_CONCURRENCY).map(load));
+    if(stale()) return null;
+    for(const m of batch){
     if(!m||!m.nodes) continue;
     for(const n of Object.values(m.nodes)){
       const plain=nodeTextPlain(n.text||'').toLowerCase();
@@ -5245,6 +5267,7 @@ async function searchAllMaps(query){
         results.push({ mapId:m.id, mapTitle:m.title||'Untitled', nodeId:n.id, snippet });
         if(results.length>=200) return results;
       }
+    }
     }
   }
   return results;
@@ -5260,8 +5283,8 @@ function runGlobalSearch(query){
   _globalSearchT=setTimeout(async ()=>{
     const panel=ensureGlobalResults();
     panel.innerHTML='<div class="gs-status">'+rmsTr('searchingAll','Searching all maps…')+'</div>';
-    const results=await searchAllMaps(q);
-    if(seq!==_globalSearchSeq) return;   // a newer search superseded this one
+    const results=await searchAllMaps(q, ()=>seq!==_globalSearchSeq);
+    if(!results || seq!==_globalSearchSeq) return;   // a newer search superseded this one
     renderGlobalResults(results, q);
   }, 220);
 }

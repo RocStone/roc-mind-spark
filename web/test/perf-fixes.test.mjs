@@ -24,6 +24,60 @@ describe('autoLinkPlainTextNodes — global URL_RE state', () => {
   });
 });
 
+describe('searchAllMaps — cache, concurrency, stale abort', () => {
+  function setup(count) {
+    const maps = {};
+    const idx = [];
+    for (let i = 0; i < count; i++) {
+      const id = 'm' + i;
+      maps[id] = { id, title: 'Map ' + i, nodes: { n: { id: 'n', text: 'hello ' + i } } };
+      idx.push({ id, updated: 1 });
+    }
+    const stats = { gets: 0, inFlight: 0, peak: 0 };
+    const Store = {
+      list: async () => idx.map(x => ({ ...x })),
+      get: async id => {
+        stats.gets++; stats.inFlight++;
+        stats.peak = Math.max(stats.peak, stats.inFlight);
+        await new Promise(r => setTimeout(r, 1));
+        stats.inFlight--;
+        return maps[id];
+      },
+    };
+    const fns = loadFns(['searchAllMaps'], {
+      Store, map: null, nodeTextPlain: t => t,
+      _searchMapCache: new Map(), SEARCH_FETCH_CONCURRENCY: 4,
+    });
+    return { fns, stats, idx };
+  }
+
+  test('fetches at most 4 maps at once and returns every match', async () => {
+    const { fns, stats } = setup(10);
+    const res = await fns.searchAllMaps('hello');
+    assert.equal(res.length, 10);
+    assert.equal(stats.gets, 10);
+    assert.ok(stats.peak <= 4, `peak ${stats.peak}`);
+  });
+
+  test('retyping reuses unchanged maps; a changed `updated` refetches', async () => {
+    const { fns, stats, idx } = setup(5);
+    await fns.searchAllMaps('hello');
+    await fns.searchAllMaps('hell');
+    assert.equal(stats.gets, 5);
+    idx[2].updated = 2;
+    await fns.searchAllMaps('hel');
+    assert.equal(stats.gets, 6);
+  });
+
+  test('a superseded run stops early and returns null', async () => {
+    const { fns, stats } = setup(12);
+    let calls = 0;
+    const res = await fns.searchAllMaps('hello', () => ++calls > 1);
+    assert.equal(res, null);
+    assert.equal(stats.gets, 4);
+  });
+});
+
 describe('splitPipeRow — escaped pipes', () => {
   const fns = loadFns([
     'splitPipeRow', 'isGfmSepLine', 'normalizeTableGrid', 'parseGfmAligns',
