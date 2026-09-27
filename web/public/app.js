@@ -9736,6 +9736,9 @@ function frontmatterNodeToYaml(n){
   return lines.join('\n');
 }
 function parseMarkdownOutline(text, filename, editorState){
+  // Windows (\r\n) and classic Mac (\r) files: a stray \r would stick to
+  // every heading/list item's text.
+  text=String(text==null?'':text).replace(/\r\n?/g,'\n');
   // An editor session carries node identity separately from the exported text.
   // Imports still allocate independent IDs. Metadata indexed by outline paths is
   // appropriate for import, but cannot identify nodes after an in-place insert.
