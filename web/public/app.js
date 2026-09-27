@@ -3611,9 +3611,17 @@ function toggleMdMode(on){
   else if(!(typeof READONLY!=='undefined' && READONLY)) pushHistory();   // one undo entry for the md session
 
 }
+// Map-level fields a history step captures and restores. One list for both
+// sides so a new user-editable field cannot be saved but never restored.
+// `pinned` is sidebar state, not an edit, so undo leaves it alone.
+const MAP_HISTORY_KEYS=['nodes','rootId','title','titleAuto','color','sameLevelColors','links','layout',
+  'vars','style','frontmatter','layoutConfig','layoutParams','layoutPreset'];
 function mapHistorySnapshot(){
-  return JSON.stringify({nodes:map.nodes,rootId:map.rootId,title:map.title,titleAuto:map.titleAuto,
-    color:map.color,sameLevelColors:map.sameLevelColors,links:map.links||[],layout:map.layout,vars:map.vars||{},style:map.style,frontmatter:map.frontmatter});
+  const o={};
+  for(const key of MAP_HISTORY_KEYS) o[key]=map[key];
+  if(!o.links) o.links=[];
+  if(!o.vars) o.vars={};
+  return JSON.stringify(o);
 }
 function pushHistory({preserveEditor=false}={}){
   // Snapshot the live WK editor, not the hidden placeholder card. Otherwise
@@ -3638,10 +3646,17 @@ function restore(s){
   // the model, and flushing would stamp the live draft onto the restored map.
   if(typeof discardEditOverlay==='function') discardEditOverlay();
   const o=JSON.parse(s);
-  for(const key of ['nodes','rootId','title','titleAuto','color','sameLevelColors','links','layout','vars','style','frontmatter']){
+  for(const key of MAP_HISTORY_KEYS){
     if(Object.hasOwn(o,key)) map[key]=o[key]; else delete map[key];
   }
   $('#mapTitle').value=map.title;
+  // The snapshot may not contain the nodes the selection points at (undo of an
+  // add). Leaving them would make addNode/deleteNode read a missing node.
+  if(sel && !map.nodes[sel]) sel=null;
+  if(typeof multiSel!=='undefined' && multiSel && multiSel.size){
+    for(const id of [...multiSel]) if(!map.nodes[id]) multiSel.delete(id);
+    if(multiSel.size<2){ multiSel.clear(); if(typeof hideBulkBar==='function') hideBulkBar(); }
+  }
   autoLayout();
   if(mdMode && !_mdSyncing) syncTextFromMap();
   scheduleSave();
@@ -3704,12 +3719,12 @@ window.rmsSetLevelColorsEnabled=function(on){
 
 function insertChildNode(parent, extra){
   const pn=map.nodes[parent]||map.nodes[map.rootId];
-  const side = parent===map.rootId ? (childrenOf(map.rootId).length%2? 'left':'right') : (pn.side||'right');
+  const side = pn.id===map.rootId ? (childrenOf(map.rootId).length%2? 'left':'right') : (pn.side||'right');
   const id=uid();
   // Pick a random soft color from the palette (skip plain white at index 0)
   const palette=NODE_COLORS.slice(1);
   const color=palette[Math.floor(Math.random()*palette.length)];
-  const node={id,text:'New topic',parent,
+  const node={id,text:'New topic',parent:pn.id,
     x:pn.x+(side==='left'?-180:180),y:pn.y+40,side, color, created:Date.now()};
   if(extra) Object.assign(node, extra);
   map.nodes[id]=node;
@@ -3718,6 +3733,7 @@ function insertChildNode(parent, extra){
 }
 function addNode(parentId,asSibling){
   if(READONLY) return;
+  if(!map.nodes[parentId]) parentId=map.rootId;
   let parent=parentId;
   if(asSibling){ const p=map.nodes[parentId]; parent=p.parent||map.rootId; if(parentId===map.rootId) parent=map.rootId; }
   const id=insertChildNode(parent);
@@ -3768,7 +3784,8 @@ function placeNewNodeNear(id){
   }
 }
 function deleteNode(id){
-  if(id===map.rootId) return;
+  if(READONLY) return;
+  if(id===map.rootId || !map.nodes[id]) return;
   const rm=[id]; const walk=i=>childrenOf(i).forEach(c=>{rm.push(c);walk(c)}); walk(id);
   const parent=map.nodes[id].parent;
   opLog('del', {id, parent, text:(map.nodes[id].text||'')});
@@ -4684,7 +4701,9 @@ function showLayoutConfigForm(){
     // autoLayout re-places and schedules a save; scheduleSave() is called
     // directly too so the settings persist even if a future change makes that
     // path conditional.
-    pushHistory(); render(); autoLayout();
+    // Snapshot after the relayout: the history entry must hold both the new
+    // config and the node positions it produced.
+    render(); autoLayout(); pushHistory();
     try{ scheduleSave(); }catch(e){ console.warn('saving layout settings failed:', e.message); }
     close(); toast('Layout settings saved');
   };

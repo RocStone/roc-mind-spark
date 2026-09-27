@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {extractFunction} from './helpers/load-app-fns.mjs';
+import {extractFunction, extractConst} from './helpers/load-app-fns.mjs';
 
 function deferred(){let resolve; const promise=new Promise(r=>{resolve=r;}); return {promise,resolve};}
 
@@ -43,7 +43,8 @@ test('closing the history panel invalidates an in-flight version read',async()=>
 test('restoring undo snapshot clears fields absent from that snapshot and schedules persistence',()=>{
   const h=new Function(`
     let map={nodes:{},rootId:'r',title:'now',color:'red',layout:'down',vars:{x:'1'},links:[{from:'r',to:'b'}],style:'classic'};
-    let saves=0,mdMode=false;
+    let saves=0,mdMode=false,sel=null;
+    const MAP_HISTORY_KEYS=${JSON.stringify(extractConst('MAP_HISTORY_KEYS'))};
     const $=()=>({value:''}); const autoLayout=()=>{};
     const scheduleSave=()=>saves++;
     ${extractFunction('restore')}
