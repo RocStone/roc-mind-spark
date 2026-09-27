@@ -3925,7 +3925,12 @@ function bulkFormat(prop){
 }
 function bulkSetProp(prop, value){
   if(READONLY) return;
-  [...multiSel].forEach(id=>{ if(map.nodes[id]) map.nodes[id][prop] = value; });
+  [...multiSel].forEach(id=>{
+    if(!map.nodes[id]) return;
+    // The root's fill is map.color (the node's own .color is never drawn).
+    if(prop==='color' && id===map.rootId){ if(value) map.color = value; }
+    else map.nodes[id][prop] = value;
+  });
   pushHistory(); render(); updateMultiSelUI();
 }
 function bulkCycleAlign(){
@@ -3974,11 +3979,6 @@ function showBulkColorPicker(anchorBtn, kind){
   setTimeout(()=>document.addEventListener('click', function cl(e){
     if(!pk.contains(e.target)){ pk.remove(); document.removeEventListener('click', cl); }
   }), 0);
-}
-function bulkColor(color){
-  multiSel.forEach(id=>{ if(map.nodes[id] && id!==map.rootId) map.nodes[id].color = color; });
-  pushHistory(); render(); updateMultiSelUI();
-  toast(`Recolored ${multiSel.size} nodes`);
 }
 function bulkDelete(){
   if(READONLY) return;

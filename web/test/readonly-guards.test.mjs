@@ -38,3 +38,15 @@ test('completeLink cancels link mode but writes nothing when READONLY', () => {
   completeLink('b');
   assert.equal(cancelled, 1);
 });
+
+test('bulkSetProp color on the root writes map.color', () => {
+  const map = { rootId: 'r', color: '#111', nodes: { r: { id: 'r' }, a: { id: 'a' } } };
+  const { bulkSetProp } = loadFns(['bulkSetProp'], {
+    READONLY: false, map, multiSel: new Set(['r', 'a']),
+    pushHistory() {}, render() {}, updateMultiSelUI() {},
+  });
+  bulkSetProp('color', '#abc');
+  assert.equal(map.color, '#abc');
+  assert.equal(map.nodes.a.color, '#abc');
+  assert.equal(map.nodes.r.color, undefined);
+});
