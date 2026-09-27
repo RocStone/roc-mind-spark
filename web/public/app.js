@@ -1707,6 +1707,9 @@ function autoLinkPlainTextNodes(root){
   let node;
   while((node = walker.nextNode())){
     if(node.parentElement && node.parentElement.closest('a')) continue;
+    // URL_RE is global: .test() advances lastIndex, so reset it or the next
+    // text node is searched from the previous match's end and can be missed.
+    URL_RE.lastIndex=0;
     if(URL_RE.test(node.nodeValue||'')) toReplace.push(node);
   }
   toReplace.forEach(t=>{
