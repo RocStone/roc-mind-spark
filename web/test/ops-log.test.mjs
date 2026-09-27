@@ -22,8 +22,17 @@ describe('formatOp', () => {
     assert.match(line, /^2026-08-22T15:04:41.000Z edit /);
     assert.match(line, /map=abc/);
     assert.match(line, /id=n1/);
+    assert.ok(!line.includes('Readout'), 'node text is not logged');
     assert.ok(line.length <= 240);
     assert.ok(!line.includes('\n'));
+  });
+
+  test('never records node text, even when an older canvas sends it', () => {
+    const line = formatOp({ op: 'edit', id: 'n1', text: 'secret note body', count: 3 });
+    assert.ok(!line.includes('secret'), line);
+    assert.ok(!line.includes('"'), line);
+    assert.match(line, /id=n1/);
+    assert.match(line, /count=3/);
   });
 
   test('drops junk input', () => {

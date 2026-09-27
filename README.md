@@ -99,7 +99,7 @@ The installed app autosaves here:
   mindspark.db          SQLite maps
   maps/                 images dropped onto maps
   server.log            Node stdout/stderr
-  ops.log               short operation log (may include map titles and the first 40 characters of node text)
+  ops.log               short operation log (action names, ids, and view settings; no node text)
   overlay.log           native overlay events
 ```
 
@@ -152,7 +152,7 @@ Roc Mind Spark is a local Mac overlay. It is **not** “fully offline” and it 
 
 - **Saved on this Mac:** maps, images, logs, language, shortcuts, launch-at-login
 - **Shown in the UI:** the maps you edit, settings, menu-bar extra
-- **For diagnosis:** `server.log`, `ops.log`, `overlay.log` (ops lines can include titles and node text clips)
+- **For diagnosis:** `server.log`, `ops.log`, `overlay.log` (ops lines hold action names and ids, not node text)
 - **Sent off-machine only when you trigger it:** LLM calls (API key lives in WKWebView `localStorage`), DOI lookup (Crossref), favicons (DuckDuckGo), and any http(s) link you open, including GitHub repo/issue links. The Mac product does not enable inherited GitHub cloud or OAuth.
 
 First launch enables **Launch at login**. Turn it off in Settings. Details: [PRIVACY.md](PRIVACY.md).

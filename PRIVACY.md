@@ -13,7 +13,7 @@ Installed app, under `~/Library/Application Support/RocMindSpark/`:
 | `mindspark.db` | SQLite maps: titles, nodes, notes, links, layout, citations |
 | `maps/` | Images dropped onto a map. A daily sweep deletes files that no map and no saved version references once they are over 24 hours old. |
 | `server.log` | Node process stdout/stderr |
-| `ops.log` | Short operation log |
+| `ops.log` | Short operation log (ids and settings, no node text) |
 | `overlay.log` | Native overlay events (show/hide, webview attach, errors) |
 
 A debug run from the source tree can write maps to `web/data/` instead. Release builds use Application Support only.
@@ -26,7 +26,7 @@ Also on this Mac, not in that folder:
 | Canvas look/theme, view camera, templates, LLM provider/model/key | WKWebView `localStorage` |
 | Launch at login | `SMAppService` login item for `com.roc.mindspark` |
 
-`ops.log` lines can include the map id/title and the first **40 characters** of node text, plus layout/theme/zoom crumbs. That file is for reproducing bugs. Treat it as user content.
+`ops.log` lines hold the action name, map and node ids, counts, and layout/theme/zoom crumbs. They do not include node text or map titles. That file is for reproducing bugs. Lines written by versions before this change may still contain up to 40 characters of node text; delete `ops.log` to clear them.
 
 ## Shown in the UI
 
