@@ -8391,6 +8391,7 @@ function openRowMenu(btn, m){
       const ed=document.getElementById('mdEditor'); if(ed) ed.value='';
     }
     refreshList(); toast(rmsTr('mapDeleted','Map deleted'));
+    try{ localStorage.removeItem('mindspark:vars:'+m.id); }catch(_){}
   };
   _rowPop=pop;
   _rowPopOut=(e)=>{ if(_rowPop && (!e || e.type!=='mousedown' || !_rowPop.contains(e.target))) closeRowMenu(); };
@@ -10780,7 +10781,9 @@ function showVariableForm(varNames, defaults, mapId, done){
   const close = () => m.remove();
   const collect = () => {
     const out = {};
-    m.querySelectorAll('.vf-input').forEach(ta => { out[ta.dataset.name] = ta.value; });
+    // Skip blank fields: an empty value would otherwise replace the placeholder with
+    // nothing and be remembered as if the user had chosen "".
+    m.querySelectorAll('.vf-input').forEach(ta => { if(ta.value.trim() !== '') out[ta.dataset.name] = ta.value; });
     // Remember per-map for next time
     try { localStorage.setItem('mindspark:vars:'+mapId, JSON.stringify(out)); } catch(e){}
     return out;
@@ -10818,13 +10821,17 @@ function exportAsPrompt(){
     finish(null);
     return;
   }
-  // Build defaults: map-level variables first (the "official" defaults defined
-  // once via the Variables panel), then any per-session localStorage values on top.
-  const defaults = { ...(map.vars || {}) };
-  try {
-    const saved = JSON.parse(localStorage.getItem('mindspark:vars:'+map.id) || '{}');
-    Object.assign(defaults, saved);
-  } catch(e){}
+  // Build defaults: values remembered from the last export form (localStorage) first,
+  // then the map-level variables on top — map.vars is what the Variables panel edits,
+  // so a stale remembered value must never override it. Empty strings don't count.
+  const nonEmpty = o => {
+    const out = {};
+    if(o && typeof o === 'object') Object.keys(o).forEach(k => { if(o[k] != null && String(o[k]).trim() !== '') out[k] = o[k]; });
+    return out;
+  };
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem('mindspark:vars:'+map.id) || '{}'); } catch(e){}
+  const defaults = { ...nonEmpty(saved), ...nonEmpty(map.vars) };
   // If every detected variable already has a non-empty map-level default, skip the
   // form entirely and export straight away — that's the whole point of map vars.
   const allCovered = vars.every(v => (map.vars||{})[v] != null && String((map.vars||{})[v]).trim() !== '');

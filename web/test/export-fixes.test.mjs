@@ -52,6 +52,36 @@ describe('PNG export — table / block nodes draw as a grid, not raw pipes', () 
   });
 });
 
+describe('exportAsPrompt — map variables beat stale remembered values', () => {
+  function harness({ mapVars, saved, found }){
+    const calls = { form: null, built: null };
+    const store = { ['mindspark:vars:m1']: JSON.stringify(saved) };
+    const { exportAsPrompt } = loadFns(['exportAsPrompt'], {
+      map: { id: 'm1', rootId: 'r', title: 'T', vars: mapVars },
+      sel: null,
+      findVariables: () => found,
+      buildPrompt: (_id, values) => { calls.built = values; return 'x'; },
+      navigator: {},
+      download: () => {},
+      toast: () => {},
+      localStorage: { getItem: k => store[k] ?? null },
+      showVariableForm: (_names, defaults) => { calls.form = defaults; },
+    });
+    exportAsPrompt();
+    return calls;
+  }
+
+  test('all variables covered by map.vars: map values are used, not remembered ones', () => {
+    const c = harness({ mapVars: { topic: 'new' }, saved: { topic: 'old' }, found: ['topic'] });
+    assert.deepEqual(c.built, { topic: 'new' });
+  });
+
+  test('form defaults: map.vars first, remembered values fill the gaps, blanks ignored', () => {
+    const c = harness({ mapVars: { a: 'map', b: '' }, saved: { a: 'old', b: 'remembered', c: '  ' }, found: ['a', 'b', 'c'] });
+    assert.deepEqual(c.form, { a: 'map', b: 'remembered' });
+  });
+});
+
 describe('mathToImgTag — draws onto the canvas it exports', () => {
   test('glyphs land on the output canvas, not the measuring one', () => {
     const base = makeDocument();
