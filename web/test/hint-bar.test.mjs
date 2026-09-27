@@ -23,6 +23,20 @@ describe('bottom hint bar', () => {
     assert.match(out, /<b>⌥ ⇧ ⌘ Q<\/b> show \/ hide/);
     delete global.window;
   });
+  test('shortcuts help takes keys from the current chords and lists the new rows', () => {
+    global.window = { rmsChordLabel: id => ({ find: '⌃ F', addChild: '⌘ T' })[id] || '' };
+    const { keyboardHelpRows } = loadFns(['keyboardHelpRows', 'helpChordLabel']);
+    const rows = keyboardHelpRows((k, f) => f).flatMap(g => g[1]);
+    const keyFor = desc => (rows.find(r => r[1] === desc) || [])[0];
+    assert.equal(keyFor('Find in this map'), '⌃ F');
+    assert.equal(keyFor('Add a child node'), '⌘ T');
+    assert.equal(keyFor('Find and replace'), '⌘ H');
+    assert.equal(keyFor('Show this list'), '?');
+    assert.equal(keyFor('Discard the edit and restore the text'), '⇧ Esc');
+    assert.equal(keyFor('Select every visible topic'), '⌘ A');
+    assert.equal(keyFor('Paste a copied subtree or an outline as children'), '⌘ V');
+    delete global.window;
+  });
   test('close button is labelled and dismissal is remembered', () => {
     assert.match(html, /id="hintClose"[^>]*aria-label=/);
     assert.match(app, /localStorage\.setItem\(HINT_DISMISSED_KEY, '1'\)/);

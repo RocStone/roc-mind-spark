@@ -13063,57 +13063,81 @@ function toggleFocusMode(){
 $('#focusBtn')?.addEventListener('click', toggleFocusMode);
 
 // ===== Keyboard shortcuts help — press '?' to open =====
+// Key column for rebindable actions comes from the current chord (Settings).
+function helpChordLabel(id, fallback){
+  const label=(typeof window!=='undefined' && window.rmsChordLabel && id) ? window.rmsChordLabel(id) : '';
+  if(id==='help' && (!label || label==='⇧ /')) return '?';
+  return label || fallback;
+}
+function keyboardHelpRows(tr){
+  const ch=helpChordLabel;
+  const or=(...xs)=>xs.filter(Boolean).join(' / ');
+  return [
+    [tr('kbBuilding','Building the map'),[
+      [ch('addChild','Tab'),              tr('kbAddChild','Add a child node')],
+      [ch('addSibling','Enter'),          tr('kbAddSibling','Add a sibling node')],
+      [ch('addSiblingMod','⌘ ↩'),         tr('kbAddSiblingMod','Add a sibling node')],
+      [ch('moveSiblingUp','⌥ ↑')+' / '+ch('moveSiblingDown','⌥ ↓'), tr('kbMoveSibling','Move / swap sibling node up / down')],
+      [ch('moveSiblingUpAlt','⇧ ⌘ ↑')+' / '+ch('moveSiblingDownAlt','⇧ ⌘ ↓'), tr('kbMoveSiblingAlt','Same, if Option is taken by the OS')],
+      [or(ch('editNode','F2'), tr('kbGDblClick','double-click')), tr('kbEdit','Edit the selected node')],
+      [or(ch('deleteNode','⌫'), ch('deleteForward','⌦')), tr('kbRemove','Remove the selected node')],
+      [ch('collapse','Space'),            tr('kbCollapse','Collapse / expand')],
+      [ch('link','L'),                    tr('kbLink','Cross-link to another node')],
+      ['⌘ C',                             tr('kbCopyMd','Copy the selected topic(s) as a Markdown outline')],
+      ['⌘ V',                             tr('kbPasteChildren','Paste a copied subtree or an outline as children')],
+      ['⌘ A',                             tr('kbSelectAll','Select every visible topic')],
+      ['⇧ ⌘ A',                           tr('kbSelectSiblings','Select the topic and its siblings')],
+      [tr('kbGRightClick','right-click a topic'), tr('kbNodeMenu','Topic menu: add, notes, marker, duplicate…')],
+      [tr('kbGDrag','drag'),              tr('kbDrag','Move a topic (subtree follows)')],
+      [tr('kbGDragCentre','drag onto centre'), tr('kbNest','Nest it as a child of that topic')],
+      [tr('kbGDragEdge','drag onto top / bottom'), tr('kbReorder','Insert as a sibling / reorder')],
+      [tr('kbGBoxSel','⌘ + drag canvas'), tr('kbBox','Box-select topics')],
+      [tr('kbGCmdClick','⌘ + click'),     tr('kbMulti','Add / remove a topic from the selection')],
+      [tr('kbGDragSel','drag a selection'), tr('kbDragSel','Move the selected topics together')],
+    ]],
+    [tr('kbNav','Navigation'),[
+      ['↑ ↓ ← →',                         tr('kbArrows','Move selection between nodes')],
+      [tr('kbGScroll','scroll'),          tr('kbScroll','Zoom canvas (mouse) / two-finger pinch (touch)')],
+      [tr('kbGDragCanvas','drag canvas'), tr('kbPan','Pan the map')],
+    ]],
+    [tr('kbEditing','Editing text'),[
+      ['⌘ B / I / U',                     tr('kbFormat','Bold / italic / underline the selection')],
+      [tr('kbGListBtn','select + UL/OL button'), tr('kbLists','Make each selected line a bullet')],
+      ['Tab',                             tr('kbSaveChild','Save and add a child node')],
+      ['↩',                               tr('kbSaveSibling','Save and add a sibling node')],
+      ['⇧ ↩',                             tr('kbNewline','Newline within the node text')],
+      ['Esc',                             tr('kbEsc','Save the edit / close a popup')],
+      ['⇧ Esc',                           tr('kbCancelEdit','Discard the edit and restore the text')],
+    ]],
+    [tr('kbToolsGroup','Find & tools'),[
+      [ch('find','⌘ F'),                  tr('kbFind','Find in this map')],
+      [ch('findReplace','⌘ H'),           tr('kbFindReplace','Find and replace')],
+      [ch('openSettings','⌘ ,'),          tr('kbSettings','Open settings')],
+      [ch('help','?'),                    tr('kbHelp','Show this list')],
+    ]],
+    [tr('kbHistory','History'),[
+      [ch('undo','⌘ Z'),                  tr('kbUndo','Undo')],
+      [ch('redo','⇧ ⌘ Z'),                tr('kbRedo','Redo')],
+    ]]
+  ];
+}
 function showKeyboardHelp(){
   document.querySelectorAll('.kb-help').forEach(m=>m.remove());
   const m = document.createElement('div');
   m.className = 'kb-help';
-  const tr = (k, fallback) => (window.rmsT ? window.rmsT(k) : fallback);
-  const shortcuts = [
-    [tr('kbBuilding','Building the map'),[
-      ['Tab',            tr('kbAddChild','Add a child node')],
-      ['Enter',          tr('kbAddSibling','Add a sibling node')],
-      ['Ctrl/⌘ + Enter', tr('kbAddSiblingMod','Add a sibling node')],
-      ['Alt + ↑ / ↓',    tr('kbMoveSibling','Move / swap sibling node up / down')],
-      ['Ctrl/⌘ + Shift + ↑ / ↓', tr('kbMoveSiblingAlt','Same, if Option is taken by the OS')],
-      ['F2 / double-click', tr('kbEdit','Edit the selected node')],
-      ['Delete',         tr('kbRemove','Remove the selected node')],
-      ['Space',          tr('kbCollapse','Collapse / expand')],
-      ['L',              tr('kbLink','Cross-link to another node')],
-      ['drag',           tr('kbDrag','Move a topic (subtree follows)')],
-      ['drag onto centre', tr('kbNest','Nest it as a child of that topic')],
-      ['drag onto top / bottom', tr('kbReorder','Insert as a sibling / reorder')],
-      ['⌘/Ctrl + drag canvas', tr('kbBox','Box-select topics')],
-      ['⌘/Ctrl + click', tr('kbMulti','Add / remove a topic from the selection')],
-      ['drag a selection', tr('kbDragSel','Move the selected topics together')],
-    ]],
-    [tr('kbNav','Navigation'),[
-      ['↑ ↓ ← →',        tr('kbArrows','Move selection between nodes')],
-      ['scroll',         tr('kbScroll','Zoom canvas (mouse) / two-finger pinch (touch)')],
-      ['drag canvas',    tr('kbPan','Pan the map')],
-    ]],
-    [tr('kbEditing','Editing text'),[
-      ['Ctrl/⌘ + B / I / U', tr('kbFormat','Bold / italic / underline the selection')],
-      ['select + UL/OL btn', tr('kbLists','Make each selected line a bullet')],
-      ['Tab',            tr('kbSaveChild','Save and add a child node')],
-      ['Enter',          tr('kbSaveSibling','Save and add a sibling node')],
-      ['Shift + Enter',  tr('kbNewline','Newline within the node text')],
-      ['Esc',            tr('kbEsc','Save the edit / close a popup')],
-    ]],
-    [tr('kbHistory','History'),[
-      ['Ctrl/⌘ + Z',     tr('kbUndo','Undo')],
-      ['Ctrl/⌘ + Shift + Z',  tr('kbRedo','Redo')],
-    ]]
-  ];
+  const tr = (k, fallback) => rmsTr(k, fallback);
+  const shortcuts = keyboardHelpRows(tr);
   const renderTable = group => `
-    <h3>${group[0]}</h3>
-    <table>${group[1].map(r=>`<tr><td><kbd>${r[0]}</kbd></td><td>${r[1]}</td></tr>`).join('')}</table>`;
+    <h3>${escapeHtml(group[0])}</h3>
+    <table>${group[1].map(r=>`<tr><td><kbd>${escapeHtml(r[0])}</kbd></td><td>${escapeHtml(r[1])}</td></tr>`).join('')}</table>`;
+  const helpKey = escapeHtml(helpChordLabel('help','?'));
   m.innerHTML = `
     <div class="kb-backdrop"></div>
     <div class="kb-card">
       <button class="kb-close" aria-label="${tr('close','Close')}">×</button>
       <h2>${tr('kbTitle','Keyboard shortcuts')}</h2>
       <div class="kb-grid">${shortcuts.map(renderTable).join('')}</div>
-      <p class="kb-foot">${tr('kbFootHtml','Press <kbd>?</kbd> any time to open this list.')}</p>
+      <p class="kb-foot">${tr('kbFootHtml','Press <kbd>?</kbd> any time to open this list.').replace('<kbd>?</kbd>', '<kbd>'+helpKey+'</kbd>')}</p>
     </div>`;
   document.body.appendChild(m);
   const close=()=>m.remove();
