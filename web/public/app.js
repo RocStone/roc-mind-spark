@@ -6198,10 +6198,15 @@ function rmsClipboardCopyPayload(){
 function rmsClipboardCut(){
   const field = typeof openOverlayTextField==='function' ? openOverlayTextField() : null;
   if(field){
-    const text = overlayFieldCopyPayload(field);
     const v = field.value || '';
     const start = field.selectionStart, end = field.selectionEnd;
-    if(start != null && end != null && end > start){
+    const hasSelection = start != null && end != null && end > start;
+    // A focused field with only a caret: ⌘X cuts nothing, like any text box.
+    // The whole-field cut is only for a field that is open but not focused.
+    const focused = typeof document!=='undefined' && document.activeElement===field;
+    if(!hasSelection && focused) return '';
+    const text = overlayFieldCopyPayload(field);
+    if(hasSelection){
       field.value = v.slice(0, start) + v.slice(end);
       try{ field.setSelectionRange(start, start); }catch(_){}
     } else {
