@@ -13217,7 +13217,7 @@ function keyboardHelpRows(tr){
       [ch('moveSiblingUpAlt','⇧ ⌘ ↑')+' / '+ch('moveSiblingDownAlt','⇧ ⌘ ↓'), tr('kbMoveSiblingAlt','Same, if Option is taken by the OS')],
       [or(ch('editNode','F2'), tr('kbGDblClick','double-click')), tr('kbEdit','Edit the selected node')],
       [or(ch('deleteNode','⌫'), ch('deleteForward','⌦')), tr('kbRemove','Remove the selected node')],
-      [ch('collapse','Space'),            tr('kbCollapse','Collapse / expand')],
+      [ch('collapse',tr('keySpace','Space')),            tr('kbCollapse','Collapse / expand')],
       [ch('link','L'),                    tr('kbLink','Cross-link to another node')],
       ['⌘ C',                             tr('kbCopyMd','Copy the selected topic(s) as a Markdown outline')],
       ['⌘ V',                             tr('kbPasteChildren','Paste a copied subtree or an outline as children')],

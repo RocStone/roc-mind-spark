@@ -598,6 +598,10 @@
       'layoutDesc_timeline-vertical': 'Sequence running downward, sub-topics alternating left and right',
       'layoutName_tree-up-down': 'Up & down',
       'layoutDesc_tree-up-down': 'Branches split above and below the root, the vertical twin of Balanced',
+      keySpace: 'Space',
+      toggleChordFallback: 'Caps + Q',
+      wheelSpeedPctAria: 'Wheel zoom speed percent',
+      wheelSpeedAria: 'Wheel zoom speed',
     },
     zh: {
       brand: 'Roc Mind Spark',
@@ -1191,6 +1195,10 @@
       'layoutDesc_timeline-vertical': '向下排列，子主题左右交替',
       'layoutName_tree-up-down': '上下分布',
       'layoutDesc_tree-up-down': '分支分到中心主题上下两侧，是「左右平衡」的竖向版本',
+      keySpace: '空格',
+      toggleChordFallback: 'Caps + Q',
+      wheelSpeedPctAria: '滚轮缩放速度百分比',
+      wheelSpeedAria: '滚轮缩放速度',
     },
   };
 

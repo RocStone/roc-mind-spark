@@ -5,6 +5,9 @@
   const CANVAS_KEY = 'rms:canvasShortcuts';
   const BUTTON_KEY = 'rms:buttonShortcuts';
   const t = (k) => (window.rmsT ? window.rmsT(k) : k);
+  // Like t(), but falls back to English text instead of the bare key.
+  const tf = (k, fb) => { const v = window.rmsT ? window.rmsT(k) : k; return (v && v !== k) ? v : fb; };
+  const toggleFallback = () => tf('toggleChordFallback', 'Caps + Q');
 
   function canvasMeta(){
     return [
@@ -105,10 +108,10 @@
     if(spec.shift) bits.push('⇧');
     if(spec.meta) bits.push('⌘');
     let key = spec.key || '';
-    if(key===' ') key='Space';
+    if(key===' ') key=tf('keySpace','Space');
     if(key==='Meta'||key==='Control'||key==='Alt'||key==='Shift') return bits.join(' ') || '…';
     const glyphs = {
-      Enter:'↩', Tab:'Tab', ' ':'Space', Space:'Space',
+      Enter:'↩', Tab:'Tab', ' ':tf('keySpace','Space'), Space:tf('keySpace','Space'),
       Backspace:'⌫', Delete:'⌦', Escape:'Esc',
       ArrowUp:'↑', ArrowDown:'↓', ArrowLeft:'←', ArrowRight:'→',
       ',':',', '/':'/',
@@ -167,7 +170,7 @@
     const login = document.getElementById('rmsLoginToggle');
     if(login) login.checked = !!(state && state.login);
     const tog = document.getElementById('rmsToggleChord');
-    if(tog && !(listening && listening.kind==='toggle')) tog.textContent = (state && state.toggleDisplay) || 'Caps + Q';
+    if(tog && !(listening && listening.kind==='toggle')) tog.textContent = (state && state.toggleDisplay) || toggleFallback();
     if(typeof window.rmsRenderHint==='function') window.rmsRenderHint();
   };
 
@@ -390,7 +393,7 @@
         </div>
         <div class="rms-set-sec">
           <h3>${t('overlay')}</h3>
-          <div class="rms-row"><span>${t('showHide')}</span><button type="button" class="rms-chord" id="rmsToggleChord" data-rec="toggle">Caps + Q</button></div>
+          <div class="rms-row"><span>${t('showHide')}</span><button type="button" class="rms-chord" id="rmsToggleChord" data-rec="toggle">${toggleFallback()}</button></div>
         </div>
         <div class="rms-set-sec">
           <h3 class="rms-sec-head">${t('canvas')}<button type="button" class="rms-clear" id="rmsCanvasResetAll">${t('resetAllShortcuts')}</button></h3>
@@ -466,7 +469,7 @@
     const login=root.querySelector('#rmsLoginToggle');
     if(login) login.checked=!!native.login;
     const tog=root.querySelector('#rmsToggleChord');
-    if(tog && !listening) tog.textContent=native.toggleDisplay||'Caps + Q';
+    if(tog && !listening) tog.textContent=native.toggleDisplay||toggleFallback();
     const levelState=getLevelColorsState();
     const level=root.querySelector('#rmsLevelColorsToggle');
     if(level){ level.checked=levelState.enabled; level.disabled=levelState.disabled; }
