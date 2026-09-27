@@ -1067,6 +1067,11 @@ function render(){
   if(typeof multiSel !== 'undefined' && multiSel.size){
     multiSel.forEach(id=>document.querySelector(`.node[data-id="${id}"]`)?.classList.add('multi-sel'));
   }
+  // Same for the presentation spotlight and the open search's hit classes.
+  if(typeof _pres!=='undefined' && _pres){
+    document.querySelector(`.node[data-id="${_pres.order[_pres.idx]}"]`)?.classList.add('pres-current');
+  }
+  if(typeof paintSearchHits==='function' && $('#searchWrap')?.classList.contains('open')) paintSearchHits();
   cullOffscreenNodes();
   } finally { _ci=_prevCI; }
 }
@@ -9328,6 +9333,7 @@ function addResponseAsNodes(parentId, answer){
    ============================================================ */
 let _pres = null;   // {order, idx, collapsed} while presenting
 function startPresentation(){
+  if(_pres) return;
   if(!map || !map.nodes[map.rootId]){ toast('Open a map first'); return; }
   document.querySelectorAll('.export-pop').forEach(p=>p.remove());
   // Expand everything so the whole map is walkable; remember what to restore.
@@ -9339,7 +9345,7 @@ function startPresentation(){
   walk(map.rootId);
   _pres={ order, idx:0, collapsed:wasCollapsed };
   document.body.classList.add('presenting');
-  autoLayout();
+  autoLayout(false, {persist:false});   // temporary expand — never saved
   const bar=document.createElement('div');
   bar.className='pres-bar';
   bar.innerHTML=`<button class="pres-prev" title="Previous (←)">◀</button>
@@ -9360,6 +9366,9 @@ function presKey(e){
   if(e.key==='ArrowRight'||e.key==='ArrowDown'||e.key===' '||e.key==='PageDown'){ e.preventDefault(); e.stopPropagation(); presStep(1); }
   else if(e.key==='ArrowLeft'||e.key==='ArrowUp'||e.key==='PageUp'){ e.preventDefault(); e.stopPropagation(); presStep(-1); }
   else if(e.key==='Escape'){ e.preventDefault(); e.stopPropagation(); endPresentation(); }
+  // Everything else (Backspace, Tab, letters, ⌘Z…) would edit the map
+  // underneath the presentation — swallow it.
+  else { e.preventDefault(); e.stopPropagation(); }
 }
 function presStep(d){ if(!_pres) return; presGo(Math.max(0, Math.min(_pres.order.length-1, _pres.idx+d))); }
 function presGo(i){
@@ -9389,7 +9398,7 @@ function endPresentation(){
   // Restore collapse state (presentation never persists changes).
   (_pres.collapsed||[]).forEach(id=>{ if(map.nodes[id]) map.nodes[id].collapsed=true; });
   _pres=null;
-  autoLayout(); fit();
+  autoLayout(false, {persist:false}); fit();
 }
 
 function exportJSON(){
