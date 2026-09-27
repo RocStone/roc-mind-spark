@@ -7,6 +7,7 @@ const {
   mapRectFromCorners,
   clientBoxFromGbr,
   nodesInMarqueeEls,
+  nodesInMarqueeRects,
   nodesInMarquee,
   selectionMoveRoots,
   selectionCommonParent,
@@ -23,6 +24,8 @@ const {
   'mapRectFromCorners',
   'clientBoxFromGbr',
   'nodesInMarqueeEls',
+  'marqueeRectsFromEls',
+  'nodesInMarqueeRects',
   'nodesInMarquee',
   'selectionMoveRoots',
   'selectionCommonParent',
@@ -102,6 +105,18 @@ describe('nodesInMarqueeEls — clientX marquee vs node GBR', () => {
     assert.deepEqual(nodesInMarqueeEls(els, {x:181, y:100, w:20, h:20}), []);
     assert.deepEqual(nodesInMarqueeEls(els, {x:0, y:0, w:0, h:10}), []);
     assert.deepEqual(nodesInMarqueeEls(els, null), []);
+  });
+
+  test('cached rects give the same hits without touching the DOM again', () => {
+    let reads = 0;
+    const els = [fakeNode('a', 100, 100, 80, 40), fakeNode('b', 300, 100, 80, 40)]
+      .map(el => ({ ...el, getBoundingClientRect: () => { reads++; return el.getBoundingClientRect(); } }));
+    const rects = els.map(el => ({ id: el.dataset.id, box: clientBoxFromGbr(el.getBoundingClientRect()) }));
+    const before = reads;
+    assert.deepEqual(nodesInMarqueeRects(rects, {x:90, y:90, w:100, h:60}), ['a']);
+    assert.deepEqual(nodesInMarqueeRects(rects, {x:90, y:90, w:300, h:60}), ['a','b']);
+    assert.deepEqual(nodesInMarqueeRects(rects, {x:0, y:0, w:0, h:10}), []);
+    assert.equal(reads, before);
   });
 
   test('skips elements without an id', () => {

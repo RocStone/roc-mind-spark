@@ -11,13 +11,14 @@ const {
   layoutSizesGrew,
   resolveNodeOverlaps,
   resolveSiblingOverlaps,
+  siblingOverlapAxis,
   mapHasCardOverlap,
   nodeLayoutBox,
 } = loadFns(
   [
     'layoutTree', 'treeLayoutOpts',
     'boxesOverlap', 'layoutSizesGrew', 'resolveNodeOverlaps', 'resolveSiblingOverlaps',
-    'mapHasCardOverlap', 'nodeIsAncestor', 'nodeLayoutBox', 'collectSubtreeIds', 'shiftSubtreeNodes',
+    'siblingOverlapAxis', 'mapHasCardOverlap', 'nodeIsAncestor', 'nodeLayoutBox', 'collectSubtreeIds', 'shiftSubtreeNodes',
   ],
   {
     TREE_LAYOUTS: {
@@ -113,6 +114,42 @@ describe('resolveSiblingOverlaps', () => {
     assert.ok(!boxesOverlap(nodeLayoutBox(nodes.a), nodeLayoutBox(nodes.b), 16));
     assert.ok(nodes.b.y >= nodes.a.y + nodes.a.h + 16);
     assert.equal(nodes.other.y, 1240, 'a node from another parent is left alone');
+  });
+});
+
+describe('resolveSiblingOverlaps — only real 2D collisions', () => {
+  test('a grid-like row of siblings (same y, apart on x) is left alone', () => {
+    const nodes = {
+      root: { id:'root', parent:null, w:140, h:50, x:0, y:0 },
+      a: { id:'a', parent:'root', w:200, h:60, x:0,   y:100, side:'' },
+      b: { id:'b', parent:'root', w:200, h:60, x:260, y:100, side:'' },
+      c: { id:'c', parent:'root', w:200, h:60, x:520, y:100, side:'' },
+    };
+    const moved = resolveSiblingOverlaps(nodes, { gap:16, vertical:true, kidsOf:kidsOf(nodes) });
+    assert.equal(moved, false);
+    assert.deepEqual([nodes.a.y, nodes.b.y, nodes.c.y], [100, 100, 100]);
+  });
+  test('siblings that really overlap vertically are pushed apart', () => {
+    const nodes = {
+      root: { id:'root', parent:null, w:140, h:50, x:0, y:0 },
+      a: { id:'a', parent:'root', w:200, h:80, x:200, y:0,  side:'right' },
+      b: { id:'b', parent:'root', w:200, h:60, x:200, y:50, side:'right' },
+    };
+    const moved = resolveSiblingOverlaps(nodes, { gap:16, vertical:true, kidsOf:kidsOf(nodes) });
+    assert.equal(moved, true);
+    assert.equal(nodes.b.y, 96);
+  });
+});
+
+describe('siblingOverlapAxis', () => {
+  test('tree layouts stack along their cross axis', () => {
+    assert.equal(siblingOverlapAxis({ strategy:'tree', params:{ axis:'x' } }), 'vertical');
+    assert.equal(siblingOverlapAxis({ strategy:'tree', params:{ axis:'y' } }), 'horizontal');
+  });
+  test('non-tree strategies are skipped', () => {
+    for (const strategy of ['grid', 'chain', 'matrix', 'radial']) {
+      assert.equal(siblingOverlapAxis({ strategy, params:{ axis:'x' } }), null);
+    }
   });
 });
 

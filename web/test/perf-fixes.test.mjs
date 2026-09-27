@@ -1,0 +1,170 @@
+// Regression tests for performance / correctness fixes in app.js helpers.
+import { test, describe } from 'node:test';
+import assert from 'node:assert/strict';
+import { loadFns, extractConst } from './helpers/load-app-fns.mjs';
+
+describe('autoLinkPlainTextNodes — global URL_RE state', () => {
+  test('links a URL in every text node, not just the first', () => {
+    const URL_RE = extractConst('URL_RE');
+    const texts = [
+      { nodeValue: 'first link at https://example.com/a-fairly-long/path', parentElement: null },
+      { nodeValue: 'https://b.io', parentElement: null },
+    ];
+    const replaced = [];
+    const document = {
+      createTreeWalker: () => { let i = 0; return { nextNode: () => texts[i++] || null }; },
+      createDocumentFragment: () => ({}),
+    };
+    for (const t of texts) t.parentNode = { replaceChild: () => replaced.push(t.nodeValue) };
+    const { autoLinkPlainTextNodes } = loadFns(['autoLinkPlainTextNodes'], {
+      URL_RE, document, NodeFilter: { SHOW_TEXT: 4 }, appendTextWithLinks: () => {},
+    });
+    autoLinkPlainTextNodes({});
+    assert.deepEqual(replaced, texts.map(t => t.nodeValue));
+  });
+});
+
+describe('searchAllMaps — cache, concurrency, stale abort', () => {
+  function setup(count) {
+    const maps = {};
+    const idx = [];
+    for (let i = 0; i < count; i++) {
+      const id = 'm' + i;
+      maps[id] = { id, title: 'Map ' + i, nodes: { n: { id: 'n', text: 'hello ' + i } } };
+      idx.push({ id, updated: 1 });
+    }
+    const stats = { gets: 0, inFlight: 0, peak: 0 };
+    const Store = {
+      list: async () => idx.map(x => ({ ...x })),
+      get: async id => {
+        stats.gets++; stats.inFlight++;
+        stats.peak = Math.max(stats.peak, stats.inFlight);
+        await new Promise(r => setTimeout(r, 1));
+        stats.inFlight--;
+        return maps[id];
+      },
+    };
+    const fns = loadFns(['searchAllMaps'], {
+      Store, map: null, nodeTextPlain: t => t,
+      _searchMapCache: new Map(), SEARCH_FETCH_CONCURRENCY: 4,
+    });
+    return { fns, stats, idx };
+  }
+
+  test('fetches at most 4 maps at once and returns every match', async () => {
+    const { fns, stats } = setup(10);
+    const res = await fns.searchAllMaps('hello');
+    assert.equal(res.length, 10);
+    assert.equal(stats.gets, 10);
+    assert.ok(stats.peak <= 4, `peak ${stats.peak}`);
+  });
+
+  test('retyping reuses unchanged maps; a changed `updated` refetches', async () => {
+    const { fns, stats, idx } = setup(5);
+    await fns.searchAllMaps('hello');
+    await fns.searchAllMaps('hell');
+    assert.equal(stats.gets, 5);
+    idx[2].updated = 2;
+    await fns.searchAllMaps('hel');
+    assert.equal(stats.gets, 6);
+  });
+
+  test('a superseded run stops early and returns null', async () => {
+    const { fns, stats } = setup(12);
+    let calls = 0;
+    const res = await fns.searchAllMaps('hello', () => ++calls > 1);
+    assert.equal(res, null);
+    assert.equal(stats.gets, 4);
+  });
+});
+
+describe('nodeSearchText — per-node plain-text cache', () => {
+  test('strips HTML once per text version', () => {
+    let strips = 0;
+    const { nodeSearchText } = loadFns(['nodeSearchText'], {
+      hasInlineMarkup: t => /</.test(t),
+      nodeTextPlain: t => { strips++; return t.replace(/<[^>]*>/g, ''); },
+      _searchTextCache: new WeakMap(),
+    });
+    const n = { text: '<b>alpha</b>' };
+    assert.equal(nodeSearchText(n), 'alpha');
+    assert.equal(nodeSearchText(n), 'alpha');
+    assert.equal(strips, 1);
+    n.text = '<i>beta</i>';
+    assert.equal(nodeSearchText(n), 'beta');
+    assert.equal(strips, 2);
+  });
+});
+
+describe('formula resolveRef — whole-map label index', () => {
+  function setup() {
+    const map = {
+      rootId: 'r',
+      nodes: {
+        r:  { id: 'r',  parent: null, text: 'root' },
+        a:  { id: 'a',  parent: 'r',  text: 'branch a' },
+        f1: { id: 'f1', parent: 'a',  text: '=price' },
+        f2: { id: 'f2', parent: 'a',  text: '=Price' },
+        b:  { id: 'b',  parent: 'r',  text: 'branch b' },
+        p:  { id: 'p',  parent: 'b',  text: 'Price: 5' },
+        p2: { id: 'p2', parent: 'b',  text: 'price: 9' },
+      },
+    };
+    let plainCalls = 0;
+    const fns = loadFns(
+      ['clearFormulaCache', 'formulaLabelIndex', 'computeNodeValue',
+       'parseLabeledValue', 'parseNumericLiteral'],
+      {
+        map,
+        childrenOf: id => Object.keys(map.nodes).filter(k => map.nodes[k].parent === id),
+        nodeTextPlain: t => { plainCalls++; return t; },
+        evalFormula: (expr, ctx) => ctx.resolveRef(expr),
+        _formulaCache: new Map(),
+        _formulaLabelIndex: null,
+      }
+    );
+    return { fns, map, calls: () => plainCalls };
+  }
+
+  test('finds a label in another branch, first in map order', () => {
+    const { fns } = setup();
+    fns.clearFormulaCache();
+    assert.equal(fns.computeNodeValue('f1'), 5);
+  });
+
+  test('the index is built once per pass and rebuilt after clearFormulaCache', () => {
+    const { fns, map, calls } = setup();
+    fns.clearFormulaCache();
+    fns.computeNodeValue('f1');
+    const afterFirst = calls();
+    fns.computeNodeValue('f2');
+    // f2 re-reads only its own text and its sibling/children lists, not all 7 nodes.
+    assert.ok(calls() - afterFirst < Object.keys(map.nodes).length, `${calls() - afterFirst} reads`);
+    map.nodes.p.text = 'Price: 7';
+    fns.clearFormulaCache();
+    assert.equal(fns.computeNodeValue('f2'), 7);
+  });
+});
+
+describe('splitPipeRow — escaped pipes', () => {
+  const fns = loadFns([
+    'splitPipeRow', 'isGfmSepLine', 'normalizeTableGrid', 'parseGfmAligns',
+    'parseGfmMarkdownTable', 'htmlTableToMarkdown',
+  ], {
+    htmlTableToGrid: () => ({ headers: ['Name', 'Rule'], rows: [['A|B', 'x']] }),
+  });
+
+  test('splits only on unescaped pipes and unescapes cells', () => {
+    assert.deepEqual(fns.splitPipeRow('| A\\|B | c |'), ['A|B', 'c']);
+    assert.deepEqual(fns.splitPipeRow('a | b\\|'), ['a', 'b|']);
+    assert.deepEqual(fns.splitPipeRow('| a | b |'), ['a', 'b']);
+  });
+
+  test('htmlTableToMarkdown output round-trips a cell containing a pipe', () => {
+    const md = fns.htmlTableToMarkdown('<table></table>');
+    assert.match(md, /A\\\|B/);
+    const g = fns.parseGfmMarkdownTable(md);
+    assert.deepEqual(g.headers, ['Name', 'Rule']);
+    assert.deepEqual(g.rows, [['A|B', 'x']]);
+  });
+});

@@ -612,16 +612,6 @@ function _reframeSmooth(cx, cy, W1, H1){
   });
   setTimeout(settle, 280);                       // safety net if transitionend doesn't fire
 }
-function _reframeDuring(ms, cx, cy){
-  const now=()=> (window.performance&&performance.now)?performance.now():Date.now();
-  const t0=now();
-  (function step(){
-    const {w:SW,h:SH}=_stageSize();
-    if(SW>1&&SH>1){ view.x=SW/2-cx*view.k; view.y=SH/2-cy*view.k; applyView(); }
-    if(now()-t0<ms) requestAnimationFrame(step);
-    else { _markStage(); saveMapView(); updateMinimap(); }
-  })();
-}
 function applyMapView(saved){
   view.k = isFinite(saved.k) ? saved.k : 1;
   if(isFinite(saved.cx) && isFinite(saved.cy)){
@@ -734,20 +724,24 @@ function nodeOutsideRect(n, r){
   const w=n.w||120, h=n.h||40;
   return n.x+w<r.x0 || n.x>r.x1 || n.y+h<r.y0 || n.y>r.y1;
 }
+// [{el,id}] for every rendered .node, rebuilt at the end of render() so the
+// per-frame cull does not query the DOM. null = rebuild lazily from the DOM.
+let _cullPairs=null;
 function cullOffscreenNodes(){
   if(!viewport || !map || !map.nodes) return;
-  const els=viewport.querySelectorAll('.node');
-  const nEls=els.length;
+  if(!_cullPairs) _cullPairs=Array.from(viewport.querySelectorAll('.node'), el=>({el, id:el.dataset.id}));
+  const pairs=_cullPairs;
+  const nEls=pairs.length;
   if(nEls<80){
-    for(let i=0;i<nEls;i++) els[i].classList.remove('offscreen');
+    for(let i=0;i<nEls;i++) pairs[i].el.classList.remove('offscreen');
     return;
   }
   const {w:SW,h:SH}=(_prevStage && _prevStage.w>1 && _prevStage.h>1) ? _prevStage : _stageSize();
   const pad=Math.max(120, 280/(view.k||1));
   const r=mapViewRect(view, SW, SH, pad);
   for(let i=0;i<nEls;i++){
-    const el=els[i];
-    const id=el.dataset.id;
+    const {el, id}=pairs[i];
+    if(!el.isConnected){ _cullPairs=null; continue; }   // DOM changed outside render()
     if(el.classList.contains('editing') || id===sel){
       if(el.classList.contains('offscreen')) el.classList.remove('offscreen');
       continue;
@@ -794,6 +788,8 @@ function clearNodes(){
   if(typeof discardEditOverlay==='function') discardEditOverlay();
 }
 
+// Pending coalesced relayout after node images finish loading (see render()).
+let _imgRelayoutT=null;
 function render(){
   if(typeof applyLevelColors==='function') applyLevelColors();
   // Rebuild destroys .node elements. If a WK .edit-float is still mounted,
@@ -801,6 +797,7 @@ function render(){
   // (pushHistory, cycleTask, setMarker) flush first.
   if(typeof discardEditOverlay==='function') discardEditOverlay();
   clearNodes(); edges.innerHTML='';
+  _cullPairs=null;
   clearFormulaCache();
   if(!map){
     $('#empty').style.display='grid';
@@ -873,7 +870,16 @@ function render(){
           pend.remove();
           el.classList.remove('image-pending');
           img.style.display='';
-          if(typeof autoLayout==='function') autoLayout();
+          // Relayout only when the revealed image actually changed the card's
+          // size, and coalesce a burst of image loads into one non-persisting
+          // pass: each autoLayout re-renders, and saving here would bump
+          // map.updated just because pictures finished loading.
+          if(typeof autoLayout!=='function' || !el.isConnected) return;
+          const sz=(view.k||1)*_uiZ();
+          const r=el.getBoundingClientRect();
+          if(Math.abs(r.width/sz-(n.w||0))<=1 && Math.abs(r.height/sz-(n.h||0))<=1) return;
+          clearTimeout(_imgRelayoutT);
+          _imgRelayoutT=setTimeout(()=>{ _imgRelayoutT=null; autoLayout(false,{persist:false}); },50);
         };
         img.addEventListener('load', reveal);
         img.addEventListener('dblclick',ev=>{
@@ -1045,10 +1051,14 @@ function render(){
   // cards now collide, push them apart here — before edges are drawn — so a
   // stale n.h cannot ship an overlapping frame. Skip while a node is being
   // dragged; the drop path re-tidies.
-  if(!(typeof document!=='undefined' && document.body && document.body.classList.contains('node-dragging'))
+  // Only tree layouts stack siblings along one axis. Grid, timeline, matrix
+  // and fishbone deliberately put siblings side by side on the same row, so a
+  // one-axis push there would staircase them on every render.
+  const _sibAxis=siblingOverlapAxis(resolveLayout(map.layout||'balanced', map.layoutParams));
+  if(_sibAxis && !(typeof document!=='undefined' && document.body && document.body.classList.contains('node-dragging'))
      && resolveSiblingOverlaps(map.nodes, {
        gap:16,
-       vertical:(map.layout||'balanced')!=='down',
+       vertical:_sibAxis==='vertical',
        hidden,
        kidsOf:childrenOf
      })){
@@ -1065,6 +1075,7 @@ function render(){
   if(typeof multiSel !== 'undefined' && multiSel.size){
     multiSel.forEach(id=>document.querySelector(`.node[data-id="${id}"]`)?.classList.add('multi-sel'));
   }
+  _cullPairs=toMeasure.map(({el})=>({el, id:el.dataset.id}));
   cullOffscreenNodes();
   } finally { _ci=_prevCI; }
 }
@@ -1276,8 +1287,21 @@ function isTableNode(n){
   if(n.table) return true;
   return !!(n.html && /<table[\s>]/i.test(n.html));
 }
+// Split a GFM row on UNESCAPED pipes. htmlTableToMarkdown writes a literal
+// pipe inside a cell as \|, so honour that here and unescape it in the cell.
 function splitPipeRow(line){
-  return String(line||'').replace(/^\s*\|/, '').replace(/\|\s*$/, '').split('|').map(c => c.trim());
+  let s=String(line||'').replace(/^\s*\|/, '').replace(/\s+$/, '');
+  if(s.endsWith('|') && !s.endsWith('\\|')) s=s.slice(0, -1);
+  const cells=[];
+  let cur='';
+  for(let i=0;i<s.length;i++){
+    const ch=s[i];
+    if(ch==='\\' && s[i+1]==='|'){ cur+='|'; i++; continue; }
+    if(ch==='|'){ cells.push(cur.trim()); cur=''; continue; }
+    cur+=ch;
+  }
+  cells.push(cur.trim());
+  return cells;
 }
 function isGfmSepLine(line){
   if(!line || line.indexOf('-')<0) return false;
@@ -1575,34 +1599,6 @@ function containsMath(text){
   if(!text || text.indexOf('$')<0) return false;
   return new RegExp(MATH_DELIM_RE.source).test(text);
 }
-// Render `text` into `container`, converting $...$ / $$...$$ to MathML while
-// passing the surrounding text through the normal (sanitized) rendering path.
-function appendMathAware(container, text){
-  const re=new RegExp(MATH_DELIM_RE.source,'g');
-  let last=0, m;
-  const plain=(str)=>{
-    if(!str) return;
-    if(hasInlineMarkup(str)){
-      const span=document.createElement('span');
-      span.innerHTML=sanitizeInlineHTML(str);
-      autoLinkPlainTextNodes(span);
-      while(span.firstChild) container.appendChild(span.firstChild);
-    } else { appendTextWithLinks(container, str); }
-  };
-  while((m=re.exec(text))){
-    plain(text.slice(last, m.index));
-    const tex = m[1]!=null ? m[1] : m[2];
-    const display = m[1]!=null;
-    let mathml=null; try{ mathml=latexToMathML(tex, display); }catch(e){ mathml=null; }
-    if(mathml){
-      const tmp=document.createElement('span');
-      tmp.innerHTML = mathml;                 // HTML5 parses <math> as MathML foreign content
-      while(tmp.firstChild) container.appendChild(tmp.firstChild);
-    } else { container.appendChild(document.createTextNode(m[0])); }
-    last = m.index + m[0].length;
-  }
-  plain(text.slice(last));
-}
 
 // Render text that may contain BOTH inline formatting/markup AND $...$ math.
 // Math is extracted first into placeholder tokens (so its contents are never
@@ -1703,6 +1699,9 @@ function autoLinkPlainTextNodes(root){
   let node;
   while((node = walker.nextNode())){
     if(node.parentElement && node.parentElement.closest('a')) continue;
+    // URL_RE is global: .test() advances lastIndex, so reset it or the next
+    // text node is searched from the previous match's end and can be missed.
+    URL_RE.lastIndex=0;
     if(URL_RE.test(node.nodeValue||'')) toReplace.push(node);
   }
   toReplace.forEach(t=>{
@@ -1785,7 +1784,6 @@ function drawEdges(hidden){
   // Cross-links: non-tree edges (references / dependencies). Drawn as separate
   // dotted paths so they read differently from the structural tree edges.
   let linkPath='';
-  const linkMarkers=[];
   (map.links||[]).forEach(lk=>{
     const a=map.nodes[lk.from], b=map.nodes[lk.to];
     if(!a||!b) return;
@@ -1799,7 +1797,6 @@ function drawEdges(hidden){
     const off=Math.min(60, len*0.18);
     const cx=mx - (dy/len)*off, cy=my + (dx/len)*off;
     linkPath += `M${ax},${ay} Q${cx},${cy} ${bx},${by} `;
-    linkMarkers.push({x:bx,y:by,cx,cy});
   });
   edges.innerHTML =
     `<path d="${path}" fill="none" stroke="var(--edge-color, var(--line-2))" stroke-width="var(--edge-width, 2.2)" stroke-linecap="round"/>` +
@@ -1997,11 +1994,19 @@ function mapHasCardOverlap(nodes, opts){
     if(hidden.has(id)) continue;
     if(nodes[id]) ids.push(id);
   }
-  for(let i=0;i<ids.length;i++){
-    for(let j=i+1;j<ids.length;j++){
-      const A=ids[i], B=ids[j];
+  // Sweep by x: once a later box starts past this one's right edge, no later
+  // box can overlap it either. The ancestor walk runs only on overlapping pairs.
+  const boxes=ids.map(id=>({id, b:nodeLayoutBox(nodes[id])}));
+  boxes.sort((p,q)=>(p.b.x||0)-(q.b.x||0));
+  for(let i=0;i<boxes.length;i++){
+    const a=boxes[i].b;
+    for(let j=i+1;j<boxes.length;j++){
+      const b=boxes[j].b;
+      if(b.x>=a.x+a.w) break;
+      if(!boxesOverlap(a, b, 0)) continue;
+      const A=boxes[i].id, B=boxes[j].id;
       if(nodeIsAncestor(nodes, A, B) || nodeIsAncestor(nodes, B, A)) continue;
-      if(boxesOverlap(nodeLayoutBox(nodes[A]), nodeLayoutBox(nodes[B]), 0)) return true;
+      return true;
     }
   }
   return false;
@@ -2013,6 +2018,13 @@ function nodeIsAncestor(nodes, ancestorId, id){
     p=nodes[p] && nodes[p].parent;
   }
   return false;
+}
+
+// Which axis tree siblings stack on for a resolved layout ({strategy, params}),
+// or null when the layout is not a tree and siblings must not be nudged.
+function siblingOverlapAxis(run){
+  if(!run || run.strategy!=='tree') return null;
+  return (run.params && run.params.axis==='y') ? 'horizontal' : 'vertical';
 }
 
 // Only same-parent, same-side siblings. A dense map has many unrelated
@@ -2041,6 +2053,9 @@ function resolveSiblingOverlaps(nodes, opts){
     for(let i=0;i<ids.length-1;i++){
       const A=ids[i], B=ids[i+1];
       const a=nodeLayoutBox(nodes[A]), b=nodeLayoutBox(nodes[B]);
+      // Siblings that are apart on the other axis do not collide, whatever
+      // their order on this one.
+      if(!boxesOverlap(a,b,gap)) continue;
       const need=vertical ? (a.y+a.h+gap) : (a.x+a.w+gap);
       const got=vertical ? b.y : b.x;
       if(got<need){
@@ -2054,102 +2069,6 @@ function resolveSiblingOverlaps(nodes, opts){
   return moved;
 }
 
-// After a node has been resized, push any siblings whose subtree-bounds now
-// overlap the resized node (or each other) just enough to restore the default
-// gap. We move whole subtrees (children follow), and only nudge — we don't do
-// a full relayout, so the user's manual arrangement is preserved.
-function resolveResizeCollisions(resizedId){
-  if(!map || !map.nodes[resizedId]) return;
-  const r = map.nodes[resizedId];
-  if(!r.parent) return;                       // root: no siblings to nudge
-  const layout = map.layout || 'balanced';
-  const vertical = (layout === 'down');       // down layout stacks horizontally
-  const gap = vertical ? DOWN_HGAP : VGAP;
-
-  // Helper: bounding box of a single node
-  const box = id => {
-    const n = map.nodes[id];
-    return { x: n.x, y: n.y, w: n.w||120, h: n.h||40 };
-  };
-  // Helper: bounding box of a whole subtree (for cleaner collision avoidance —
-  // a node + its descendants behave as one block).
-  const subtreeBox = id => {
-    const ids = [id]; const collect = i => { childrenOf(i).forEach(c => { ids.push(c); collect(c); }); };
-    collect(id);
-    let minX=Infinity, minY=Infinity, maxX=-Infinity, maxY=-Infinity;
-    ids.forEach(i => {
-      const b = box(i);
-      if(b.x < minX) minX = b.x;
-      if(b.y < minY) minY = b.y;
-      if(b.x + b.w > maxX) maxX = b.x + b.w;
-      if(b.y + b.h > maxY) maxY = b.y + b.h;
-    });
-    return { x:minX, y:minY, w:maxX-minX, h:maxY-minY };
-  };
-  // Helper: shift a whole subtree
-  const shift = (id, dx, dy) => {
-    const n = map.nodes[id]; n.x += dx; n.y += dy;
-    childrenOf(id).forEach(c => shift(c, dx, dy));
-  };
-
-  // Only consider siblings on the same side of the parent — those are the
-  // ones that are stacked next to the resized node in the layout direction.
-  const siblings = childrenOf(r.parent).filter(c => c !== resizedId && map.nodes[c].side === r.side);
-  if(!siblings.length) return;
-
-  // Resized-node centre on the stacking axis (y for horizontal layouts, x for down)
-  const rb = box(resizedId);
-  const rCentre = vertical ? rb.x + rb.w/2 : rb.y + rb.h/2;
-  // Separate siblings into "before" (lower coord) and "after" (higher coord) on
-  // the stacking axis. Sort each so we can cascade nudges.
-  const before = [], after = [];
-  siblings.forEach(s => {
-    const sb = subtreeBox(s);
-    const sc = vertical ? sb.x + sb.w/2 : sb.y + sb.h/2;
-    (sc < rCentre ? before : after).push(s);
-  });
-  if(vertical){
-    before.sort((a,b) => subtreeBox(b).x - subtreeBox(a).x);  // closest-to-resized first
-    after.sort((a,b) => subtreeBox(a).x - subtreeBox(b).x);
-  } else {
-    before.sort((a,b) => subtreeBox(b).y - subtreeBox(a).y);
-    after.sort((a,b) => subtreeBox(a).y - subtreeBox(b).y);
-  }
-
-  // "After" pass: ensure each successive sibling sits at least `gap` past the
-  // previous block on the stacking axis. The first comparison uses the resized
-  // node's actual box; subsequent ones use the previous subtree-bounds.
-  let prevEnd = vertical ? (rb.x + rb.w) : (rb.y + rb.h);
-  after.forEach(s => {
-    const sb = subtreeBox(s);
-    const start = vertical ? sb.x : sb.y;
-    const need  = prevEnd + gap;
-    if(start < need){
-      const delta = need - start;
-      if(vertical) shift(s, delta, 0);
-      else         shift(s, 0, delta);
-    }
-    const newSB = subtreeBox(s);
-    prevEnd = vertical ? (newSB.x + newSB.w) : (newSB.y + newSB.h);
-  });
-  // "Before" pass: mirror image — push earlier siblings backwards if they
-  // would overlap with the resized node now (because it grew upward/leftward).
-  let prevStart = vertical ? rb.x : rb.y;
-  before.forEach(s => {
-    const sb = subtreeBox(s);
-    const end = vertical ? (sb.x + sb.w) : (sb.y + sb.h);
-    const need = prevStart - gap;
-    if(end > need){
-      const delta = end - need;
-      if(vertical) shift(s, -delta, 0);
-      else         shift(s, 0, -delta);
-    }
-    const newSB = subtreeBox(s);
-    prevStart = vertical ? newSB.x : newSB.y;
-  });
-
-  render();
-}
 
 // Assign root children to left/right by subtree weight for a balanced split.
 // Used when first building a map (templates) or when explicitly re-balancing;
@@ -2716,9 +2635,6 @@ function autoLayout(noRender, opts){
   const layout = map.layout || 'balanced';
   // Spacing comes from this map's config. Local names, so the module constants
   // stay the defaults and other callers (drag-insertion, FLIP) are unaffected.
-  const _lc = validateLayoutConfig(map.layoutConfig)[layout] || LAYOUT_CONFIG_DEFAULTS.balanced;
-  const LH = (_lc.hGap != null) ? _lc.hGap : HGAP;
-  const LV = (_lc.vGap != null) ? _lc.vGap : VGAP;
 
   // ----- PLACEMENT -----
   // One dispatch for every layout: resolve to a strategy plus a complete
@@ -2774,6 +2690,8 @@ function paintPositions(hidden){
   });
   drawEdges(hidden);
   repositionNodeBar();
+  // Nodes shifted into view by the live relayout must stop being culled.
+  cullOffscreenNodes();
 }
 // Re-measure the node being edited, recompute the tidy layout, and paint it.
 // Keeps the map neat as the node grows while typing (the way GitMind reflows).
@@ -4025,14 +3943,28 @@ function clientBoxFromGbr(r){
 // Box is painted in clientX. After dropping whole-app zoom/transform, GBR is
 // already in that space.
 function nodesInMarqueeEls(nodeEls, clientRect){
-  const hit=[];
-  if(!nodeEls || !clientRect || !(clientRect.w>0) || !(clientRect.h>0)) return hit;
+  if(!nodeEls || !clientRect || !(clientRect.w>0) || !(clientRect.h>0)) return [];
+  return nodesInMarqueeRects(marqueeRectsFromEls(nodeEls), clientRect);
+}
+// One layout read per node, done once when a marquee starts (or the camera
+// moves), so each mousemove afterwards is pure math with no forced reflow.
+function marqueeRectsFromEls(nodeEls){
+  const out=[];
+  if(!nodeEls) return out;
   for(let i=0;i<nodeEls.length;i++){
     const el=nodeEls[i];
     const id=el && el.dataset && el.dataset.id;
     if(!id || typeof el.getBoundingClientRect!=='function') continue;
     const box=clientBoxFromGbr(el.getBoundingClientRect());
-    if(box && box.w>0 && box.h>0 && rectsIntersect(box, clientRect)) hit.push(id);
+    if(box && box.w>0 && box.h>0) out.push({id, box});
+  }
+  return out;
+}
+function nodesInMarqueeRects(rects, clientRect){
+  const hit=[];
+  if(!rects || !clientRect || !(clientRect.w>0) || !(clientRect.h>0)) return hit;
+  for(let i=0;i<rects.length;i++){
+    if(rectsIntersect(rects[i].box, clientRect)) hit.push(rects[i].id);
   }
   return hit;
 }
@@ -5154,14 +5086,36 @@ if(typeof document!=='undefined' && document.addEventListener){
 /* ============================================================
    SEARCH ACROSS ALL MAPS
    ============================================================ */
-async function searchAllMaps(query){
+// Map contents keyed by id; reused while the index still reports the same
+// `updated`, so retyping a query does not refetch every unchanged map.
+const _searchMapCache=new Map();
+const SEARCH_FETCH_CONCURRENCY=4;
+// isStale(): true once a newer search has started — this run then stops and
+// returns null instead of finishing work nobody will look at.
+async function searchAllMaps(query, isStale){
   const q=(query||'').trim().toLowerCase();
   if(!q) return [];
+  const stale=()=>typeof isStale==='function' && isStale();
   let idx=[]; try{ idx=await Store.list(); }catch(e){ idx=[]; }
-  const results=[];
-  for(const meta of idx){
+  if(stale()) return null;
+  idx=Array.isArray(idx)?idx:[];
+  const live=new Set(idx.map(meta=>meta&&meta.id));
+  for(const id of _searchMapCache.keys()) if(!live.has(id)) _searchMapCache.delete(id);
+  const load=async meta=>{
+    if(!meta) return null;
+    if(meta.id===(map&&map.id)) return map;
+    const hit=_searchMapCache.get(meta.id);
+    if(hit && meta.updated!=null && hit.updated===meta.updated) return hit.m;
     let m=null;
-    try{ m = (meta.id===(map&&map.id)) ? map : await Store.get(meta.id); }catch(e){ continue; }
+    try{ m=await Store.get(meta.id); }catch(e){ return null; }
+    if(m && meta.updated!=null) _searchMapCache.set(meta.id, {updated:meta.updated, m});
+    return m;
+  };
+  const results=[];
+  for(let b=0;b<idx.length;b+=SEARCH_FETCH_CONCURRENCY){
+    const batch=await Promise.all(idx.slice(b, b+SEARCH_FETCH_CONCURRENCY).map(load));
+    if(stale()) return null;
+    for(const m of batch){
     if(!m||!m.nodes) continue;
     for(const n of Object.values(m.nodes)){
       const plain=nodeTextPlain(n.text||'').toLowerCase();
@@ -5174,6 +5128,7 @@ async function searchAllMaps(query){
         results.push({ mapId:m.id, mapTitle:m.title||'Untitled', nodeId:n.id, snippet });
         if(results.length>=200) return results;
       }
+    }
     }
   }
   return results;
@@ -5189,8 +5144,8 @@ function runGlobalSearch(query){
   _globalSearchT=setTimeout(async ()=>{
     const panel=ensureGlobalResults();
     panel.innerHTML='<div class="gs-status">'+rmsTr('searchingAll','Searching all maps…')+'</div>';
-    const results=await searchAllMaps(q);
-    if(seq!==_globalSearchSeq) return;   // a newer search superseded this one
+    const results=await searchAllMaps(q, ()=>seq!==_globalSearchSeq);
+    if(!results || seq!==_globalSearchSeq) return;   // a newer search superseded this one
     renderGlobalResults(results, q);
   }, 220);
 }
@@ -6879,8 +6834,11 @@ function beginSubtreeDrag(idOrIds, mx, my){
     roots.forEach(collect);
   });
   document.querySelectorAll('.node.drag-ghost').forEach(n=>n.classList.remove('drag-ghost'));
+  // Cache each element once here: applySubtreeDelta runs every mousemove.
   for(const id in subtree){
-    document.querySelector(`.node[data-id="${id}"]`)?.classList.add('drag-ghost');
+    const el=document.querySelector(`.node[data-id="${id}"]`);
+    subtree[id].el=el||null;
+    if(el) el.classList.add('drag-ghost');
   }
   return { mx, my, root:roots[0], roots, subtree };
 }
@@ -6890,7 +6848,10 @@ function applySubtreeDelta(start, dx, dy){
     const base = start.subtree[id];
     const n = map.nodes[id]; if(!n) continue;
     n.x = base.x + dx; n.y = base.y + dy;
-    const el = document.querySelector(`.node[data-id="${id}"]`);
+    let el = base.el;
+    if(el && !el.isConnected){   // a render() mid-drag replaced the element
+      el = base.el = document.querySelector(`.node[data-id="${id}"]`);
+    }
     if(el){ el.style.left = n.x+'px'; el.style.top = n.y+'px'; }
   }
 }
@@ -7070,11 +7031,33 @@ function updateMarqueeEl(m){
   el.style.height=Math.abs(m.y1-m.y0)+'px';
   return el;
 }
+// Runs at most once per frame while ⌘-dragging a marquee. Node rects are
+// cached on the marquee and re-read only when the camera has moved.
+let _marqueeRAF=0;
+function applyMarqueeFrame(){
+  _marqueeRAF=0;
+  const m=marquee;
+  if(!m || !m.moved || !map) return;
+  const camKey=view.x+','+view.y+','+view.k;
+  if(!m.rects || m.rectsCam!==camKey){
+    m.rects=marqueeRectsFromEls(viewport.querySelectorAll('.node'));   // reads first…
+    m.rectsCam=camKey;
+  }
+  updateMarqueeEl(m);                                                 // …then writes
+  const hits=nodesInMarqueeRects(m.rects, mapRectFromCorners(m.x0, m.y0, m.x1, m.y1));
+  const key=hits.join('\n');
+  m.hits=hits;
+  if(key!==m.hitsKey){ m.hitsKey=key; paintMarqueeHits(hits); }
+}
 function paintMarqueeHits(ids){
   const set=new Set(ids||[]);
   viewport.querySelectorAll('.node').forEach(n=>n.classList.toggle('marquee-hit', set.has(n.dataset.id)));
 }
 function endMarquee(cancel){
+  if(_marqueeRAF){
+    cancelAnimationFrame(_marqueeRAF); _marqueeRAF=0;
+    if(!cancel) applyMarqueeFrame();   // commit the final pointer position's hits
+  }
   document.body.classList.remove('marquee-selecting');
   $('#marquee')?.remove();
   document.querySelectorAll('.node.marquee-hit').forEach(n=>n.classList.remove('marquee-hit'));
@@ -7303,15 +7286,7 @@ window.addEventListener('mousemove',e=>{
     e.preventDefault();
     marquee.x1=e.clientX; marquee.y1=e.clientY;
     if(Math.abs(marquee.x1-marquee.x0)+Math.abs(marquee.y1-marquee.y0)>4) marquee.moved=true;
-    if(marquee.moved && map){
-      updateMarqueeEl(marquee);
-      const hits=nodesInMarqueeEls(
-        viewport.querySelectorAll('.node'),
-        mapRectFromCorners(marquee.x0, marquee.y0, marquee.x1, marquee.y1)
-      );
-      marquee.hits=hits;
-      paintMarqueeHits(hits);
-    }
+    if(marquee.moved && map && !_marqueeRAF) _marqueeRAF=requestAnimationFrame(applyMarqueeFrame);
     return;
   }
   if(panning){
@@ -7814,11 +7789,18 @@ let searchMatches=[], searchPos=-1;
 let searchReveal=null;
 let searchAutoExpanded=new Set();
 
+// node -> {raw, plain}. The raw text is the validity key: an edited node
+// misses and is re-stripped; untouched nodes skip the HTML parse per keystroke.
+const _searchTextCache=new WeakMap();
 function nodeSearchText(n){
   if(!n) return '';
   const raw = n.text || '';
   if(typeof hasInlineMarkup==='function' && hasInlineMarkup(raw) && typeof nodeTextPlain==='function'){
-    return nodeTextPlain(raw);
+    const hit=_searchTextCache.get(n);
+    if(hit && hit.raw===raw) return hit.plain;
+    const plain=nodeTextPlain(raw);
+    _searchTextCache.set(n, {raw, plain});
+    return plain;
   }
   return raw;
 }
@@ -7948,7 +7930,12 @@ $('#searchBtn').onclick=()=>{
   if(w.classList.contains('open')) closeSearch(); else openSearch(false);
 };
 $('#replaceToggle').onclick=()=>{ $('#searchWrap').classList.toggle('replace-mode'); $('#replace').focus(); };
-$('#search').addEventListener('input',e=>{ if(globalSearchMode) runGlobalSearch(e.target.value); else doSearch(e.target.value); });
+$('#search').addEventListener('input',e=>{
+  if(globalSearchMode){ runGlobalSearch(e.target.value); return; }
+  // Debounce: a fast typist should not rescan the whole map per keystroke.
+  clearTimeout(_searchInputT);
+  _searchInputT=setTimeout(()=>{ _searchInputT=0; doSearch(); }, 80);
+});
 $('#search').addEventListener('keydown',e=>{
   if(e.key==='Escape'){ e.preventDefault(); closeSearch(); }
   if(e.key==='Enter'){ e.preventDefault(); focusNextMatch(); }
@@ -8026,7 +8013,9 @@ function keepSearchFocus(){
   if(!input || !wrap || !wrap.classList.contains('open')) return;
   if(document.activeElement!==input) input.focus({preventScroll:true});
 }
+let _searchInputT=0;   // pending debounced doSearch from typing
 function doSearch(q){
+  if(_searchInputT){ clearTimeout(_searchInputT); _searchInputT=0; }
   const raw=q==null ? ($('#search')?.value||'') : q;
   searchMatches=collectSearchMatches(raw);
   searchPos=-1;
@@ -8036,6 +8025,7 @@ function doSearch(q){
   if(cnt) cnt.textContent = needle ? (searchMatches.length ? rmsTr('searchFound','%s found').replace('%s', searchMatches.length) : rmsTr('searchNone','none')) : '';
 }
 function focusNextMatch(){
+  if(_searchInputT) doSearch();   // Enter right after typing: use the current query
   if(!searchMatches.length){ keepSearchFocus(); return; }
   if(typeof flushOpenEditToModel==='function') flushOpenEditToModel();
   const nextPos=(searchPos+1)%searchMatches.length;
@@ -8835,8 +8825,14 @@ $('#mapTitle').addEventListener('input',e=>{
   if(!map || READONLY) return;
   map.title=e.target.value;
   map.titleAuto=false;          // user took control — stop mirroring the root text
-  scheduleSave(); refreshList();
+  scheduleSave();
+  // Per keystroke only retitle the active sidebar row; the full list rebuild
+  // (Store.list + re-sort) waits for change/blur below.
+  const nm=document.querySelector('#mapList .map-item.active .nm');
+  if(nm) nm.textContent=map.title||rmsTr('untitled','Untitled');
+  else refreshList();
 });
+$('#mapTitle').addEventListener('change',()=>{ if(map && !READONLY) refreshList(); });
 
 /* ---------- autosave ---------- */
 const _mapSaveStates=new Map(), _saveErrorNotified=new Set();
@@ -10199,7 +10195,24 @@ function parseLabeledValue(text){
 // Cleared at the start of every render() so formulas always reflect the current map;
 // memoized within a single pass so a value referenced by several formulas is only computed once.
 let _formulaCache=new Map();
-function clearFormulaCache(){ _formulaCache=new Map(); }
+// normalized label -> node ids (map order), built on first whole-map lookup
+// in a pass so each reference does not re-parse every node's text.
+let _formulaLabelIndex=null;
+function clearFormulaCache(){ _formulaCache=new Map(); _formulaLabelIndex=null; }
+function formulaLabelIndex(){
+  if(_formulaLabelIndex) return _formulaLabelIndex;
+  const idx=new Map();
+  if(map && map.nodes){
+    for(const id of Object.keys(map.nodes)){
+      const n=map.nodes[id]; if(!n) continue;
+      const key=(parseLabeledValue(nodeTextPlain(n.text||'')).label||'').trim().toLowerCase();
+      const list=idx.get(key);
+      if(list) list.push(id); else idx.set(key, [id]);
+    }
+  }
+  _formulaLabelIndex=idx;
+  return idx;
+}
 function computeNodeValue(nodeId, visiting){
   if(_formulaCache.has(nodeId)) return _formulaCache.get(nodeId);
   if(!visiting) visiting=new Set();
@@ -10234,7 +10247,7 @@ function computeNodeValue(nodeId, visiting){
       let v;
       if(n.parent!=null){ v=tryList(childrenOf(n.parent)); if(v!==undefined) return v; }
       v=tryList(childrenOf(nodeId)); if(v!==undefined) return v;
-      v=tryList(Object.keys(map.nodes)); if(v!==undefined) return v;
+      v=tryList(formulaLabelIndex().get(target)||[]); if(v!==undefined) return v;
       return null;
     }
   };
@@ -11505,7 +11518,6 @@ function pickContrast(hex){
   return L > 0.6 ? '#23201b' : '#ffffff';
 }
 function roundRect(ctx,x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();}
-function wrapText(ctx,text,x,y,maxW,lh){const words=text.split(/\s+/);let line='',lines=[];words.forEach(w=>{const t=line?line+' '+w:w;if(ctx.measureText(t).width>maxW&&line){lines.push(line);line=w;}else line=t;});if(line)lines.push(line);const startY=y-(lines.length-1)*lh/2;lines.forEach((l,i)=>ctx.fillText(l,x,startY+i*lh));}
 function download(blob,name){const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);}
 
 /* ---------- toast ---------- */
