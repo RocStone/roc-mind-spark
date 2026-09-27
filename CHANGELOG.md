@@ -4,6 +4,32 @@ Versions follow the macOS bundle `CFBundleShortVersionString` and the matching G
 
 ## [Unreleased]
 
+### Fixed (2026-09-28 audit)
+
+- File exports (PNG, Markdown, JSON, Word, Mermaid, references) now save through a native Save panel. WKWebView previously cancelled the `blob:` download and only showed the success toast.
+- Delete map, save as template, remove image, insert link in notes, and import errors now use in-page dialogs. The native `confirm()` / `prompt()` / `alert()` were no-ops in the overlay, so those actions silently did nothing. The Swift shell also implements the JS dialog delegates as a fallback.
+- Quit no longer interrupts macOS logout, restart or shutdown when nothing is pending; a 7-second native timeout, a "Quit Anyway" choice, and WebContent-crash recovery were added.
+- Map JSON larger than one socket chunk is decoded as a whole, so Chinese text is no longer corrupted into U+FFFD on save. Oversized bodies get 413, invalid bodies 400, cross-origin writes 403.
+- Pinned maps are pinned again in the sidebar; the row menu no longer toggles the wrong way.
+- Grid, timeline, matrix, fishbone and radial layouts are no longer staircased by the sibling-overlap pass on every render.
+- Undo/redo after deleting the selected node no longer throws; history snapshots include layout config/params/preset; restoring a version keeps map-level fields and is itself undoable, and never overwrites the pre-restore version.
+- Markdown preview / PDF, the node toolbar, sidebar, minimap, breadcrumb, global search results and PNG export no longer inject unescaped HTML or colours; imported maps are sanitized on load; links are restricted to http(s)/mailto in both the page and the shell.
+- Word export math images are no longer blank; PNG export draws formula results, tables and dividers like the canvas; a failed remote image no longer fails the export.
+- Permanent save failures stop retrying, show a red status and a distinct message instead of blocking quit forever; a failed map delete keeps the pending edit.
+- Version history keeps one version per 5-minute editing window (up to 50) instead of one per autosave.
+- Presentation mode no longer persists the temporary unfold or lets Backspace/Tab edit the map; replace matches what find matches and skips HTML entities; CRLF Markdown imports keep their structure; notes popup closes on map switch and saves on Escape; IME Enter no longer triggers find/replace; search highlights survive a re-render.
+- Global hotkey: a chord that fails to register (already taken) is rolled back and reported instead of leaving no hotkey; ⌥⇧⌘Q (macOS log-out) is rejected at entry instead of being silently rewritten on the next launch.
+- Node lookup covers nvm and `node@22` Homebrew paths and reports a too-old Node instead of a generic timeout.
+- Performance: cached node elements during subtree drag, marquee and off-screen culling; image loads coalesce into one non-persisting relayout; global search aborts stale runs and caches maps; large-map find debounces; formula references use a label index.
+
+### Added (2026-09-28)
+
+- ⌘V with a topic selected pastes the copied subtree (or a multi-line outline) as children; ⌘C copies the subtree outline. ⌘A selects all visible topics, ⌘⇧A selects siblings, ⇧Esc cancels an edit.
+- Right-click menu on a topic (add child/sibling, edit, notes, marker, copy as Markdown, duplicate subtree, fold, delete).
+- Layout presets shipped in `web/public/layouts/` appear in the look panel; the JSON import dialog has an entry point again.
+- Shortcuts help reflects current bindings and lists find, replace, settings, help and clipboard actions; settings can reset canvas shortcuts.
+- Hint bar dismissal persists; toast duration scales with length and stays above overlays; save status turns red on failure; the diff panel opens beside the history panel; highlighted topics keep readable text on dark themes.
+
 - Removed the inherited cloud store, share links, live collaboration, and GitHub OAuth sign-in code from the Mac canvas, along with the unused service worker.
 - A GFM Markdown table in a topic is rendered as a table while the topic is not being edited. Double-click or F2 still edits the Markdown source. The add-child plus stays outside the card; the table scrolls inside the topic text. Header tint follows the topic colour; table type size and weight match the topic.
 - Find in the current map includes topics hidden by a **−** fold. Enter cycles hits, unfolds the ancestor chain, and refolds the previous path when that topic was not edited. A second **⌘F** closes the find box.
