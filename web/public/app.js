@@ -1045,10 +1045,14 @@ function render(){
   // cards now collide, push them apart here — before edges are drawn — so a
   // stale n.h cannot ship an overlapping frame. Skip while a node is being
   // dragged; the drop path re-tidies.
-  if(!(typeof document!=='undefined' && document.body && document.body.classList.contains('node-dragging'))
+  // Only tree layouts stack siblings along one axis. Grid, timeline, matrix
+  // and fishbone deliberately put siblings side by side on the same row, so a
+  // one-axis push there would staircase them on every render.
+  const _sibAxis=siblingOverlapAxis(resolveLayout(map.layout||'balanced', map.layoutParams));
+  if(_sibAxis && !(typeof document!=='undefined' && document.body && document.body.classList.contains('node-dragging'))
      && resolveSiblingOverlaps(map.nodes, {
        gap:16,
-       vertical:(map.layout||'balanced')!=='down',
+       vertical:_sibAxis==='vertical',
        hidden,
        kidsOf:childrenOf
      })){
@@ -2015,6 +2019,13 @@ function nodeIsAncestor(nodes, ancestorId, id){
   return false;
 }
 
+// Which axis tree siblings stack on for a resolved layout ({strategy, params}),
+// or null when the layout is not a tree and siblings must not be nudged.
+function siblingOverlapAxis(run){
+  if(!run || run.strategy!=='tree') return null;
+  return (run.params && run.params.axis==='y') ? 'horizontal' : 'vertical';
+}
+
 // Only same-parent, same-side siblings. A dense map has many unrelated
 // branches whose boxes happen to overlap in 2D; shoving those apart would
 // scatter the whole canvas. The overlap the user actually sees is two
@@ -2041,6 +2052,9 @@ function resolveSiblingOverlaps(nodes, opts){
     for(let i=0;i<ids.length-1;i++){
       const A=ids[i], B=ids[i+1];
       const a=nodeLayoutBox(nodes[A]), b=nodeLayoutBox(nodes[B]);
+      // Siblings that are apart on the other axis do not collide, whatever
+      // their order on this one.
+      if(!boxesOverlap(a,b,gap)) continue;
       const need=vertical ? (a.y+a.h+gap) : (a.x+a.w+gap);
       const got=vertical ? b.y : b.x;
       if(got<need){
