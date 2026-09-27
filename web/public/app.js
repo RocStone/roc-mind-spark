@@ -10323,7 +10323,24 @@ function parseLabeledValue(text){
 // Cleared at the start of every render() so formulas always reflect the current map;
 // memoized within a single pass so a value referenced by several formulas is only computed once.
 let _formulaCache=new Map();
-function clearFormulaCache(){ _formulaCache=new Map(); }
+// normalized label -> node ids (map order), built on first whole-map lookup
+// in a pass so each reference does not re-parse every node's text.
+let _formulaLabelIndex=null;
+function clearFormulaCache(){ _formulaCache=new Map(); _formulaLabelIndex=null; }
+function formulaLabelIndex(){
+  if(_formulaLabelIndex) return _formulaLabelIndex;
+  const idx=new Map();
+  if(map && map.nodes){
+    for(const id of Object.keys(map.nodes)){
+      const n=map.nodes[id]; if(!n) continue;
+      const key=(parseLabeledValue(nodeTextPlain(n.text||'')).label||'').trim().toLowerCase();
+      const list=idx.get(key);
+      if(list) list.push(id); else idx.set(key, [id]);
+    }
+  }
+  _formulaLabelIndex=idx;
+  return idx;
+}
 function computeNodeValue(nodeId, visiting){
   if(_formulaCache.has(nodeId)) return _formulaCache.get(nodeId);
   if(!visiting) visiting=new Set();
@@ -10358,7 +10375,7 @@ function computeNodeValue(nodeId, visiting){
       let v;
       if(n.parent!=null){ v=tryList(childrenOf(n.parent)); if(v!==undefined) return v; }
       v=tryList(childrenOf(nodeId)); if(v!==undefined) return v;
-      v=tryList(Object.keys(map.nodes)); if(v!==undefined) return v;
+      v=tryList(formulaLabelIndex().get(target)||[]); if(v!==undefined) return v;
       return null;
     }
   };

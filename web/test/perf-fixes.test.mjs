@@ -96,6 +96,56 @@ describe('nodeSearchText — per-node plain-text cache', () => {
   });
 });
 
+describe('formula resolveRef — whole-map label index', () => {
+  function setup() {
+    const map = {
+      rootId: 'r',
+      nodes: {
+        r:  { id: 'r',  parent: null, text: 'root' },
+        a:  { id: 'a',  parent: 'r',  text: 'branch a' },
+        f1: { id: 'f1', parent: 'a',  text: '=price' },
+        f2: { id: 'f2', parent: 'a',  text: '=Price' },
+        b:  { id: 'b',  parent: 'r',  text: 'branch b' },
+        p:  { id: 'p',  parent: 'b',  text: 'Price: 5' },
+        p2: { id: 'p2', parent: 'b',  text: 'price: 9' },
+      },
+    };
+    let plainCalls = 0;
+    const fns = loadFns(
+      ['clearFormulaCache', 'formulaLabelIndex', 'computeNodeValue',
+       'parseLabeledValue', 'parseNumericLiteral'],
+      {
+        map,
+        childrenOf: id => Object.keys(map.nodes).filter(k => map.nodes[k].parent === id),
+        nodeTextPlain: t => { plainCalls++; return t; },
+        evalFormula: (expr, ctx) => ctx.resolveRef(expr),
+        _formulaCache: new Map(),
+        _formulaLabelIndex: null,
+      }
+    );
+    return { fns, map, calls: () => plainCalls };
+  }
+
+  test('finds a label in another branch, first in map order', () => {
+    const { fns } = setup();
+    fns.clearFormulaCache();
+    assert.equal(fns.computeNodeValue('f1'), 5);
+  });
+
+  test('the index is built once per pass and rebuilt after clearFormulaCache', () => {
+    const { fns, map, calls } = setup();
+    fns.clearFormulaCache();
+    fns.computeNodeValue('f1');
+    const afterFirst = calls();
+    fns.computeNodeValue('f2');
+    // f2 re-reads only its own text and its sibling/children lists, not all 7 nodes.
+    assert.ok(calls() - afterFirst < Object.keys(map.nodes).length, `${calls() - afterFirst} reads`);
+    map.nodes.p.text = 'Price: 7';
+    fns.clearFormulaCache();
+    assert.equal(fns.computeNodeValue('f2'), 7);
+  });
+});
+
 describe('splitPipeRow — escaped pipes', () => {
   const fns = loadFns([
     'splitPipeRow', 'isGfmSepLine', 'normalizeTableGrid', 'parseGfmAligns',
