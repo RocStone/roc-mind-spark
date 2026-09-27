@@ -126,7 +126,7 @@ describe('openExternalUrl — one click, one browser tab', () => {
       },
       body: { appendChild(){} },
     };
-    const { openExternalUrl, isRmsWk } = loadFns(['isRmsWk', 'openExternalUrl']);
+    const { openExternalUrl, isRmsWk } = loadFns(['isRmsWk', 'isSafeLinkUrl', 'openExternalUrl']);
     return { openExternalUrl, isRmsWk, counts: () => ({ opened, fallback }) };
   }
 
@@ -146,6 +146,15 @@ describe('openExternalUrl — one click, one browser tab', () => {
     const c = h.counts();
     assert.equal(c.opened, 1);
     assert.equal(c.fallback, 1);
+  });
+
+  test('non-http(s)/mailto schemes are never handed to the opener', () => {
+    const h = harness(true);
+    for(const u of ['javascript:alert(1)', 'file:///etc/passwd', 'vscode://x', 'smb://host/share']){
+      assert.equal(h.openExternalUrl(u), false, u);
+    }
+    assert.equal(h.openExternalUrl('mailto:a@b.c'), true);
+    assert.equal(h.counts().opened, 1);
   });
 });
 

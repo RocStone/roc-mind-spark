@@ -4524,6 +4524,8 @@ function isRmsWk(){
 }
 function openExternalUrl(url){
   if(!url) return false;
+  // Same rule as Markdown links: only http(s)/mailto are handed to the native opener.
+  if(!isSafeLinkUrl(url)) return false;
   // WK: window.open(_blank) already goes through createWebViewWith →
   // NSWorkspace.open. createWebViewWith returns nil, so window.open is null
   // even though the page already opened. A fallback <a> click would open it
