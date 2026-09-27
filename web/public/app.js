@@ -9136,6 +9136,10 @@ function closeAllMenus(){
   try{ if(typeof closeThemePanel==='function') closeThemePanel(); }catch(_){}
   if(typeof activePicker!=='undefined' && activePicker){ try{activePicker.remove();}catch(_){} activePicker=null; }
 }
+// Category labels in templates.js are English data; show them in the UI language.
+function tplCatLabel(c){ return rmsTr('tplCat_'+c.id, c.label); }
+// User templates store desc:'Your saved template' in localStorage; translate at render.
+function tplDesc(t){ return (t._user && t.desc==='Your saved template') ? rmsTr('tplUserDesc', t.desc) : (t.desc||''); }
 function showTemplatesMenu(){
   if(document.querySelector('.tpl-pop')){ closeAllMenus(); return; }      // click again closes it
   closeAllMenus();
@@ -9159,17 +9163,17 @@ function showTemplatesMenu(){
   // ----- root view: blank + category list -----
   const renderRoot = () => {
     pop.innerHTML = `
-      <div class="tpl-head">Start from a template</div>
+      <div class="tpl-head">${escapeHtml(rmsTr('newMapMenu','Start from a template'))}</div>
       <button class="tpl-item" data-act="blank">
         <span class="tpl-ic" style="background:#e0613a">⊕</span>
-        <span><b>Blank map</b><i>Just a root node</i></span>
+        <span><b>${escapeHtml(rmsTr('tplBlank','Blank map'))}</b><i>${escapeHtml(rmsTr('tplBlankSub','Just a root node'))}</i></span>
       </button>
       <div class="tpl-divider"></div>
       ${TEMPLATE_CATEGORIES.map(c=>{
         const count = Object.values(TEMPLATES).filter(t=>(t.group||'prompt')===c.id).length;
         return `<button class="tpl-item tpl-cat" data-cat="${c.id}">
             <span class="tpl-ic" style="background:${c.color}">${c.icon}</span>
-            <span><b>${escapeHtml(c.label)}</b><i>${count} template${count===1?'':'s'}</i></span>
+            <span><b>${escapeHtml(tplCatLabel(c))}</b><i>${escapeHtml(count===1?rmsTr('tplCountOne','1 template'):rmsTf('tplCountN','%s templates',count))}</i></span>
             <span class="tpl-chev">›</span>
           </button>`;
       }).join('')}`;
@@ -9184,13 +9188,13 @@ function showTemplatesMenu(){
     if(!cat) return renderRoot();   // e.g. the last "My templates" entry was deleted
     const entries = Object.entries(TEMPLATES).filter(([,t])=>(t.group||'prompt')===catId);
     pop.innerHTML = `
-      <button class="tpl-back" data-act="back">‹ All categories</button>
-      <div class="tpl-head" style="padding-top:2px">${escapeHtml(cat.label)}</div>
+      <button class="tpl-back" data-act="back">‹ ${escapeHtml(rmsTr('tplAllCats','All categories'))}</button>
+      <div class="tpl-head" style="padding-top:2px">${escapeHtml(tplCatLabel(cat))}</div>
       ${entries.map(([id,t])=>`
         <button class="tpl-item" data-id="${id}">
           <span class="tpl-ic" style="background:${t.color}">${t.icon || '⊟'}</span>
-          <span><b>${escapeHtml(t.name)}</b><i>${escapeHtml(t.desc)}</i></span>
-          ${t._user?`<span class="tpl-del" data-del="${id}" title="Delete template">✕</span>`:''}
+          <span><b>${escapeHtml(t.name)}</b><i>${escapeHtml(tplDesc(t))}</i></span>
+          ${t._user?`<span class="tpl-del" data-del="${id}" title="${escapeHtml(rmsTr('tplDelete','Delete template'))}">✕</span>`:''}
         </button>`).join('')}`;
     pop.querySelector('[data-act="back"]').onclick = renderRoot;
     pop.querySelectorAll('.tpl-item[data-id]').forEach(b => b.onclick = (e) => {
