@@ -3840,6 +3840,7 @@ let multiSel = new Set();
 let reparentMode = false;
 
 function toggleMultiSelect(id){
+  if(READONLY) return;
   // First shift-click seeds the set with the current primary selection so the
   // node you already had selected is included.
   if(multiSel.size === 0 && sel && sel !== id) multiSel.add(sel);
@@ -3916,16 +3917,19 @@ function showBulkBar(prompt){
 }
 // Toggle a boolean style across all selected nodes (on if any are off).
 function bulkFormat(prop){
+  if(READONLY) return;
   const ids = [...multiSel].filter(id=>map.nodes[id]);
   const anyOff = ids.some(id => !map.nodes[id][prop]);
   ids.forEach(id => { map.nodes[id][prop] = anyOff; });
   pushHistory(); render(); updateMultiSelUI();
 }
 function bulkSetProp(prop, value){
+  if(READONLY) return;
   [...multiSel].forEach(id=>{ if(map.nodes[id]) map.nodes[id][prop] = value; });
   pushHistory(); render(); updateMultiSelUI();
 }
 function bulkCycleAlign(){
+  if(READONLY) return;
   const order = ['left','center','right'];
   const ids = [...multiSel].filter(id=>map.nodes[id]);
   // Use the first node's current alignment to decide the next in the cycle
@@ -3977,6 +3981,7 @@ function bulkColor(color){
   toast(`Recolored ${multiSel.size} nodes`);
 }
 function bulkDelete(){
+  if(READONLY) return;
   const targets = [...multiSel].filter(id => id !== map.rootId);
   if(!targets.length){ toast('Can’t delete the root'); return; }
   const removed = new Set();
@@ -4018,6 +4023,7 @@ function copySelectionAsMarkdown(){
   return false;
 }
 function bulkReparent(targetId){
+  if(READONLY) return;
   const roots = selectionMoveRoots([...multiSel], map.nodes, map.rootId);
   const did = applySelectionMove(roots, targetId, 'on');
   reparentMode = false;
@@ -4239,7 +4245,7 @@ function buildSelectionMarkdown(ids, nodes, rootId){
    ============================================================ */
 let linkMode = false, linkSource = null;
 function startLinkMode(sourceId){
-  if(!sourceId){ return; }
+  if(READONLY || !sourceId){ return; }
   linkMode = true; linkSource = sourceId;
   document.querySelector(`.node[data-id="${sourceId}"]`)?.classList.add('link-source');
   toast('Link mode — click another node (Esc to cancel)');
@@ -4251,6 +4257,7 @@ function cancelLinkMode(){
 function completeLink(targetId){
   const from = linkSource;
   cancelLinkMode();
+  if(READONLY) return;
   if(!from || !targetId || from===targetId) return;
   if(!map.links) map.links = [];
   // Toggle: if this exact link already exists (either direction), remove it
@@ -8099,6 +8106,7 @@ function replaceInNode(id, find, repl){
   return count;
 }
 function replaceNext(){
+  if(READONLY || _historyPreview) return;
   const find=$('#search').value.trim(); const repl=$('#replace').value;
   if(!find || !searchMatches.length) return;
   if(searchPos<0) searchPos=0;
@@ -8108,6 +8116,7 @@ function replaceNext(){
   doSearch(find);            // refresh matches (node may no longer match)
 }
 function replaceAll(){
+  if(READONLY || _historyPreview) return;
   const find=$('#search').value.trim(); const repl=$('#replace').value;
   if(!find) return;
   let total=0, nodes=0;
@@ -8552,7 +8561,10 @@ function showNotesEditor(nodeId, opts){
   });
 
   const close=()=>closeNotesPopup();
+  // The popup can outlive its node (undo, map switch, read-only preview).
+  const canWrite=()=>!!(map && map.nodes[nodeId] && !READONLY);
   const save=()=>{
+    if(!canWrite()){ close(); return; }
     // Robust sanitize (inert parse + tag/attr whitelist) before storing.
     const html=sanitizeNotes(editor.innerHTML);
     const plain=html.replace(/<[^>]*>/g,'').trim();
@@ -8562,6 +8574,7 @@ function showNotesEditor(nodeId, opts){
   popup.querySelector('.np-save').onclick=save;
   popup.querySelector('.np-cancel').onclick=close;
   popup.querySelector('.np-clear')?.addEventListener('click',()=>{
+    if(!canWrite()){ close(); return; }
     delete map.nodes[nodeId].notes; pushHistory(); render(); close();
   });
   editor.addEventListener('input',()=>applyNotesPopupHeight(popup));
