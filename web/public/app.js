@@ -7988,10 +7988,12 @@ $('#searchBtn').onclick=()=>{
 $('#replaceToggle').onclick=()=>{ $('#searchWrap').classList.toggle('replace-mode'); $('#replace').focus(); };
 $('#search').addEventListener('input',e=>{ if(globalSearchMode) runGlobalSearch(e.target.value); else doSearch(e.target.value); });
 $('#search').addEventListener('keydown',e=>{
+  if(isImeEvent(e)) return;   // Enter/Esc confirm or cancel the IME candidate
   if(e.key==='Escape'){ e.preventDefault(); closeSearch(); }
-  if(e.key==='Enter'){ e.preventDefault(); focusNextMatch(); }
+  if(e.key==='Enter'){ e.preventDefault(); focusNextMatch(e.shiftKey ? -1 : 1); }
 });
 $('#replace').addEventListener('keydown',e=>{
+  if(isImeEvent(e)) return;
   if(e.key==='Escape'){ e.preventDefault(); closeSearch(); }
   if(e.key==='Enter'){ e.preventDefault(); e.shiftKey ? replaceAll() : replaceNext(); }
 });
@@ -8073,10 +8075,12 @@ function doSearch(q){
   const needle=String(raw||'').trim();
   if(cnt) cnt.textContent = needle ? (searchMatches.length ? rmsTr('searchFound','%s found').replace('%s', searchMatches.length) : rmsTr('searchNone','none')) : '';
 }
-function focusNextMatch(){
+function focusNextMatch(dir=1){
   if(!searchMatches.length){ keepSearchFocus(); return; }
   if(typeof flushOpenEditToModel==='function') flushOpenEditToModel();
-  const nextPos=(searchPos+1)%searchMatches.length;
+  const len=searchMatches.length;
+  // Shift+Enter from "no current match" lands on the last one.
+  const nextPos=dir<0 ? (searchPos<0 ? len-1 : (searchPos-1+len)%len) : (searchPos+1)%len;
   const nextId=searchMatches[nextPos];
   const foldChanged=searchLeaveCurrent(nextId);
   const opened=searchEnterExpand(nextId);

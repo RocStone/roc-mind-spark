@@ -44,6 +44,28 @@ test('plain-text node is replaced directly', () => {
   assert.equal(map.nodes.a.text, 'x bar x');
 });
 
+test('focusNextMatch(-1) walks backwards and wraps; from no match it lands on the last', () => {
+  const cnt = { textContent: '' };
+  const { focusNextMatch } = loadFns(['focusNextMatch'], {
+    searchMatches: ['a', 'b', 'c'], searchPos: -1, searchReveal: null, _searchNavigating: false,
+    keepSearchFocus() {}, searchLeaveCurrent: () => false, searchEnterExpand: () => false,
+    autoLayout() {}, searchNodeFingerprint: () => '', paintSearchHits() {},
+    select() {}, centreOn() {}, $: () => cnt,
+  });
+  focusNextMatch(-1); assert.equal(cnt.textContent, '3 / 3');
+  focusNextMatch(-1); assert.equal(cnt.textContent, '2 / 3');
+  focusNextMatch(1);  assert.equal(cnt.textContent, '3 / 3');
+  focusNextMatch();   assert.equal(cnt.textContent, '1 / 3');
+  focusNextMatch(-1); assert.equal(cnt.textContent, '3 / 3');
+});
+
+test('search and replace inputs ignore IME Enter/Esc', async () => {
+  const { readFileSync } = await import('node:fs');
+  const src = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8');
+  assert.match(src, /\$\('#search'\)\.addEventListener\('keydown',e=>\{\s*if\(isImeEvent\(e\)\) return;/);
+  assert.match(src, /\$\('#replace'\)\.addEventListener\('keydown',e=>\{\s*if\(isImeEvent\(e\)\) return;/);
+});
+
 test('replaceAll only touches current search matches and toasts when nothing changed', () => {
   const map = { nodes: { a: { id: 'a', text: 'cat' }, b: { id: 'b', text: 'cat' } } };
   const toasts = [];
