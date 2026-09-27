@@ -8597,7 +8597,12 @@ function showNotesEditor(nodeId, opts){
   editor.addEventListener('input',()=>applyNotesPopupHeight(popup));
   editor.addEventListener('keydown',e=>{
     e.stopPropagation();
-    if(e.key==='Escape'){ e.preventDefault(); close(); }
+    if(e.key==='Escape' && !e.isComposing){
+      e.preventDefault();
+      // Esc keeps typed notes (same "unsaved" test the quit path uses);
+      // Cancel is the explicit discard.
+      if(sanitizeNotes(editor.innerHTML)!==editor._initialHTML) save(); else close();
+    }
     if(e.key==='Enter' && (e.ctrlKey||e.metaKey)){ e.preventDefault(); save(); }
   });
 }
@@ -8610,6 +8615,7 @@ function showNotesEditor(nodeId, opts){
 async function createMapFromTemplate(templateId){
   ++_mapLoadGeneration;
   if(!leaveLiveForSwitch()) return;
+  closeNotesPopup();
   const tpl = TEMPLATES[templateId];
   if(!tpl){ createMap(); return; }
   const id = uid();
@@ -8817,6 +8823,7 @@ function createMap(){
     nodes:{[rid]:{id:rid,text:rootText,parent:null,x:0,y:0,side:'root',color:'#fff'}}};
   // Show it immediately — never wait on the network to render the UI.
   flushPendingSave();
+  closeNotesPopup();
   map=m; sel=rid; history=[]; hpos=-1; pushHistory();
   $('#mapTitle').value=map.title;
   opLog('newMap', {id});
@@ -8850,6 +8857,7 @@ async function loadMap(id){
     }
   }
   flushPendingSave();          // persist the outgoing map's pending edit to itself
+  closeNotesPopup();           // its node belongs to the outgoing map
   map=m; sel=map.rootId;
   const _imported = !!map._import; if(_imported) delete map._import;
   // Initialise history WITHOUT triggering a save — loading is not a change,
