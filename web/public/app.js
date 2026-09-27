@@ -8182,8 +8182,10 @@ $('#searchBtn').onclick=()=>{
 $('#replaceToggle').onclick=()=>{ $('#searchWrap').classList.toggle('replace-mode'); $('#replace').focus(); };
 $('#search').addEventListener('input',e=>{
   if(globalSearchMode){ runGlobalSearch(e.target.value); return; }
-  // Debounce: a fast typist should not rescan the whole map per keystroke.
-  clearTimeout(_searchInputT);
+  // Small maps search on every keystroke (feels instant). Large maps
+  // debounce so a fast typist does not rescan thousands of nodes per key.
+  clearTimeout(_searchInputT); _searchInputT=0;
+  if(!map || Object.keys(map.nodes).length<SEARCH_DEBOUNCE_MIN_NODES){ doSearch(); return; }
   _searchInputT=setTimeout(()=>{ _searchInputT=0; doSearch(); }, 80);
 });
 $('#search').addEventListener('keydown',e=>{
@@ -8266,6 +8268,7 @@ function keepSearchFocus(){
   if(document.activeElement!==input) input.focus({preventScroll:true});
 }
 let _searchInputT=0;   // pending debounced doSearch from typing
+const SEARCH_DEBOUNCE_MIN_NODES=400;
 function doSearch(q){
   if(_searchInputT){ clearTimeout(_searchInputT); _searchInputT=0; }
   const raw=q==null ? ($('#search')?.value||'') : q;
