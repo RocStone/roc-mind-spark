@@ -3489,7 +3489,7 @@ function insertChildNode(parent, extra){
   // Pick a random soft color from the palette (skip plain white at index 0)
   const palette=NODE_COLORS.slice(1);
   const color=palette[Math.floor(Math.random()*palette.length)];
-  const node={id,text:'New topic',parent:pn.id,
+  const node={id,text:rmsTr('newTopic','New topic'),parent:pn.id,
     x:pn.x+(side==='left'?-180:180),y:pn.y+40,side, color, created:Date.now()};
   if(extra) Object.assign(node, extra);
   map.nodes[id]=node;
@@ -5683,7 +5683,7 @@ function updateFormulaAutocomplete(textEl, nodeId){
   _formulaAC.el.innerHTML='';
   matches.forEach(f=>{
     const row=document.createElement('div'); row.className='formula-ac-row';
-    row.innerHTML='<span class="formula-ac-sig">'+f.sig+'</span><span class="formula-ac-desc">'+f.desc+'</span>';
+    row.innerHTML='<span class="formula-ac-sig">'+f.sig+'</span><span class="formula-ac-desc">'+escapeHtml(rmsTr('fx_'+f.name, f.desc))+'</span>';
     row.addEventListener('mousedown', e=>{ e.preventDefault(); _insertFormulaSuggestion(); });
     _formulaAC.el.appendChild(row);
   });
@@ -9094,7 +9094,7 @@ async function duplicateMap(id){
 // ===== Save current map as a reusable template =====
 async function saveAsTemplate(){
   if(!map){ return; }
-  const name = ((await rmsPrompt(rmsTr('templateNamePrompt','Name this template:'), map.title||'My template'))||'').trim();
+  const name = ((await rmsPrompt(rmsTr('templateNamePrompt','Name this template:'), map.title||rmsTr('tplDefaultName','My template')))||'').trim();
   if(!name || !map) return;
   const idToK = {}; let i=0;
   Object.keys(map.nodes).forEach(nid=>{ idToK[nid] = (nid===map.rootId) ? 'root' : ('n'+(i++)); });
@@ -10456,14 +10456,14 @@ const FORMULA_FUNCS = {
   SUM:     args => args.reduce((a,b)=>a+b, 0),
   AVERAGE: args => args.length ? args.reduce((a,b)=>a+b,0)/args.length : 0,
   AVG:     args => FORMULA_FUNCS.AVERAGE(args),
-  MIN:     args => { if(!args.length) throw new FormulaError('MIN needs at least one value'); return Math.min(...args); },
-  MAX:     args => { if(!args.length) throw new FormulaError('MAX needs at least one value'); return Math.max(...args); },
+  MIN:     args => { if(!args.length) throw new FormulaError(rmsTf('fxErrNeedOne','%s needs at least one value','MIN')); return Math.min(...args); },
+  MAX:     args => { if(!args.length) throw new FormulaError(rmsTf('fxErrNeedOne','%s needs at least one value','MAX')); return Math.max(...args); },
   COUNT:   args => args.length,
   ROUND:   args => { const x=args[0], n=args.length>1?args[1]:0; const f=Math.pow(10,n); return Math.round(x*f)/f; },
   ABS:     args => Math.abs(args[0]),
-  SQRT:    args => { if(args[0]<0) throw new FormulaError('SQRT of a negative number'); return Math.sqrt(args[0]); },
+  SQRT:    args => { if(args[0]<0) throw new FormulaError(rmsTr('fxErrSqrtNeg','SQRT of a negative number')); return Math.sqrt(args[0]); },
   POW:     args => Math.pow(args[0], args[1]),
-  MOD:     args => { if(args[1]===0) throw new FormulaError('Division by zero'); return args[0] % args[1]; },
+  MOD:     args => { if(args[1]===0) throw new FormulaError(rmsTr('fxErrDivZero','Division by zero')); return args[0] % args[1]; },
   FLOOR:   args => Math.floor(args[0]),
   CEIL:    args => Math.ceil(args[0]),
   CEILING: args => Math.ceil(args[0]),
@@ -10501,7 +10501,7 @@ function _formulaTokenize(src){
     if(/\s/.test(c)){ i++; continue; }
     if(c==='{'){
       const j=src.indexOf('}', i+1);
-      if(j<0) throw new FormulaError('Unclosed { reference');
+      if(j<0) throw new FormulaError(rmsTr('fxErrUnclosed','Unclosed { reference'));
       toks.push({t:'ref', v:src.slice(i+1,j).trim()}); i=j+1; continue;
     }
     if(/[0-9]/.test(c) || (c==='.' && /[0-9]/.test(src[i+1]||''))){
@@ -10525,7 +10525,7 @@ function _formulaTokenize(src){
     if(c==='('){ toks.push({t:'('}); i++; continue; }
     if(c===')'){ toks.push({t:')'}); i++; continue; }
     if(c===','){ toks.push({t:','}); i++; continue; }
-    throw new FormulaError('Unexpected character: "'+c+'"');
+    throw new FormulaError(rmsTf('fxErrChar','Unexpected character: “%s”', c));
   }
   toks.push({t:'eof'});
   return toks;
@@ -10534,7 +10534,7 @@ function _formulaParse(toks){
   let p=0;
   const peek=()=>toks[p];
   const next=()=>toks[p++];
-  function expect(t){ const tok=next(); if(tok.t!==t) throw new FormulaError('Expected "'+t+'"'); return tok; }
+  function expect(t){ const tok=next(); if(tok.t!==t) throw new FormulaError(rmsTf('fxErrExpected','Expected “%s”', t)); return tok; }
   function parseExpression(){ return parseComparison(); }
   function parseComparison(){
     let left=parseAdd();
@@ -10600,15 +10600,15 @@ function _formulaParse(toks){
       if(name==='CHILDREN') return {type:'children'};
       return {type:'const', name};
     }
-    throw new FormulaError('Unexpected token in formula');
+    throw new FormulaError(rmsTr('fxErrToken','Unexpected token in formula'));
   }
   const ast=parseExpression();
-  if(peek().t!=='eof') throw new FormulaError('Unexpected trailing input');
+  if(peek().t!=='eof') throw new FormulaError(rmsTr('fxErrTrailing','Unexpected trailing input'));
   return ast;
 }
 function _assertNum(v, where){
-  if(v && typeof v==='object' && '__children' in v) throw new FormulaError('children can only be used as a whole function argument, e.g. SUM(children)');
-  if(typeof v!=='number' || !isFinite(v)) throw new FormulaError('Expected a number'+(where?(' ('+where+')'):''));
+  if(v && typeof v==='object' && '__children' in v) throw new FormulaError(rmsTr('fxErrChildren','children can only be used as a whole function argument, e.g. SUM(children)'));
+  if(typeof v!=='number' || !isFinite(v)) throw new FormulaError(where ? rmsTf('fxErrNumberAt','Expected a number (%s)', where) : rmsTr('fxErrNumber','Expected a number'));
 }
 function _formulaEval(node, ctx){
   switch(node.type){
@@ -10616,11 +10616,11 @@ function _formulaEval(node, ctx){
     case 'const':
       if(node.name==='PI') return Math.PI;
       if(node.name==='E') return Math.E;
-      throw new FormulaError('Unknown name: '+node.name);
+      throw new FormulaError(rmsTf('fxErrName','Unknown name: %s', node.name));
     case 'children': return { __children: ctx.children() };
     case 'ref': {
       const v = ctx.resolveRef(node.label);
-      if(v==null) throw new FormulaError('Cannot resolve {'+node.label+'}');
+      if(v==null) throw new FormulaError(rmsTf('fxErrResolve','Cannot resolve {%s}', node.label));
       _assertNum(v, '{'+node.label+'}');
       return v;
     }
@@ -10635,8 +10635,8 @@ function _formulaEval(node, ctx){
         case '+': return l+r;
         case '-': return l-r;
         case '*': return l*r;
-        case '/': if(r===0) throw new FormulaError('Division by zero'); return l/r;
-        case '%': if(r===0) throw new FormulaError('Division by zero'); return l%r;
+        case '/': if(r===0) throw new FormulaError(rmsTr('fxErrDivZero','Division by zero')); return l/r;
+        case '%': if(r===0) throw new FormulaError(rmsTr('fxErrDivZero','Division by zero')); return l%r;
         case '^': return Math.pow(l,r);
       }
       break;
@@ -10653,13 +10653,13 @@ function _formulaEval(node, ctx){
     }
     case 'call': {
       if(node.name==='IF'){
-        if(node.args.length!==3) throw new FormulaError('IF needs 3 arguments: IF(cond, then, else)');
+        if(node.args.length!==3) throw new FormulaError(rmsTr('fxErrIf','IF needs 3 arguments: IF(cond, then, else)'));
         const cond=_formulaEval(node.args[0], ctx); _assertNum(cond, 'IF condition');
         return cond ? _formulaEval(node.args[1], ctx) : _formulaEval(node.args[2], ctx);
       }
       if(node.name==='PI' && node.args.length===0) return Math.PI;
       const fn=FORMULA_FUNCS[node.name];
-      if(!fn) throw new FormulaError('Unknown function: '+node.name+'()');
+      if(!fn) throw new FormulaError(rmsTf('fxErrFunc','Unknown function: %s()', node.name));
       const flat=[];
       for(const a of node.args){
         const v=_formulaEval(a, ctx);
@@ -10669,7 +10669,7 @@ function _formulaEval(node, ctx){
       return fn(flat);
     }
   }
-  throw new FormulaError('Malformed formula');
+  throw new FormulaError(rmsTr('fxErrMalformed','Malformed formula'));
 }
 function evalFormula(src, ctx){
   const toks=_formulaTokenize(src);
@@ -10722,7 +10722,7 @@ function formulaLabelIndex(){
 function computeNodeValue(nodeId, visiting){
   if(_formulaCache.has(nodeId)) return _formulaCache.get(nodeId);
   if(!visiting) visiting=new Set();
-  if(visiting.has(nodeId)) return {error:'Circular reference'};
+  if(visiting.has(nodeId)) return {error:rmsTr('fxErrCircular','Circular reference')};
   const n = map && map.nodes[nodeId];
   if(!n) return null;
   const plain = nodeTextPlain(n.text||'').trim();
@@ -10759,7 +10759,7 @@ function computeNodeValue(nodeId, visiting){
   };
   let result;
   try{ result = evalFormula(plain.slice(1), ctx); }
-  catch(e){ result = { error: (e && e.message) || 'Formula error' }; }
+  catch(e){ result = { error: (e && e.message) || rmsTr('fxErrGeneric','Formula error') }; }
   _formulaCache.set(nodeId, result);
   return result;
 }
