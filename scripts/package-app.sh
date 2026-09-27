@@ -31,6 +31,7 @@ rsync -a \
   "$ROOT/web/server.js" "$CONTENTS/Resources/web/server.js"
 cp "$ROOT/web/ops-log.js" "$CONTENTS/Resources/web/ops-log.js"
 cp "$ROOT/web/map-images.js" "$CONTENTS/Resources/web/map-images.js"
+cp "$ROOT/web/image-gc.js" "$CONTENTS/Resources/web/image-gc.js"
 cp "$ROOT/web/listen-bind.js" "$CONTENTS/Resources/web/listen-bind.js"
 rsync -a "$ROOT/web/public/" "$CONTENTS/Resources/web/public/"
 

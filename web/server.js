@@ -23,6 +23,7 @@ const path = require('node:path');
 const { DatabaseSync } = require('node:sqlite');
 const opsLog = require('./ops-log');
 const mapImages = require('./map-images');
+const imageGc = require('./image-gc');
 const {
   LISTEN_HOST,
   PRODUCT_NAME,
@@ -325,6 +326,12 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
+    // Read-only report of what the next image GC sweep would delete.
+    if (p === '/api/images/gc' && req.method === 'GET') {
+      const r = await imageGc.runImageGc({ db, dbPath: DB_PATH, dryRun: true });
+      return send(res, 200, { dryRun: true, ...r });
+    }
+
     const imgDup = p.match(/^\/api\/maps\/([\w-]+)\/images\/duplicate$/);
     if (imgDup && req.method === 'POST') {
       const body = await readBody(req);
@@ -456,6 +463,8 @@ if (require.main === module) {
     const host = addr && addr.address ? addr.address : LISTEN_HOST;
     const port = addr && addr.port ? addr.port : PORT;
     opsLog.startOpsLogChecker();
+    // Sweep unreferenced image files 30 s after start, then once a day.
+    imageGc.startImageGc({ db, dbPath: DB_PATH });
     console.log(`\n  Roc Mind Spark canvas → http://${host}:${port}`);
     console.log(`  Listen              → ${host}:${port} (loopback only)`);
     console.log(`  Database            → ${DB_PATH}`);

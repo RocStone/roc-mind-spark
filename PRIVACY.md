@@ -11,7 +11,7 @@ Installed app, under `~/Library/Application Support/RocMindSpark/`:
 | Item | What it holds |
 |---|---|
 | `mindspark.db` | SQLite maps: titles, nodes, notes, links, layout, citations |
-| `maps/` | Images dropped onto a map |
+| `maps/` | Images dropped onto a map. A daily sweep deletes files that no map and no saved version references once they are over 24 hours old. |
 | `server.log` | Node process stdout/stderr |
 | `ops.log` | Short operation log |
 | `overlay.log` | Native overlay events (show/hide, webview attach, errors) |
