@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { loadFns } from './helpers/load-app-fns.mjs';
+import { DOMParser as MiniDOMParser } from './helpers/mini-dom.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const css = readFileSync(join(here, '..', 'public', 'styles.css'), 'utf8');
@@ -117,12 +118,14 @@ describe('editing host CSS', () => {
 describe('clipboardPlainText / nodeClipboardPlain', () => {
   test('prefers text/plain, then text/html stripped to text', () => {
     assert.equal(clipboardPlainText({ getData: t => t === 'text/plain' ? 'hello' : '' }), 'hello');
-    const prev = global.document;
-    global.document = { createElement: () => ({ innerHTML: '', get textContent(){ return this.innerHTML.replace(/<[^>]+>/g,''); } }) };
+    const prev = global.DOMParser;
+    global.DOMParser = MiniDOMParser;
     try{
       assert.equal(clipboardPlainText({ getData: t => t === 'text/html' ? '<b>hi</b>' : '' }).trim(), 'hi');
+      // Parsed inertly into a separate document: markup is only read as text.
+      assert.equal(clipboardPlainText({ getData: t => t === 'text/html' ? 'a<img src=x onerror=alert(1)>b' : '' }), 'ab');
     } finally {
-      global.document = prev;
+      global.DOMParser = prev;
     }
     assert.equal(clipboardPlainText(null), '');
   });

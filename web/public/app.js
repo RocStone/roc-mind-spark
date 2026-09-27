@@ -5791,11 +5791,12 @@ function clipboardPlainText(dt){
   if(plain) return plain;
   let html = '';
   try{ html = dt.getData('text/html') || ''; }catch(_){}
-  if(!html || typeof document === 'undefined' || !document.createElement) return '';
+  if(!html || typeof DOMParser === 'undefined') return '';
   try{
-    const d = document.createElement('div');
-    d.innerHTML = html;
-    return (d.textContent || '').replace(/\u00A0/g, ' ');
+    // Inert parse: a DOMParser document has no browsing context, so clipboard HTML
+    // like <img src=x onerror=…> never loads or runs (a live <div> would).
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    return ((doc.body && doc.body.textContent) || '').replace(/\u00A0/g, ' ');
   }catch(_){ return ''; }
 }
 function nodeClipboardPlain(n){
