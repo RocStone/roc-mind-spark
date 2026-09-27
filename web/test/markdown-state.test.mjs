@@ -65,6 +65,16 @@ describe('Markdown editor node identity',()=>{
   });
 });
 
+test('CRLF and lone CR line endings parse like LF, with no stray \\r in node text',()=>{
+  for(const eol of ['\r\n','\r']){
+    const result=parser()(['# Root','- One','  - Two','- Three'].join(eol),'Map');
+    const texts=Object.values(result.nodes).map(n=>n.text).sort();
+    assert.deepEqual(texts,['One','Root','Three','Two']);
+    const two=Object.values(result.nodes).find(n=>n.text==='Two');
+    assert.equal(result.nodes[two.parent].text,'One');
+  }
+});
+
 describe('pending Markdown synchronization',()=>{
   function harness(extra=''){
     return new Function('clearTimeout',`

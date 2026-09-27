@@ -1358,6 +1358,14 @@
   .vf-clear{margin-right:auto; color:var(--ink-soft); border-color:transparent !important; background:transparent !important}
   .vf-clear:hover{color:var(--ink); background:var(--hover) !important}
 
+  /* rmsConfirm / rmsPrompt / rmsAlert: a compact .var-form card. */
+  .var-form.rms-dialog{z-index:6500}   /* above other .var-form / .kb-help modals */
+  .rms-dialog .vf-card{width:400px; padding:22px 24px 18px}
+  .rms-dialog .rms-dialog-msg{color:var(--ink); font-size:14px; margin:0 0 14px; white-space:pre-wrap; overflow-wrap:anywhere}
+  .rms-dialog .vf-actions{justify-content:flex-end; margin-top:16px}
+  .vf-actions .vf-go.danger{background:#c0392b; border-color:#c0392b}
+  .vf-actions .vf-go.danger:hover{background:#a93226}
+
   /* ===== In-app settings + button shortcut context menu ===== */
   .rms-settings.var-form{animation:none}
   .rms-settings .vf-backdrop{backdrop-filter:none;-webkit-backdrop-filter:none}

@@ -152,6 +152,36 @@ describe('Markdown / field clipboard', () => {
     assert.equal(rmsClipboardCut(), 'hello');
     assert.equal(ed.value, ' world');
   });
+
+  test('cut in a focused overlay field with only a caret leaves the field alone', () => {
+    const field = {
+      tagName: 'INPUT', id: 'mapTitle', value: 'My map',
+      selectionStart: 3, selectionEnd: 3,
+      closest(){ return null; },
+      setSelectionRange(){}, dispatchEvent(){ return true; },
+    };
+    global.document = { activeElement: field, querySelector: () => null };
+    const { rmsClipboardCut } = loadFns(
+      ['openOverlayTextField', 'overlayFieldCopyPayload', 'emitEditorInput', 'rmsClipboardCut'],
+      { focusedValueField: () => null, rmsClipboardCopy: () => '', openClipboardTarget: () => null }
+    );
+    assert.equal(rmsClipboardCut(), '');
+    assert.equal(field.value, 'My map');
+  });
+
+  test('cut from an unfocused overlay field still takes the whole value', () => {
+    const field = {
+      tagName: 'INPUT', value: 'abc', selectionStart: 0, selectionEnd: 0,
+      closest(){ return null; }, setSelectionRange(){}, dispatchEvent(){ return true; },
+    };
+    global.document = { activeElement: null, querySelector: () => field };
+    const { rmsClipboardCut } = loadFns(
+      ['openOverlayTextField', 'overlayFieldCopyPayload', 'emitEditorInput', 'rmsClipboardCut'],
+      { focusedValueField: () => null, rmsClipboardCopy: () => '', openClipboardTarget: () => null }
+    );
+    assert.equal(rmsClipboardCut(), 'abc');
+    assert.equal(field.value, '');
+  });
 });
 
 describe('click-and-drag selection hot path', () => {

@@ -402,7 +402,9 @@ async function initStore(){
 
 /* ---------- helpers ---------- */
 const $=s=>document.querySelector(s);
-const uid=()=>Math.random().toString(36).slice(2,9);
+// Letter prefix: an all-digit id is an "array index" key, and JS objects
+// enumerate those first in numeric order — that would reorder siblings.
+const uid=()=>'n'+Math.random().toString(36).slice(2,9);
 // Per-node marker badges (issue #13). A deliberately small, curated set
 // rather than a full emoji keyboard: these are meant to be scannable at a
 // glance across a whole map, which stops working once there are hundreds of
@@ -1075,6 +1077,11 @@ function render(){
   if(typeof multiSel !== 'undefined' && multiSel.size){
     multiSel.forEach(id=>document.querySelector(`.node[data-id="${id}"]`)?.classList.add('multi-sel'));
   }
+  // Same for the presentation spotlight and the open search's hit classes.
+  if(typeof _pres!=='undefined' && _pres){
+    document.querySelector(`.node[data-id="${_pres.order[_pres.idx]}"]`)?.classList.add('pres-current');
+  }
+  if(typeof paintSearchHits==='function' && $('#searchWrap')?.classList.contains('open')) paintSearchHits();
   _cullPairs=toMeasure.map(({el})=>({el, id:el.dataset.id}));
   cullOffscreenNodes();
   } finally { _ci=_prevCI; }
@@ -3529,9 +3536,17 @@ function toggleMdMode(on){
   else if(!(typeof READONLY!=='undefined' && READONLY)) pushHistory();   // one undo entry for the md session
 
 }
+// Map-level fields a history step captures and restores. One list for both
+// sides so a new user-editable field cannot be saved but never restored.
+// `pinned` is sidebar state, not an edit, so undo leaves it alone.
+const MAP_HISTORY_KEYS=['nodes','rootId','title','titleAuto','color','sameLevelColors','links','layout',
+  'vars','style','frontmatter','layoutConfig','layoutParams','layoutPreset'];
 function mapHistorySnapshot(){
-  return JSON.stringify({nodes:map.nodes,rootId:map.rootId,title:map.title,titleAuto:map.titleAuto,
-    color:map.color,sameLevelColors:map.sameLevelColors,links:map.links||[],layout:map.layout,vars:map.vars||{},style:map.style,frontmatter:map.frontmatter});
+  const o={};
+  for(const key of MAP_HISTORY_KEYS) o[key]=map[key];
+  if(!o.links) o.links=[];
+  if(!o.vars) o.vars={};
+  return JSON.stringify(o);
 }
 function pushHistory({preserveEditor=false}={}){
   // Snapshot the live WK editor, not the hidden placeholder card. Otherwise
@@ -3556,10 +3571,17 @@ function restore(s){
   // the model, and flushing would stamp the live draft onto the restored map.
   if(typeof discardEditOverlay==='function') discardEditOverlay();
   const o=JSON.parse(s);
-  for(const key of ['nodes','rootId','title','titleAuto','color','sameLevelColors','links','layout','vars','style','frontmatter']){
+  for(const key of MAP_HISTORY_KEYS){
     if(Object.hasOwn(o,key)) map[key]=o[key]; else delete map[key];
   }
   $('#mapTitle').value=map.title;
+  // The snapshot may not contain the nodes the selection points at (undo of an
+  // add). Leaving them would make addNode/deleteNode read a missing node.
+  if(sel && !map.nodes[sel]) sel=null;
+  if(typeof multiSel!=='undefined' && multiSel && multiSel.size){
+    for(const id of [...multiSel]) if(!map.nodes[id]) multiSel.delete(id);
+    if(multiSel.size<2){ multiSel.clear(); if(typeof hideBulkBar==='function') hideBulkBar(); }
+  }
   autoLayout();
   if(mdMode && !_mdSyncing) syncTextFromMap();
   scheduleSave();
@@ -3622,12 +3644,12 @@ window.rmsSetLevelColorsEnabled=function(on){
 
 function insertChildNode(parent, extra){
   const pn=map.nodes[parent]||map.nodes[map.rootId];
-  const side = parent===map.rootId ? (childrenOf(map.rootId).length%2? 'left':'right') : (pn.side||'right');
+  const side = pn.id===map.rootId ? (childrenOf(map.rootId).length%2? 'left':'right') : (pn.side||'right');
   const id=uid();
   // Pick a random soft color from the palette (skip plain white at index 0)
   const palette=NODE_COLORS.slice(1);
   const color=palette[Math.floor(Math.random()*palette.length)];
-  const node={id,text:'New topic',parent,
+  const node={id,text:'New topic',parent:pn.id,
     x:pn.x+(side==='left'?-180:180),y:pn.y+40,side, color, created:Date.now()};
   if(extra) Object.assign(node, extra);
   map.nodes[id]=node;
@@ -3636,6 +3658,7 @@ function insertChildNode(parent, extra){
 }
 function addNode(parentId,asSibling){
   if(READONLY) return;
+  if(!map.nodes[parentId]) parentId=map.rootId;
   let parent=parentId;
   if(asSibling){ const p=map.nodes[parentId]; parent=p.parent||map.rootId; if(parentId===map.rootId) parent=map.rootId; }
   const id=insertChildNode(parent);
@@ -3686,7 +3709,8 @@ function placeNewNodeNear(id){
   }
 }
 function deleteNode(id){
-  if(id===map.rootId) return;
+  if(READONLY) return;
+  if(id===map.rootId || !map.nodes[id]) return;
   const rm=[id]; const walk=i=>childrenOf(i).forEach(c=>{rm.push(c);walk(c)}); walk(id);
   const parent=map.nodes[id].parent;
   opLog('del', {id, parent, text:(map.nodes[id].text||'')});
@@ -3741,6 +3765,7 @@ let multiSel = new Set();
 let reparentMode = false;
 
 function toggleMultiSelect(id){
+  if(READONLY) return;
   // First shift-click seeds the set with the current primary selection so the
   // node you already had selected is included.
   if(multiSel.size === 0 && sel && sel !== id) multiSel.add(sel);
@@ -3817,16 +3842,24 @@ function showBulkBar(prompt){
 }
 // Toggle a boolean style across all selected nodes (on if any are off).
 function bulkFormat(prop){
+  if(READONLY) return;
   const ids = [...multiSel].filter(id=>map.nodes[id]);
   const anyOff = ids.some(id => !map.nodes[id][prop]);
   ids.forEach(id => { map.nodes[id][prop] = anyOff; });
   pushHistory(); render(); updateMultiSelUI();
 }
 function bulkSetProp(prop, value){
-  [...multiSel].forEach(id=>{ if(map.nodes[id]) map.nodes[id][prop] = value; });
+  if(READONLY) return;
+  [...multiSel].forEach(id=>{
+    if(!map.nodes[id]) return;
+    // The root's fill is map.color (the node's own .color is never drawn).
+    if(prop==='color' && id===map.rootId){ if(value) map.color = value; }
+    else map.nodes[id][prop] = value;
+  });
   pushHistory(); render(); updateMultiSelUI();
 }
 function bulkCycleAlign(){
+  if(READONLY) return;
   const order = ['left','center','right'];
   const ids = [...multiSel].filter(id=>map.nodes[id]);
   // Use the first node's current alignment to decide the next in the cycle
@@ -3872,12 +3905,8 @@ function showBulkColorPicker(anchorBtn, kind){
     if(!pk.contains(e.target)){ pk.remove(); document.removeEventListener('click', cl); }
   }), 0);
 }
-function bulkColor(color){
-  multiSel.forEach(id=>{ if(map.nodes[id] && id!==map.rootId) map.nodes[id].color = color; });
-  pushHistory(); render(); updateMultiSelUI();
-  toast(`Recolored ${multiSel.size} nodes`);
-}
 function bulkDelete(){
+  if(READONLY) return;
   const targets = [...multiSel].filter(id => id !== map.rootId);
   if(!targets.length){ toast('Can’t delete the root'); return; }
   const removed = new Set();
@@ -3919,6 +3948,7 @@ function copySelectionAsMarkdown(){
   return false;
 }
 function bulkReparent(targetId){
+  if(READONLY) return;
   const roots = selectionMoveRoots([...multiSel], map.nodes, map.rootId);
   const did = applySelectionMove(roots, targetId, 'on');
   reparentMode = false;
@@ -4154,7 +4184,7 @@ function buildSelectionMarkdown(ids, nodes, rootId){
    ============================================================ */
 let linkMode = false, linkSource = null;
 function startLinkMode(sourceId){
-  if(!sourceId){ return; }
+  if(READONLY || !sourceId){ return; }
   linkMode = true; linkSource = sourceId;
   document.querySelector(`.node[data-id="${sourceId}"]`)?.classList.add('link-source');
   toast('Link mode — click another node (Esc to cancel)');
@@ -4166,6 +4196,7 @@ function cancelLinkMode(){
 function completeLink(targetId){
   const from = linkSource;
   cancelLinkMode();
+  if(READONLY) return;
   if(!from || !targetId || from===targetId) return;
   if(!map.links) map.links = [];
   // Toggle: if this exact link already exists (either direction), remove it
@@ -4616,7 +4647,9 @@ function showLayoutConfigForm(){
     // autoLayout re-places and schedules a save; scheduleSave() is called
     // directly too so the settings persist even if a future change makes that
     // path conditional.
-    pushHistory(); render(); autoLayout();
+    // Snapshot after the relayout: the history entry must hold both the new
+    // config and the node positions it produced.
+    render(); autoLayout(); pushHistory();
     try{ scheduleSave(); }catch(e){ console.warn('saving layout settings failed:', e.message); }
     close(); toast('Layout settings saved');
   };
@@ -6125,10 +6158,15 @@ function rmsClipboardCopyPayload(){
 function rmsClipboardCut(){
   const field = typeof openOverlayTextField==='function' ? openOverlayTextField() : null;
   if(field){
-    const text = overlayFieldCopyPayload(field);
     const v = field.value || '';
     const start = field.selectionStart, end = field.selectionEnd;
-    if(start != null && end != null && end > start){
+    const hasSelection = start != null && end != null && end > start;
+    // A focused field with only a caret: ⌘X cuts nothing, like any text box.
+    // The whole-field cut is only for a field that is open but not focused.
+    const focused = typeof document!=='undefined' && document.activeElement===field;
+    if(!hasSelection && focused) return '';
+    const text = overlayFieldCopyPayload(field);
+    if(hasSelection){
       field.value = v.slice(0, start) + v.slice(end);
       try{ field.setSelectionRange(start, start); }catch(_){}
     } else {
@@ -6782,7 +6820,10 @@ function positionNodeBar(){
       else if(a==='href'){ showHrefPicker(b, sel); return; }
       else if(a==='image'){
         if(map.nodes[sel].image){
-          if(confirm('Remove this image?')) detachImageFromNode(sel);
+          const imgId=sel;
+          rmsConfirm(rmsTr('confirmRemoveImage','Remove this image?'),
+                     { okLabel:rmsTr('dlgRemove','Remove'), danger:true })
+            .then(ok=>{ if(ok && map && map.nodes[imgId] && map.nodes[imgId].image) detachImageFromNode(imgId); });
         } else attachImageToNode(sel);
       }
       else if(a==='mdtable'){ showMdTablePicker(b, sel); return; }
@@ -7685,6 +7726,47 @@ function navTarget(id, key){
   return null;
 }
 
+// ---- Modal keyboard isolation ----
+// While a dialog-like surface is open the canvas takes no keys: Backspace,
+// Tab or a letter would otherwise edit the map hidden behind it.
+function topModalEl(){
+  if(typeof document==='undefined' || !document.querySelectorAll) return null;
+  const all=document.querySelectorAll('.var-form, .kb-help, .hist-panel');
+  if(!all.length) return null;
+  return document.querySelector('.var-form.rms-dialog') || all[all.length-1];
+}
+function closeModalOnEscape(m){
+  if(!m) return false;
+  // rms-settings.js owns Escape there (it also cancels shortcut recording).
+  if(m.classList.contains('rms-settings')) return false;
+  if(m.classList.contains('hist-panel')){
+    const x=m.querySelector('.hist-x');
+    if(x) x.click(); else m.remove();
+    return true;
+  }
+  const btn=m.querySelector('.vf-cancel, .vf-close, .kb-close')
+    || (m.classList.contains('rms-dialog') ? m.querySelector('.vf-go') : null);
+  if(btn) btn.click(); else m.remove();
+  return true;
+}
+// Esc closes the topmost transient surface: context/row menus, pickers,
+// template/export/theme menus, then the diff panel. True if it closed one.
+function closeTransientOnEscape(){
+  const menuSel='.rms-ctx, .tpl-pop, .export-pop, .row-pop, .picker';
+  const hasMenu=!!document.querySelector(menuSel)
+    || (typeof themePanel!=='undefined' && !!themePanel);
+  if(hasMenu){
+    closeAllMenus();
+    if(typeof closeNodeHrefMenu==='function') closeNodeHrefMenu();
+    if(typeof closeTextEditContextMenu==='function') closeTextEditContextMenu();
+    document.querySelectorAll(menuSel).forEach(p=>p.remove());
+    return true;
+  }
+  const diff=document.querySelector('.diff-panel');
+  if(diff){ diff.remove(); return true; }
+  return false;
+}
+
 // Reorder must run in capture: Option/Alt+arrows are often swallowed by the OS,
 // Raycast, or the browser before bubble listeners see e.key === 'ArrowDown'.
 // e.code is the physical key, which stays ArrowUp/Down even when Option remaps e.key.
@@ -7692,6 +7774,7 @@ function navTarget(id, key){
 window.addEventListener('keydown', e=>{
   if(clipboardEditAction(e)) return;
   if(isImeEvent(e)) return;
+  if(topModalEl()) return;
   if(document.querySelector('.node.editing')) return;
   if(e.target && e.target.isContentEditable && !pendingNodeTyping()) return;
   if(e.target && e.target.closest && e.target.closest('#mdPane')) return;
@@ -7718,6 +7801,15 @@ window.addEventListener('keydown',e=>{
     return;
   }
   if(clipboardEditAction(e)) return;
+  const modal=topModalEl();
+  if(modal){
+    // Only Escape, and only to close something; nothing reaches the canvas.
+    // rms-settings.js handles its own Escape (settings and shortcut recording).
+    if(e.key==='Escape' && !e.defaultPrevented && !isImeEvent(e) && !modal.classList.contains('rms-settings')){
+      if(closeTransientOnEscape() || closeModalOnEscape(modal)) e.preventDefault();
+    }
+    return;
+  }
   if(['INPUT','TEXTAREA'].includes(e.target.tagName)||(e.target.isContentEditable && !pendingNodeTyping())||document.querySelector('.node.editing')) return;
   if(isImeEvent(e)){
     if(sel && map && !READONLY && !e.metaKey && !e.ctrlKey && !e.altKey) startEdit(sel);
@@ -7726,6 +7818,7 @@ window.addEventListener('keydown',e=>{
   if(rms('undo', e, (e.ctrlKey||e.metaKey)&&!e.shiftKey&&e.key.toLowerCase()==='z')){e.preventDefault();performHistoryChord('undo');return;}
   if(rms('redo', e, (e.ctrlKey||e.metaKey)&&e.shiftKey&&e.key.toLowerCase()==='z') || ((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='y')){e.preventDefault();performHistoryChord('redo');return;}
   if(e.key==='Escape'){
+    if(closeTransientOnEscape()){ e.preventDefault(); return; }
     if(marquee){ e.preventDefault(); endMarquee(true); return; }
     if(linkMode){ e.preventDefault(); cancelLinkMode(); return; }
     if(multiSel.size){ e.preventDefault(); clearMultiSelect(); return; }
@@ -7937,10 +8030,12 @@ $('#search').addEventListener('input',e=>{
   _searchInputT=setTimeout(()=>{ _searchInputT=0; doSearch(); }, 80);
 });
 $('#search').addEventListener('keydown',e=>{
+  if(isImeEvent(e)) return;   // Enter/Esc confirm or cancel the IME candidate
   if(e.key==='Escape'){ e.preventDefault(); closeSearch(); }
-  if(e.key==='Enter'){ e.preventDefault(); focusNextMatch(); }
+  if(e.key==='Enter'){ e.preventDefault(); focusNextMatch(e.shiftKey ? -1 : 1); }
 });
 $('#replace').addEventListener('keydown',e=>{
+  if(isImeEvent(e)) return;
   if(e.key==='Escape'){ e.preventDefault(); closeSearch(); }
   if(e.key==='Enter'){ e.preventDefault(); e.shiftKey ? replaceAll() : replaceNext(); }
 });
@@ -8024,11 +8119,13 @@ function doSearch(q){
   const needle=String(raw||'').trim();
   if(cnt) cnt.textContent = needle ? (searchMatches.length ? rmsTr('searchFound','%s found').replace('%s', searchMatches.length) : rmsTr('searchNone','none')) : '';
 }
-function focusNextMatch(){
+function focusNextMatch(dir=1){
   if(_searchInputT) doSearch();   // Enter right after typing: use the current query
   if(!searchMatches.length){ keepSearchFocus(); return; }
   if(typeof flushOpenEditToModel==='function') flushOpenEditToModel();
-  const nextPos=(searchPos+1)%searchMatches.length;
+  const len=searchMatches.length;
+  // Shift+Enter from "no current match" lands on the last one.
+  const nextPos=dir<0 ? (searchPos<0 ? len-1 : (searchPos-1+len)%len) : (searchPos+1)%len;
   const nextId=searchMatches[nextPos];
   const foldChanged=searchLeaveCurrent(nextId);
   const opened=searchEnterExpand(nextId);
@@ -8054,7 +8151,10 @@ function replaceInNode(id, find, repl){
   const flags='gi';
   const re=new RegExp(find.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'), flags);
   let count=0;
-  if(INLINE_HTML_RE.test(n.text||'')){
+  // Same test nodeSearchText() uses to decide the text is HTML: tags OR
+  // entities. `Tom &amp; Jerry` must be edited as "Tom & Jerry", never as its
+  // source, or searching "&" would corrupt the entity.
+  if(hasInlineMarkup(n.text||'')){
     // Walk text nodes only, preserving tags — parse inertly via <template>.
     const tpl=document.createElement('template'); tpl.innerHTML=n.text||'';
     const walker=document.createTreeWalker(tpl.content, NodeFilter.SHOW_TEXT);
@@ -8070,21 +8170,25 @@ function replaceInNode(id, find, repl){
   return count;
 }
 function replaceNext(){
+  if(READONLY || _historyPreview) return;
   const find=$('#search').value.trim(); const repl=$('#replace').value;
   if(!find || !searchMatches.length) return;
   if(searchPos<0) searchPos=0;
   const id=searchMatches[searchPos] || searchMatches[0];
   const c=replaceInNode(id, find, repl);
   if(c){ pushHistory(); render(); toast(`Replaced ${c} in 1 node`); }
+  else toast(rmsTr('replaceNone','Nothing to replace'));
   doSearch(find);            // refresh matches (node may no longer match)
 }
 function replaceAll(){
+  if(READONLY || _historyPreview) return;
   const find=$('#search').value.trim(); const repl=$('#replace').value;
   if(!find) return;
   let total=0, nodes=0;
-  Object.keys(map.nodes).forEach(id=>{ const c=replaceInNode(id, find, repl); if(c){ total+=c; nodes++; } });
+  // Only the nodes the search found — the same set the user sees highlighted.
+  [...searchMatches].forEach(id=>{ const c=replaceInNode(id, find, repl); if(c){ total+=c; nodes++; } });
   if(total){ pushHistory(); render(); toast(`Replaced ${total} occurrence${total>1?'s':''} in ${nodes} node${nodes>1?'s':''}`); }
-  else toast('No matches to replace');
+  else toast(rmsTr('replaceNone','Nothing to replace'));
   doSearch(find);
 }
 // Centre the viewport on a node (used by find-next)
@@ -8212,7 +8316,7 @@ function openRowMenu(btn, m){
   pop.querySelector('[data-a="pin"]').onclick=ev=>{ ev.stopPropagation(); closeRowMenu(); togglePin(m.id); };
   pop.querySelector('[data-a="dup"]').onclick=ev=>{ ev.stopPropagation(); closeRowMenu(); duplicateMap(m.id); };
   pop.querySelector('[data-a="del"]').onclick=async ev=>{ ev.stopPropagation(); closeRowMenu();
-    if(!confirm(rmsTr('confirmDeleteMap','Delete “%s”?').replace('%s', m.title||rmsTr('untitled','Untitled')))) return;
+    if(!(await rmsConfirm(rmsTr('confirmDeleteMap','Delete “%s”?').replace('%s', m.title||rmsTr('untitled','Untitled')), { okLabel:rmsTr('dlgDelete','Delete'), danger:true }))) return;
     ++_mapLoadGeneration;
     try{ await _mapSaves.remove(m.id,id=>Store.remove(id)); }
     catch(e){ toast(rmsTr('deleteMapFailed','Could not delete the map. Please retry.')); return; }
@@ -8519,7 +8623,16 @@ function showNotesEditor(nodeId, opts){
       const c=btn.dataset.c;
       if(c==='h1'||c==='h2'){ execCmd('formatBlock', '<'+c+'>'); }
       else if(c==='createLink'){
-        const url=prompt(rmsTr('enterUrl','Enter URL (https://…):')); if(url) execCmd('createLink',url);
+        // The dialog takes focus; remember the selection to link and put it back.
+        const s=getSelection();
+        const range=s.rangeCount && editor.contains(s.anchorNode) ? s.getRangeAt(0).cloneRange() : null;
+        rmsPrompt(rmsTr('enterUrl','Enter URL (https://…):')).then(url=>{
+          if(!editor.isConnected) return;
+          editor.focus();
+          if(range){ const s2=getSelection(); s2.removeAllRanges(); s2.addRange(range); }
+          if(url) execCmd('createLink',url);
+        });
+        return;
       }
       else { execCmd(c); }
       editor.focus();
@@ -8527,7 +8640,10 @@ function showNotesEditor(nodeId, opts){
   });
 
   const close=()=>closeNotesPopup();
+  // The popup can outlive its node (undo, map switch, read-only preview).
+  const canWrite=()=>!!(map && map.nodes[nodeId] && !READONLY);
   const save=()=>{
+    if(!canWrite()){ close(); return; }
     // Robust sanitize (inert parse + tag/attr whitelist) before storing.
     const html=sanitizeNotes(editor.innerHTML);
     const plain=html.replace(/<[^>]*>/g,'').trim();
@@ -8537,12 +8653,18 @@ function showNotesEditor(nodeId, opts){
   popup.querySelector('.np-save').onclick=save;
   popup.querySelector('.np-cancel').onclick=close;
   popup.querySelector('.np-clear')?.addEventListener('click',()=>{
+    if(!canWrite()){ close(); return; }
     delete map.nodes[nodeId].notes; pushHistory(); render(); close();
   });
   editor.addEventListener('input',()=>applyNotesPopupHeight(popup));
   editor.addEventListener('keydown',e=>{
     e.stopPropagation();
-    if(e.key==='Escape'){ e.preventDefault(); close(); }
+    if(e.key==='Escape' && !e.isComposing){
+      e.preventDefault();
+      // Esc keeps typed notes (same "unsaved" test the quit path uses);
+      // Cancel is the explicit discard.
+      if(sanitizeNotes(editor.innerHTML)!==editor._initialHTML) save(); else close();
+    }
     if(e.key==='Enter' && (e.ctrlKey||e.metaKey)){ e.preventDefault(); save(); }
   });
 }
@@ -8556,6 +8678,7 @@ async function createMapFromTemplate(templateId){
   ++_mapLoadGeneration;
   if(!leaveLiveForSwitch()) return;
   exitSharedMode();
+  closeNotesPopup();
   const tpl = TEMPLATES[templateId];
   if(!tpl){ createMap(); return; }
   const id = uid();
@@ -8626,10 +8749,10 @@ async function duplicateMap(id){
 }
 
 // ===== Save current map as a reusable template =====
-function saveAsTemplate(){
+async function saveAsTemplate(){
   if(!map){ return; }
-  const name = (prompt('Name this template:', map.title||'My template')||'').trim();
-  if(!name) return;
+  const name = ((await rmsPrompt(rmsTr('templateNamePrompt','Name this template:'), map.title||'My template'))||'').trim();
+  if(!name || !map) return;
   const idToK = {}; let i=0;
   Object.keys(map.nodes).forEach(nid=>{ idToK[nid] = (nid===map.rootId) ? 'root' : ('n'+(i++)); });
   const nodes = Object.values(map.nodes).map(n=>{
@@ -8721,6 +8844,7 @@ function showTemplatesMenu(){
   // ----- category view: back + that category's templates -----
   const renderCategory = (catId) => {
     const cat = TEMPLATE_CATEGORIES.find(c=>c.id===catId);
+    if(!cat) return renderRoot();   // e.g. the last "My templates" entry was deleted
     const entries = Object.entries(TEMPLATES).filter(([,t])=>(t.group||'prompt')===catId);
     pop.innerHTML = `
       <button class="tpl-back" data-act="back">‹ All categories</button>
@@ -8735,9 +8859,17 @@ function showTemplatesMenu(){
     pop.querySelectorAll('.tpl-item[data-id]').forEach(b => b.onclick = (e) => {
       if(e.target.classList.contains('tpl-del')){
         e.stopPropagation();
-        deleteUserTemplate(e.target.dataset.del);
-        renderCategory(catId);   // refresh; back to root if category now empty
-        if(!TEMPLATE_CATEGORIES.some(c=>c.id===catId)) renderRoot();
+        const tid=e.target.dataset.del;
+        const tname=(TEMPLATES[tid] && TEMPLATES[tid].name) || '';
+        rmsConfirm(rmsTr('confirmDeleteTemplate','Delete template “%s”?').replace('%s', tname),
+                   { okLabel:rmsTr('dlgDelete','Delete'), danger:true }).then(ok=>{
+          if(!ok) return;
+          deleteUserTemplate(tid);
+          if(!pop.isConnected) return;
+          // Refresh; back to root if the category is now gone.
+          if(TEMPLATE_CATEGORIES.some(c=>c.id===catId)) renderCategory(catId);
+          else renderRoot();
+        });
         return;
       }
       close(); createMapFromTemplate(b.dataset.id);
@@ -8761,6 +8893,7 @@ function createMap(){
     nodes:{[rid]:{id:rid,text:rootText,parent:null,x:0,y:0,side:'root',color:'#fff'}}};
   // Show it immediately — never wait on the network to render the UI.
   flushPendingSave();
+  closeNotesPopup();
   map=m; sel=rid; history=[]; hpos=-1; pushHistory();
   $('#mapTitle').value=map.title;
   opLog('newMap', {id});
@@ -8794,6 +8927,7 @@ async function loadMap(id){
     }
   }
   flushPendingSave();          // persist the outgoing map's pending edit to itself
+  closeNotesPopup();           // its node belongs to the outgoing map
   map=m; sel=map.rootId;
   const _imported = !!map._import; if(_imported) delete map._import;
   // Initialise history WITHOUT triggering a save — loading is not a change,
@@ -9137,8 +9271,15 @@ async function restoreVersion(mapId, ref){
   restored.id=mapId;                 // keep identity
   restored.updated=Date.now();
   cancelHistoryPreview();
+  // Pinning is sidebar state of the map as it is now, not part of the version.
+  if(map && map.pinned) restored.pinned=true; else delete restored.pinned;
   map=restored;
-  history=[]; hpos=-1; pushHistory();   // restored state becomes a fresh undo baseline
+  if(sel && !map.nodes[sel]) sel=null;
+  if(typeof multiSel!=='undefined' && multiSel.size) clearMultiSelect();
+  $('#mapTitle').value=map.title;
+  // Append to the existing undo stack (pushHistory also resyncs the Markdown
+  // editor) so ⌘Z goes back to the pre-restore map.
+  pushHistory();
   render(); fit();
   try{ await saveMapNow(restored); }catch(e){ console.warn('save after history restore failed:',e); return; }
   if(map!==restored) return;
@@ -9147,8 +9288,10 @@ async function restoreVersion(mapId, ref){
   toast('Version restored');
 }
 // Normalize a loaded/decoded map object to the current shape (defensive defaults).
+// Unknown top-level fields (layoutConfig, layoutParams, layoutPreset,
+// frontmatter, …) are carried over so a restore doesn't silently drop them.
 function normalizeLoadedMap(m){
-  return { id:m.id, title:m.title||'Untitled map', titleAuto:!!m.titleAuto, color:m.color||'#e0613a',
+  return { ...m, id:m.id, title:m.title||'Untitled map', titleAuto:!!m.titleAuto, color:m.color||'#e0613a',
            rootId:m.rootId, sameLevelColors:m.sameLevelColors, style:m.style, layout:m.layout||'balanced',
            nodes:m.nodes||{}, links:m.links||[], vars:m.vars||{} };
 }
@@ -9287,6 +9430,7 @@ function addResponseAsNodes(parentId, answer){
    ============================================================ */
 let _pres = null;   // {order, idx, collapsed} while presenting
 function startPresentation(){
+  if(_pres) return;
   if(!map || !map.nodes[map.rootId]){ toast('Open a map first'); return; }
   document.querySelectorAll('.export-pop').forEach(p=>p.remove());
   // Expand everything so the whole map is walkable; remember what to restore.
@@ -9298,7 +9442,7 @@ function startPresentation(){
   walk(map.rootId);
   _pres={ order, idx:0, collapsed:wasCollapsed };
   document.body.classList.add('presenting');
-  autoLayout();
+  autoLayout(false, {persist:false});   // temporary expand — never saved
   const bar=document.createElement('div');
   bar.className='pres-bar';
   bar.innerHTML=`<button class="pres-prev" title="Previous (←)">◀</button>
@@ -9319,6 +9463,9 @@ function presKey(e){
   if(e.key==='ArrowRight'||e.key==='ArrowDown'||e.key===' '||e.key==='PageDown'){ e.preventDefault(); e.stopPropagation(); presStep(1); }
   else if(e.key==='ArrowLeft'||e.key==='ArrowUp'||e.key==='PageUp'){ e.preventDefault(); e.stopPropagation(); presStep(-1); }
   else if(e.key==='Escape'){ e.preventDefault(); e.stopPropagation(); endPresentation(); }
+  // Everything else (Backspace, Tab, letters, ⌘Z…) would edit the map
+  // underneath the presentation — swallow it.
+  else { e.preventDefault(); e.stopPropagation(); }
 }
 function presStep(d){ if(!_pres) return; presGo(Math.max(0, Math.min(_pres.order.length-1, _pres.idx+d))); }
 function presGo(i){
@@ -9348,7 +9495,7 @@ function endPresentation(){
   // Restore collapse state (presentation never persists changes).
   (_pres.collapsed||[]).forEach(id=>{ if(map.nodes[id]) map.nodes[id].collapsed=true; });
   _pres=null;
-  autoLayout(); fit();
+  autoLayout(false, {persist:false}); fit();
 }
 
 function exportJSON(){
@@ -9541,13 +9688,15 @@ function importFile(){
       }
       m.id=uid();
       await saveMapNow(m);
-      await loadMap(m.id);
+      // Saved but not opened (switch refused, superseded, or read failed):
+      // don't lay out / toast over whatever map is showing now.
+      if(!(await loadMap(m.id))){ refreshList(); return; }
       // Imported nodes have no positions (all at 0,0) — lay them out into a
       // proper tree, then frame the result.
       autoLayout(); fit();
       refreshList();
       toast('Imported '+f.name + (preserveState?'':' (collapsed — click ＋ to expand)'));
-    }catch(e){ console.error(e); alert('Could not import this file:\n'+e.message); }
+    }catch(e){ console.error(e); rmsAlert(rmsTr('importFailed','Could not import this file:\n%s').replace('%s', e.message)); }
   };
   inp.click();
 }
@@ -9681,6 +9830,9 @@ function frontmatterNodeToYaml(n){
   return lines.join('\n');
 }
 function parseMarkdownOutline(text, filename, editorState){
+  // Windows (\r\n) and classic Mac (\r) files: a stray \r would stick to
+  // every heading/list item's text.
+  text=String(text==null?'':text).replace(/\r\n?/g,'\n');
   // An editor session carries node identity separately from the exported text.
   // Imports still allocate independent IDs. Metadata indexed by outline paths is
   // appropriate for import, but cannot identify nodes after an in-place insert.
@@ -10601,6 +10753,78 @@ function buildPrompt(startId, values){
   walk(root, 0);
   return out.join('\n').replace(/\n{3,}/g, '\n\n').trim() + '\n';
 }
+
+/* ---------- In-page dialogs ----------
+   WKWebView has no UI delegate for window.confirm/prompt/alert, so those
+   return false/null silently. These themed modals replace them and resolve a
+   Promise: rmsConfirm → true/false, rmsPrompt → string/null, rmsAlert → undefined.
+   They use .var-form, so the canvas keydown handler already treats them as modal. */
+function rmsDialog(message, opts){
+  const o=opts||{};
+  const kind=o.kind||'confirm';                 // 'confirm' | 'prompt' | 'alert'
+  return new Promise(resolve=>{
+    const prevFocus=document.activeElement;
+    const m=document.createElement('div');
+    m.className='var-form rms-dialog';
+    m.setAttribute('role', kind==='alert' ? 'alertdialog' : 'dialog');
+    m.setAttribute('aria-modal','true');
+    m.innerHTML=`
+      <div class="vf-backdrop"></div>
+      <div class="vf-card">
+        <p class="vf-sub rms-dialog-msg"></p>
+        ${kind==='prompt' ? '<div class="vf-fields"><input class="vf-input rms-dialog-input" type="text" spellcheck="false"></div>' : ''}
+        <div class="vf-actions">
+          ${kind==='alert' ? '' : '<button class="vf-cancel"></button>'}
+          <button class="vf-go primary${o.danger ? ' danger' : ''}"></button>
+        </div>
+      </div>`;
+    m.querySelector('.rms-dialog-msg').textContent=String(message==null ? '' : message);
+    const okBtn=m.querySelector('.vf-go');
+    const cancelBtn=m.querySelector('.vf-cancel');
+    const input=m.querySelector('.rms-dialog-input');
+    okBtn.textContent=o.okLabel || rmsTr('ok','OK');
+    if(cancelBtn) cancelBtn.textContent=o.cancelLabel || rmsTr('cancel','Cancel');
+    if(input) input.value=o.defaultValue==null ? '' : String(o.defaultValue);
+    let done=false;
+    const finish=value=>{
+      if(done) return;
+      done=true;
+      m.remove();
+      try{ if(prevFocus && prevFocus.isConnected && prevFocus.focus) prevFocus.focus({preventScroll:true}); }catch(_){}
+      resolve(value);
+    };
+    const ok=()=>finish(kind==='prompt' ? input.value : (kind==='alert' ? undefined : true));
+    const cancel=()=>finish(kind==='prompt' ? null : (kind==='alert' ? undefined : false));
+    okBtn.onclick=ok;
+    if(cancelBtn) cancelBtn.onclick=cancel;
+    m.querySelector('.vf-backdrop').onclick=cancel;
+    // Nothing inside may reach the canvas (mousedown clears selection,
+    // keydown would edit the map underneath).
+    m.addEventListener('mousedown',e=>e.stopPropagation());
+    m.addEventListener('click',e=>e.stopPropagation());
+    m.addEventListener('keydown',e=>{
+      e.stopPropagation();
+      if(isImeEvent(e)) return;
+      if(e.key==='Escape'){ e.preventDefault(); cancel(); }
+      else if(e.key==='Enter' && !e.shiftKey && !e.altKey){
+        e.preventDefault();
+        if(e.target===cancelBtn) cancel(); else ok();
+      }
+      else if(e.key==='Tab'){
+        // Keep focus inside the dialog.
+        const f=[input, cancelBtn, okBtn].filter(Boolean);
+        const i=f.indexOf(document.activeElement);
+        e.preventDefault();
+        f[(i + (e.shiftKey ? f.length-1 : 1)) % f.length].focus();
+      }
+    });
+    document.body.appendChild(m);
+    if(input){ input.focus(); input.select(); } else okBtn.focus();
+  });
+}
+function rmsConfirm(message, opts){ return rmsDialog(message, { ...(opts||{}), kind:'confirm' }); }
+function rmsPrompt(message, defaultValue){ return rmsDialog(message, { kind:'prompt', defaultValue }); }
+function rmsAlert(message){ return rmsDialog(message, { kind:'alert' }); }
 
 // Show a small modal listing each detected variable with an input field.
 // On submit, calls `done(values)` with the user-entered substitutions.
@@ -12536,6 +12760,8 @@ function showKeyboardHelp(){
   m.querySelector('.kb-close').onclick = close;
   m.querySelector('.kb-backdrop').onclick = close;
   m.addEventListener('keydown', e=>{ if(e.key==='Escape'){ e.preventDefault(); close(); } });
+  // Focus inside the dialog so its own Escape handler sees the key.
+  m.querySelector('.kb-close').focus();
 }
 window.addEventListener('keydown', e=>{
   if(!rms('help', e, e.key === '?')) return;
@@ -12552,6 +12778,7 @@ window.addEventListener('keydown', e=>{
   if(e.key!=='Escape') return;
   if(!document.body.classList.contains('focus-mode')) return;
   // Don't fight with editing/notes/login overlay — they handle Esc themselves
+  if(topModalEl()) return;
   if(document.querySelector('.node.editing')) return;
   if(document.querySelector('.notes-popup')) return;
   if($('#loginOverlay') && $('#loginOverlay').style.display==='flex') return;
