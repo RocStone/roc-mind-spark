@@ -1,8 +1,56 @@
 // Export regressions: Word-export math images and prompt-export variables.
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { loadFns } from './helpers/load-app-fns.mjs';
+import { loadFns, extractConst } from './helpers/load-app-fns.mjs';
 import { makeDocument } from './helpers/mini-dom.mjs';
+
+describe('PNG export — table / block nodes draw as a grid, not raw pipes', () => {
+  const document = makeDocument();
+  const INLINE_HTML_RE = extractConst('INLINE_HTML_RE');
+  const ENTITY_RE = extractConst('ENTITY_RE');
+  const hasInlineMarkup = t => INLINE_HTML_RE.test(t || '') || ENTITY_RE.test(t || '');
+  const { exportNodeBlocks, drawExportBlocks } = loadFns([
+    'splitPipeRow', 'isGfmSepLine', 'normalizeTableGrid', 'parseGfmAligns', 'nodeTextForTableScan',
+    'splitTextWithGfmTables', 'nodeTextHasGfmTable', 'htmlTableToGrid', 'nodeTextPlain',
+    'isSafeLinkUrl', 'sanitizeInlineHTML', 'sanitizeNotes', 'escapeHtml', 'mdInlineToHtml', 'formatNodeTableCell', 'exportNodeBlocks', 'drawExportBlocks',
+  ], {
+    document, hasInlineMarkup,
+    INLINE_HTML_RE, SAFE_TAGS: extractConst('SAFE_TAGS'), DROP_TAGS: extractConst('DROP_TAGS'), NOTES_TAGS: extractConst('NOTES_TAGS'),
+  });
+
+  test('GFM text becomes text + table blocks with plain cell text', () => {
+    const blocks = exportNodeBlocks({ text: 'Scores\n| Name | **Pts** |\n| :-- | --: |\n| a | 1 |' });
+    assert.deepEqual(blocks, [
+      { type: 'text', lines: ['Scores'] },
+      { type: 'table', grid: { headers: ['Name', 'Pts'], rows: [['a', '1']], aligns: ['left', 'right'] } },
+    ]);
+  });
+
+  test('n.html table and code blocks', () => {
+    assert.deepEqual(exportNodeBlocks({ html: '<table><tr><th>A</th><th>B</th></tr><tr><td>1</td><td>2</td></tr></table>' }),
+      [{ type: 'table', grid: { headers: ['A', 'B'], rows: [['1', '2']] } }]);
+    assert.deepEqual(exportNodeBlocks({ html: '<pre><code>x = 1\ny = 2</code></pre>' }),
+      [{ type: 'text', lines: ['x = 1', 'y = 2'] }]);
+  });
+
+  test('ordinary text and dividers are left to the normal path', () => {
+    assert.equal(exportNodeBlocks({ text: 'just text' }), null);
+    assert.equal(exportNodeBlocks({ hr: true }), null);
+  });
+
+  test('drawExportBlocks writes every cell and no pipe characters', () => {
+    const drawn = [];
+    const ctx = {
+      font: '', fillStyle: '', strokeStyle: '', textAlign: '', textBaseline: '', lineWidth: 1,
+      save(){}, restore(){}, beginPath(){}, moveTo(){}, lineTo(){}, stroke(){},
+      measureText: s => ({ width: String(s).length * 6 }),
+      fillText: s => drawn.push(s),
+    };
+    drawExportBlocks(ctx, exportNodeBlocks({ text: '| A | B |\n| - | - |\n| 1 | 2 |' }),
+      { x: 0, y: 0, w: 200, h: 60, fontPx: 15, color: '#000', lineColor: '#ccc', family: 'sans-serif' });
+    assert.deepEqual(drawn, ['A', 'B', '1', '2']);
+  });
+});
 
 describe('mathToImgTag — draws onto the canvas it exports', () => {
   test('glyphs land on the output canvas, not the measuring one', () => {

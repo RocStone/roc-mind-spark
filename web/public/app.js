@@ -11430,7 +11430,28 @@ async function exportPNG(){
     // Render with inline B/I/U/S support, list bullets, line wrapping.
     // Nodes with $...$ math go through the canvas math renderer so equations
     // export as laid-out math instead of raw LaTeX source.
-    if(containsMath(n.text||'')){
+    // Mirror render(): divider nodes draw a rule, block/table nodes draw a cell grid,
+    // formula nodes draw their computed value (render() above refreshed the cache).
+    const exportBlocks = n.hr ? null : exportNodeBlocks(n);
+    const formulaSrc = (n.hr || n.html) ? '' : nodeTextPlain(n.text||'').trim();
+    if(n.hr){
+      ctx.save(); ctx.strokeStyle=textFill; ctx.globalAlpha=0.55; ctx.lineWidth=2;
+      ctx.beginPath(); ctx.moveTo(textX, textCenterY); ctx.lineTo(textX+textMaxWidth, textCenterY); ctx.stroke();
+      ctx.restore();
+    } else if(exportBlocks){
+      drawExportBlocks(ctx, exportBlocks, {
+        x: textX, y: n.y+imgDrawH+6, w: textMaxWidth, h: h-imgDrawH-12,
+        fontPx, color: textFill, lineColor: themeLine, family: '"PingFang SC", sans-serif'
+      });
+    } else if(formulaSrc.startsWith('=')){
+      const val = computeNodeValue(i);
+      const shown = (val && typeof val==='object' && val.error) ? '#ERROR' : formatFormulaResult(val);
+      drawFormattedText(ctx, escapeHtml(String(shown==null?'':shown)), {
+        favicons, x: textX, y: textCenterY, maxWidth: textMaxWidth, fontPx, color: textFill,
+        family: '"PingFang SC", sans-serif', baseBold: !!n.bold || isRoot, baseItalic: !!n.italic,
+        baseUnderline: !!n.underline, baseStrike: !!n.strike, align: n.align || 'center', listType: null
+      });
+    } else if(containsMath(n.text||'')){
       drawNodeMath(ctx, n.text||'', {
         x: textX, y: textCenterY, maxWidth: textMaxWidth,
         fontPx, color: textFill, family: '"PingFang SC", sans-serif',
@@ -11502,6 +11523,74 @@ async function exportPNG(){
   }
 }
 
+// PNG export: what a block node (n.html) or a GFM-table node shows, as drawable
+// blocks — {type:'table', grid} or {type:'text', lines}. null = ordinary text node.
+function exportNodeBlocks(n){
+  if(!n || n.hr) return null;
+  if(n.html){
+    const grid=htmlTableToGrid(sanitizeNotes(n.html));
+    if(grid) return [{ type:'table', grid }];
+    const tpl=document.createElement('template'); tpl.innerHTML=sanitizeNotes(n.html);
+    tpl.content.querySelectorAll('br').forEach(br=>br.replaceWith(document.createTextNode('\n')));
+    const txt=(tpl.content.textContent||'').replace(/\u00A0/g,' ').replace(/\n{3,}/g,'\n\n').trim();
+    return txt ? [{ type:'text', lines:txt.split('\n') }] : null;
+  }
+  const text=n.text||'';
+  if(!nodeTextHasGfmTable(text)) return null;
+  const blocks=[];
+  splitTextWithGfmTables(text).forEach(p=>{
+    if(p.type==='table' && p.grid){
+      const plain=c=>nodeTextPlain(formatNodeTableCell(c)).trim();   // same inline Markdown as the live cell, drawn as text
+      blocks.push({ type:'table', grid:{ headers:p.grid.headers.map(plain), rows:p.grid.rows.map(r=>r.map(plain)), aligns:p.grid.aligns } });
+    } else if(p.value){
+      const t=nodeTextPlain(p.value).trim();
+      if(t) blocks.push({ type:'text', lines:t.split('\n') });
+    }
+  });
+  return blocks.length ? blocks : null;
+}
+// Draw exportNodeBlocks() output inside the box {x,y,w,h}: text lines, then each
+// table as an equal-width grid with a bold header row. Rows shrink to fit the box.
+function drawExportBlocks(ctx, blocks, o){
+  const rowsNeeded=blocks.reduce((k,b)=> k + (b.type==='table' ? 1+b.grid.rows.length : b.lines.length), 0);
+  if(!rowsNeeded) return;
+  const rowH=Math.max(6, Math.min(o.fontPx*1.7, o.h/rowsNeeded));
+  const fontPx=Math.max(6, Math.min(o.fontPx, rowH/1.45));
+  const fit=(str, maxW)=>{
+    let t=String(str==null?'':str);
+    if(ctx.measureText(t).width<=maxW) return t;
+    while(t.length>1 && ctx.measureText(t+'\u2026').width>maxW) t=t.slice(0,-1);
+    return t+'\u2026';
+  };
+  let y=o.y + Math.max(0, (o.h - rowsNeeded*rowH)/2);
+  ctx.save();
+  ctx.textBaseline='middle'; ctx.fillStyle=o.color;
+  blocks.forEach(b=>{
+    if(b.type==='text'){
+      ctx.font='500 '+fontPx+'px '+o.family; ctx.textAlign='center';
+      b.lines.forEach(line=>{ ctx.fillText(fit(line, o.w), o.x+o.w/2, y+rowH/2); y+=rowH; });
+      return;
+    }
+    const g=b.grid, cols=g.headers.length, cw=o.w/cols, top=y;
+    const pad=Math.min(6, cw*0.1);
+    [g.headers, ...g.rows].forEach((row, ri)=>{
+      ctx.font=(ri===0?'700 ':'500 ')+fontPx+'px '+o.family;
+      row.forEach((cell, ci)=>{
+        const al=(g.aligns && g.aligns[ci]) || 'left';
+        ctx.textAlign=al==='right'?'right':(al==='center'?'center':'left');
+        const cx=al==='right' ? o.x+(ci+1)*cw-pad : al==='center' ? o.x+ci*cw+cw/2 : o.x+ci*cw+pad;
+        ctx.fillText(fit(cell, cw-pad*2), cx, y+rowH/2);
+      });
+      y+=rowH;
+    });
+    ctx.strokeStyle=o.lineColor||o.color; ctx.lineWidth=1;
+    ctx.beginPath();
+    for(let r=0; r<=1+g.rows.length; r++){ ctx.moveTo(o.x, top+r*rowH); ctx.lineTo(o.x+o.w, top+r*rowH); }
+    for(let c=0; c<=cols; c++){ ctx.moveTo(o.x+c*cw, top); ctx.lineTo(o.x+c*cw, y); }
+    ctx.stroke();
+  });
+  ctx.restore();
+}
 // Render text (possibly containing inline <b>/<i>/<u>/<s>/<a>/<br>/<ul>/<ol>/<li>)
 // onto a canvas context at the given centre point, with word-wrap and per-line
 // alignment. This is what makes the PNG export look like the browser render.
