@@ -11469,8 +11469,8 @@ function buildDoc(inlined){
 <meta charset="utf-8" />
 <title>${escapeHtml(title)}</title>
 <style>
-  body{font-family:Calibri,"Segoe UI",Arial,sans-serif;color:#23201b;line-height:1.55;max-width:780px;margin:24px auto;padding:0 24px}
-  h1{font-family:Cambria,Georgia,serif;color:#e0613a;margin:0 0 18px;font-size:26pt}
+  body{font-family:"PingFang SC",Calibri,"Segoe UI",Arial,sans-serif;color:#23201b;line-height:1.55;max-width:780px;margin:24px auto;padding:0 24px}
+  h1{font-family:"PingFang SC",Cambria,Georgia,serif;color:#e0613a;margin:0 0 18px;font-size:26pt}
   ul{margin:6px 0 6px 24px;padding-left:18px}
   li{margin:4px 0}
   em{font-style:italic;color:#6a6258}
