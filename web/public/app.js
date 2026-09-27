@@ -1288,7 +1288,7 @@ function sanitizeInlineHTML(html, extraTags, opts){
               .join('; ');
             if(safe) child.setAttribute('style', safe); else child.removeAttribute('style');
           }
-          else if(!['target','rel','color','face','size'].includes(n)) child.removeAttribute(attr.name);   // note: class removed — pasted HTML must not claim app CSS classes
+          else if(!['target','rel','color','face','size','title','colspan','rowspan'].includes(n)) child.removeAttribute(attr.name);   // note: class removed — pasted HTML must not claim app CSS classes
         });
         if(tag==='img' && !(o.img && child.getAttribute('src'))){ node.removeChild(child); return; }
         if(tag==='a'){ child.setAttribute('target','_blank'); child.setAttribute('rel','noopener noreferrer'); }
@@ -1310,6 +1310,73 @@ const NOTES_TAGS = ['h1','h2','h3','blockquote','pre','code','table','thead','tb
 // promote a hidden <script> to the top level where a snapshotted loop misses it.
 const DROP_TAGS = new Set(['script','style','iframe','object','embed','noscript','svg','math','template','link','meta','base','frame','frameset','title','xmp']);
 function sanitizeNotes(html){ return sanitizeInlineHTML(html, NOTES_TAGS); }
+
+// ---- Map-level sanitizing: every map that enters from outside (import, store,
+// share link, live peer) passes through here before anything renders it.
+const SAFE_NODE_ID_RE = /^[\w-]+$/;
+// Block nodes (n.html) legitimately hold tables, code blocks, frontmatter tables and
+// raw Markdown HTML blocks; keep those tags so Markdown export still round-trips.
+const NODE_HTML_TAGS = ['h1','h2','h3','h4','h5','h6','blockquote','pre','code','hr','img','table','thead','tbody','tr','th','td','details','summary','figure','figcaption'];
+// Only rewrite stored HTML when sanitizing actually removed something: harmless
+// content keeps its exact bytes (entities, spacing) so nothing drifts on load.
+function _sanitizeStoredHtml(html, clean){
+  if(typeof html!=='string' || !html) return html;
+  const tpl=document.createElement('template'); tpl.innerHTML=html;
+  const holder=document.createElement('div'); holder.appendChild(tpl.content);
+  return clean===holder.innerHTML ? html : clean;
+}
+function sanitizeMapNode(n){
+  if(!n || typeof n!=='object') return null;
+  for(const f of ['color','textColor','highlight']){
+    if(n[f]==null || n[f]==='') continue;
+    const c=safeColor(n[f]);
+    if(c) n[f]=c; else delete n[f];
+  }
+  // n.text is plain text unless hasInlineMarkup() says HTML (see renderNodeText);
+  // plain text is always rendered as text, so only the HTML form needs cleaning.
+  if(typeof n.text==='string' && /</.test(n.text) && hasInlineMarkup(n.text)) n.text=_sanitizeStoredHtml(n.text, sanitizeInlineHTML(n.text));
+  else if(n.text!=null && typeof n.text!=='string') n.text=String(n.text);
+  if(typeof n.notes==='string' && /</.test(n.notes)) n.notes=_sanitizeStoredHtml(n.notes, sanitizeNotes(n.notes));
+  else if(n.notes!=null && typeof n.notes!=='string') delete n.notes;
+  if(typeof n.html==='string' && n.html) n.html=_sanitizeStoredHtml(n.html, sanitizeInlineHTML(n.html, NODE_HTML_TAGS, { img:true, mailto:true, classes:/^[\w-]+$/ }));
+  else if(n.html!=null && typeof n.html!=='string') delete n.html;
+  return n;
+}
+function sanitizeMap(m){
+  if(!m || typeof m!=='object') return m;
+  if(m.color!=null) m.color=safeColor(m.color)||'#e0613a';
+  const src=(m.nodes && typeof m.nodes==='object') ? m.nodes : {};
+  // Node ids end up in data-id attributes and CSS selectors, so they must be plain
+  // word characters; anything else gets a fresh id with its references updated.
+  const keys=Object.keys(src);
+  const used=new Set(keys.filter(k=>SAFE_NODE_ID_RE.test(k)));
+  const remap={};
+  keys.forEach(k=>{
+    if(SAFE_NODE_ID_RE.test(k)) return;
+    let id; do{ id=uid(); }while(used.has(id));
+    used.add(id); remap[k]=id;
+  });
+  const fix=ref=>{
+    if(ref==null) return ref;
+    const r=String(ref);
+    if(Object.prototype.hasOwnProperty.call(remap, r)) return remap[r];
+    return SAFE_NODE_ID_RE.test(r) ? ref : null;
+  };
+  const nodes={};
+  keys.forEach(k=>{
+    const n=sanitizeMapNode(src[k]); if(!n) return;
+    const id=remap[k]||k;
+    n.id=id;
+    if(n.parent!=null) n.parent=fix(n.parent);
+    nodes[id]=n;
+  });
+  m.nodes=nodes;
+  if(m.rootId!=null) m.rootId=fix(m.rootId);
+  if(Array.isArray(m.links)){
+    m.links=m.links.filter(l=>l && typeof l==='object').map(l=>({ ...l, from:fix(l.from), to:fix(l.to) })).filter(l=>l.from!=null && l.to!=null);
+  }
+  return m;
+}
 
 function isTableNode(n){
   if(!n || n.frontmatter) return false;
@@ -8879,6 +8946,7 @@ async function loadMap(id){
   catch(e){ if(generation===_mapLoadGeneration) toast(rmsTr('couldNotOpenMap','Could not open map')); return false; }
   if(generation!==_mapLoadGeneration) return false;
   if(!m){ toast('Map not found'); return false; }
+  sanitizeMap(m);
   // Legacy migration: old maps may still store `comment` — promote it to `notes`
   for(const n of Object.values(m.nodes||{})){
     if(n.comment && !n.notes){
@@ -9227,9 +9295,9 @@ async function restoreVersion(mapId, ref){
 }
 // Normalize a loaded/decoded map object to the current shape (defensive defaults).
 function normalizeLoadedMap(m){
-  return { id:m.id, title:m.title||'Untitled map', titleAuto:!!m.titleAuto, color:m.color||'#e0613a',
+  return sanitizeMap({ id:m.id, title:m.title||'Untitled map', titleAuto:!!m.titleAuto, color:m.color||'#e0613a',
            rootId:m.rootId, sameLevelColors:m.sameLevelColors, style:m.style, layout:m.layout||'balanced',
-           nodes:m.nodes||{}, links:m.links||[], vars:m.vars||{} };
+           nodes:m.nodes||{}, links:m.links||[], vars:m.vars||{} });
 }
 
 /* ============================================================
@@ -9611,6 +9679,7 @@ function importFile(){
         else { m=parseMarkdownOutline(t, f.name); }   // .md, .markdown, .txt
       }
       if(!m || !m.nodes || !m.rootId) throw new Error('No recognizable outline');
+      m=sanitizeMap(m);
       // Start collapsed so the user sees a clean top-level overview (unless the
       // format already carries its own expand state, e.g. .gmind).
       if(!preserveState){
@@ -9995,12 +10064,12 @@ function parseMarkdownOutline(text, filename, editorState){
     const kidsOrd = pid => Object.values(nodes).filter(n=>n.parent===pid);   // document order (matches export)
     const applyMeta=(id,path)=>{ const mm=_meta.nodes[path], n=nodes[id];
       if(mm && n){
-        if(mm.color) n.color=mm.color; if(mm.textColor) n.textColor=mm.textColor;
+        if(safeColor(mm.color)) n.color=safeColor(mm.color); if(safeColor(mm.textColor)) n.textColor=safeColor(mm.textColor);
         if(mm.w){ n.width=mm.w; n.w=mm.w; } if(mm.h){ n.height=mm.h; n.h=mm.h; }
         if(mm.collapsed) n.collapsed=true;
         if(mm.underline) n.underline=true;   // bold/italic/strike round-trip via visible **/*/~~ syntax instead (see buildMarkdown)
         if(mm.fontSize) n.fontSize=mm.fontSize; if(mm.listType) n.listType=mm.listType;
-        if(mm.highlight) n.highlight=mm.highlight; if(mm.align) n.align=mm.align;
+        if(safeColor(mm.highlight)) n.highlight=safeColor(mm.highlight); if(mm.align) n.align=mm.align;
         if(mm.image) n.image=mm.image; if(mm.url) n.url=mm.url; if(mm.ref) n.ref=true; if(mm.citation) n.citation=mm.citation;
         if(mm.created) n.created=mm.created; if(mm.updated) n.updated=mm.updated;
       }
@@ -10008,7 +10077,7 @@ function parseMarkdownOutline(text, filename, editorState){
     };
     applyMeta(finalRoot, '0');
   }
-  const out = { id:uid(), title, titleAuto:false, color:(_meta&&_meta.color)||'#e0613a', rootId:finalRoot, nodes };
+  const out = { id:uid(), title, titleAuto:false, color:(_meta&&safeColor(_meta.color))||'#e0613a', rootId:finalRoot, nodes };
   if(_frontmatter) out.frontmatter=_frontmatter;
   if(_meta&&_meta.layout) out.layout=_meta.layout;
   if(_meta&&_meta.vars) out.vars=_meta.vars;
@@ -12927,9 +12996,9 @@ async function tryEnterSharedView(){
   catch(e){ console.error('bad share link',e); return false; }
   READONLY=true;
   document.body.classList.add('shared-view');
-  map={ id:'shared', title:payload.title||'Shared map', color:payload.color||'#e0613a',
+  map=sanitizeMap({ id:'shared', title:payload.title||'Shared map', color:payload.color||'#e0613a',
         style:payload.style, layout:payload.layout, rootId:payload.rootId,
-        nodes:payload.nodes||{}, links:payload.links||[], vars:payload.vars||{} };
+        nodes:payload.nodes||{}, links:payload.links||[], vars:payload.vars||{} });
   sel=null;
   $('#mapTitle').value=map.title; $('#mapTitle').readOnly=true;
   // Grow the title <input> to fit the whole title (it clips to its width) so a
@@ -12972,9 +13041,9 @@ async function consumePendingImport(){
   try{ sessionStorage.removeItem('mindspark:pendingImport'); }catch(e){}
   let p; try{ p=JSON.parse(raw); }catch(e){ return false; }
   const id=uid();
-  map={ id, title:(p.title||'Shared map')+' (copy)', titleAuto:false, color:p.color||'#e0613a',
+  map=sanitizeMap({ id, title:(p.title||'Shared map')+' (copy)', titleAuto:false, color:p.color||'#e0613a',
         style:p.style, layout:p.layout, rootId:p.rootId, nodes:p.nodes||{},
-        links:p.links||[], vars:p.vars||{}, updated:Date.now() };
+        links:p.links||[], vars:p.vars||{}, updated:Date.now() });
   sel=map.rootId; history=[]; hpos=-1; pushHistory();
   $('#mapTitle').value=map.title;
   render(); fit();
@@ -13082,6 +13151,7 @@ const Collab = (function(){
       if(s.layout) map.layout=s.layout;
       if(s.vars)  map.vars=clone(s.vars);
       if('style' in s) map.style=s.style;
+      sanitizeMap(map);              // peer data is untrusted: same checks as an import
       shadow=snap();
       if(typeof autoLayout==='function') autoLayout();
       render();
@@ -13093,9 +13163,9 @@ const Collab = (function(){
     applying=true;
     try{
       for(const op of ops){
-        if(op.t==='node') map.nodes[op.id]=op.n;
+        if(op.t==='node'){ if(SAFE_NODE_ID_RE.test(String(op.id))){ const sn=sanitizeMapNode(op.n); if(sn){ sn.id=op.id; map.nodes[op.id]=sn; } } }
         else if(op.t==='del'){ delete map.nodes[op.id]; if(sel===op.id) sel=null; }
-        else if(op.t==='meta'){ if(op.k==='title'){ map.title=op.v; const t=$('#mapTitle'); if(t) t.value=op.v; } else map[op.k]=op.v; }
+        else if(op.t==='meta'){ if(op.k==='title'){ map.title=op.v; const t=$('#mapTitle'); if(t) t.value=op.v; } else if(op.k==='color') map.color=safeColor(op.v)||map.color; else map[op.k]=op.v; }
       }
       shadow=snap(); render();
     } finally { applying=false; }    // same guarantee — a malformed op or a render() edge case must not permanently wedge sync
@@ -13603,9 +13673,9 @@ function _applySharedMap(id, token, data){
   document.body.classList.remove('cloud-edit','shared-view');
   document.body.classList.add(editable?'cloud-edit':'shared-view');
   document.body.classList.add('no-banner');   // compact themed pill instead of a full-width banner
-  map={ id:'shared-'+id, title:data.title||'Shared map', color:data.color||'#e0613a',
+  map=sanitizeMap({ id:'shared-'+id, title:data.title||'Shared map', color:data.color||'#e0613a',
         style:data.style, layout:data.layout||'balanced', rootId:data.rootId,
-        nodes:data.nodes||{}, links:data.links||[], vars:data.vars||{} };
+        nodes:data.nodes||{}, links:data.links||[], vars:data.vars||{} });
   map._cloudView=id;
   map._opening=true;                 // opening a shared map isn't an edit — suppress the save pill until it settles
   if(editable){ map._cloudEdit={ id, token }; }

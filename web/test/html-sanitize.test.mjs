@@ -148,6 +148,70 @@ describe('sanitizeInlineHTML — node/notes sanitizer', () => {
   });
 });
 
+describe('sanitizeMap — one gate for maps from imports, the store, share links and peers', () => {
+  let n = 0;
+  const { sanitizeMap } = loadFns(['escapeHtml', 'isSafeLinkUrl', 'safeColor', 'sanitizeInlineHTML', 'sanitizeNotes', '_sanitizeStoredHtml', 'sanitizeMapNode', 'sanitizeMap'], {
+    document, hasInlineMarkup, ...consts,
+    SAFE_COLOR_NAMES: extractConst('SAFE_COLOR_NAMES'),
+    SAFE_NODE_ID_RE: extractConst('SAFE_NODE_ID_RE'),
+    NODE_HTML_TAGS: extractConst('NODE_HTML_TAGS'),
+    uid: () => 'fresh' + (++n),
+  });
+  const evil = () => ({
+    id: 'm1', rootId: 'r"><img src=x onerror=1>', color: 'red;background:url(x)',
+    nodes: {
+      'r"><img src=x onerror=1>': { id: 'r"><img src=x onerror=1>', text: '<b onclick="alert(1)">Root</b><img src=x onerror=alert(1)>', color: '#fff" onmouseover="x' },
+      a: { id: 'a', parent: 'r"><img src=x onerror=1>', text: 'plain <b>bold</b> &rarr; $x^2$', textColor: 'expression(alert(1))', highlight: '#ffee00',
+           notes: '<h2>N</h2><p onmouseover="x">note</p><script>alert(1)</script>' },
+      t: { id: 't', parent: 'a', html: '<table><thead><tr><th style="text-align:left" onclick="x">A</th><th>B</th></tr></thead><tbody><tr><td>1</td><td><a href="javascript:alert(1)">l</a></td></tr></tbody></table>' },
+      c: { id: 'c', parent: 'a', html: '<pre><code>x &lt; y</code></pre>' },
+      p: { id: 'p', parent: 'a', text: 'a < b & c <img src=x onerror=1>' },
+    },
+    links: [{ from: 'a', to: 'r"><img src=x onerror=1>' }, { from: 'a', to: 'bad"id' }],
+  });
+
+  test('unsafe node ids are remapped everywhere they are referenced', () => {
+    const m = sanitizeMap(evil());
+    const rid = m.rootId;
+    assert.match(rid, /^[\w-]+$/);
+    assert.ok(m.nodes[rid], 'root still resolves');
+    assert.equal(m.nodes[rid].id, rid);
+    assert.equal(m.nodes.a.parent, rid);
+    assert.deepEqual(m.links, [{ from: 'a', to: rid }], 'dangling unsafe link dropped');
+    for(const id of Object.keys(m.nodes)) assert.match(id, /^[\w-]+$/);
+  });
+
+  test('colors are validated', () => {
+    const m = sanitizeMap(evil());
+    assert.equal(m.color, '#e0613a');
+    assert.equal(m.nodes[m.rootId].color, undefined);
+    assert.equal(m.nodes.a.textColor, undefined);
+    assert.equal(m.nodes.a.highlight, '#ffee00');
+  });
+
+  test('text / notes / html lose handlers and scripts but keep legitimate markup', () => {
+    const m = sanitizeMap(evil());
+    for(const n of Object.values(m.nodes)){
+      for(const f of ['text', 'notes', 'html']){
+        if(typeof n[f] === 'string' && (f !== 'text' || hasInlineMarkup(n[f]))) assertNoActiveContent(n[f]);
+      }
+    }
+    assert.equal(m.nodes[m.rootId].text, '<b>Root</b>');
+    assert.equal(m.nodes.a.text, 'plain <b>bold</b> &rarr; $x^2$', 'harmless HTML text keeps its exact bytes');
+    assert.equal(m.nodes.a.notes, '<h2>N</h2><p>note</p>');
+    assert.match(m.nodes.t.html, /<table><thead><tr><th style="text-align:left">A<\/th>/);
+    assert.match(m.nodes.t.html, /<td><a target="_blank" rel="noopener noreferrer">l<\/a><\/td>/);
+    assert.equal(m.nodes.c.html, '<pre><code>x &lt; y</code></pre>', 'code block untouched');
+    assert.equal(m.nodes.p.text, 'a < b & c <img src=x onerror=1>', 'plain-text node stays plain text (it is rendered as text)');
+  });
+
+  test('a clean map comes back unchanged', () => {
+    const clean = { id: 'm', rootId: 'r', color: '#e0613a', nodes: { r: { id: 'r', text: 'Root' }, a: { id: 'a', parent: 'r', text: '<i>x</i> &amp; y', notes: '<p>hi &amp; bye</p>', color: '#cfe0ee' } }, links: [] };
+    const before = JSON.stringify(clean);
+    assert.equal(JSON.stringify(sanitizeMap(clean)), before);
+  });
+});
+
 describe('safeColor — only well-formed color literals reach style/fill attributes', () => {
   const { safeColor } = loadFns(['safeColor'], { SAFE_COLOR_NAMES: extractConst('SAFE_COLOR_NAMES') });
   test('accepts hex, rgb/rgba/hsl and a few names', () => {
