@@ -6936,8 +6936,11 @@ function beginSubtreeDrag(idOrIds, mx, my){
     roots.forEach(collect);
   });
   document.querySelectorAll('.node.drag-ghost').forEach(n=>n.classList.remove('drag-ghost'));
+  // Cache each element once here: applySubtreeDelta runs every mousemove.
   for(const id in subtree){
-    document.querySelector(`.node[data-id="${id}"]`)?.classList.add('drag-ghost');
+    const el=document.querySelector(`.node[data-id="${id}"]`);
+    subtree[id].el=el||null;
+    if(el) el.classList.add('drag-ghost');
   }
   return { mx, my, root:roots[0], roots, subtree };
 }
@@ -6947,7 +6950,10 @@ function applySubtreeDelta(start, dx, dy){
     const base = start.subtree[id];
     const n = map.nodes[id]; if(!n) continue;
     n.x = base.x + dx; n.y = base.y + dy;
-    const el = document.querySelector(`.node[data-id="${id}"]`);
+    let el = base.el;
+    if(el && !el.isConnected){   // a render() mid-drag replaced the element
+      el = base.el = document.querySelector(`.node[data-id="${id}"]`);
+    }
     if(el){ el.style.left = n.x+'px'; el.style.top = n.y+'px'; }
   }
 }
