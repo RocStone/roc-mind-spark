@@ -3289,7 +3289,7 @@ function mdAfterEdit(){
   mdRefreshDecorations();
   clearTimeout(_mdTimer);
   const target=map;
-  _mdTimer=setTimeout(()=>{ _mdTimer=0; if(map===target) applyMdToMap(); }, 300);
+  _mdTimer=setTimeout(()=>{ _mdTimer=0; if(map===target) applyMdToMap(); scheduleSaveStatePost(); }, 300);
 }
 function flushMdEdits(){
   if(!mdMode || _mdSyncing || _mdComposing || !_mdTimer) return;
@@ -3375,6 +3375,7 @@ function toggleMdMode(on){
     }
   }
   else if(!(typeof READONLY!=='undefined' && READONLY)) pushHistory();   // one undo entry for the md session
+  if(typeof scheduleSaveStatePost==='function') scheduleSaveStatePost();
 
 }
 // Map-level fields a history step captures and restores. One list for both
@@ -8775,6 +8776,7 @@ function closeNotesPopup(){
   if(typeof document!=='undefined' && document.querySelectorAll){
     document.querySelectorAll('.notes-popup').forEach(p=>p.remove());
   }
+  if(typeof scheduleSaveStatePost==='function') scheduleSaveStatePost();
 }
 function closeNotesPreview(){
   if(!shouldCloseNotesOnPointerLeave(_notesSticky)) return;
@@ -8953,6 +8955,7 @@ function showNotesEditor(nodeId, opts){
   const editor=popup.querySelector('.np-editor');
   editor.innerHTML = sanitizeNotes(n.notes||'');   // safe: inert-parsed, whitelisted
   editor._initialHTML=sanitizeNotes(editor.innerHTML);
+  scheduleSaveStatePost();
   applyNotesPopupHeight(popup);
   if(sticky){
     editor.focus();
@@ -9316,6 +9319,8 @@ $('#mapTitle').addEventListener('change',()=>{ if(map && !READONLY) refreshList(
 
 /* ---------- autosave ---------- */
 const _mapSaveStates=new Map(), _saveErrorNotified=new Set();
+// Last `saveState` value sent to the native shell (null = never sent).
+let _saveStatePosted=null, _saveStateTimer=0;
 const _mapSaves=createMapSaveQueue({
   save:snapshot=>Store.save(snapshot),
   onState(id,state,error){
@@ -9323,7 +9328,7 @@ const _mapSaves=createMapSaveQueue({
     if(state==='saved') _saveErrorNotified.delete(id);
     if(map && map.id===id) updateMapSaveStatus();
     // Native quit skips the save round-trip when nothing is pending.
-    try{ window.webkit.messageHandlers.rmsNative.postMessage({op:'saveState',dirty:[..._mapSaveStates.values()].some(s=>s!=='saved')}); }catch(_){}
+    postSaveState();
     // A terminal refusal is not retried, so it always gets its own warning
     // even if a retryable failure was already announced for this map.
     if(state==='failed-terminal'){
@@ -9346,6 +9351,64 @@ function updateMapSaveStatus(){
   const key=state==='failed-terminal' ? 'saveFailedTerminal' : state==='failed' ? 'saveFailed' : state==='retrying' ? 'saveRetrying' : busy ? 'saving' : 'saved';
   const fallback={saveFailedTerminal:'Save refused',saveFailed:'Save failed',saveRetrying:'Retrying…',saving:'Saving…',saved:'Saved'};
   $('#saveText').textContent=rmsTr(key,fallback[key]);
+}
+// The native shell (applicationShouldTerminate) quits without a flush when
+// this is false, whether or not the overlay is visible. So it must cover
+// every edit that could still be lost: the save queue, and drafts that have
+// not reached the model yet (open node editor, notes popup, Markdown pane).
+function rmsPageIsDirty(){
+  if([..._mapSaveStates.values()].some(s=>s!=='saved')) return true;
+  if(typeof mdMode!=='undefined' && mdMode && (_mdTimer || _mdComposing)) return true;
+  if(notesPopupIsDirty()) return true;
+  return openNodeEditIsDirty();
+}
+function notesPopupIsDirty(){
+  if(typeof document==='undefined' || !document.querySelector) return false;
+  const ed=document.querySelector('.notes-popup .np-editor');
+  // Same "unsaved" test rmsFlushPendingEdits and Esc use.
+  return !!ed && sanitizeNotes(ed.innerHTML)!==ed._initialHTML;
+}
+// Mirrors flushOpenEditToModel's reading of the editor, but only compares.
+function openNodeEditIsDirty(){
+  if(typeof document==='undefined' || !document.querySelector || !map || !map.nodes) return false;
+  const float=(typeof _editFloat!=='undefined') ? _editFloat : null;
+  // A float prepared for the first keystroke holds no user text yet.
+  if(float && float.classList && float.classList.contains('input-ready')) return false;
+  const el=document.querySelector('.node.editing');
+  const id=(float && float.dataset && float.dataset.nodeId) || (el && el.dataset && el.dataset.id);
+  const n=id && map.nodes[id];
+  if(!n) return false;
+  if(el && el.classList && el.classList.contains('editing-block')){
+    const box=el.querySelector('.node-block');
+    if(!box) return false;
+    return !!box._rmsComposing || captureBlockEditHTML(box, n.html)!==n.html;
+  }
+  const textEl=(float && editFloatLiveTextEl(float)) || (el && (el.querySelector('.node-text') || el));
+  if(!textEl) return false;
+  if(textEl._rmsComposing) return true;   // IME marked text is not in the model
+  const cap=captureNodeEditText(textEl);
+  if(cap.image && (cap.image!==n.image || cap.imageAlt!==(n.imageAlt||''))) return true;
+  const text=cap.text || (n.image!==undefined ? '' : 'Untitled');
+  return text!==(n.text||'');
+}
+function postSaveState(){
+  clearTimeout(_saveStateTimer); _saveStateTimer=0;
+  const handler=typeof window!=='undefined' && window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.rmsNative;
+  if(!handler) return;
+  let dirty;
+  try{ dirty=rmsPageIsDirty(); }catch(_){ dirty=true; }   // unsure: let the shell flush
+  if(dirty===_saveStatePosted) return;
+  try{ handler.postMessage({op:'saveState',dirty}); _saveStatePosted=dirty; }catch(_){}
+}
+// Editor events can flip the draft part of the flag. At most one check per
+// 150 ms: the first event arms the timer, later ones ride on it.
+function scheduleSaveStatePost(){
+  if(_saveStateTimer) return;
+  _saveStateTimer=setTimeout(postSaveState,150);
+}
+if(typeof document!=='undefined' && document.addEventListener){
+  for(const type of ['input','focusin','focusout','compositionstart','compositionend','keydown','pointerdown'])
+    document.addEventListener(type, scheduleSaveStatePost, true);
 }
 function scheduleSave(){
   if(!map || READONLY || _historyPreview) return;
