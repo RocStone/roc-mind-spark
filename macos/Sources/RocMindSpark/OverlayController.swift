@@ -1344,9 +1344,12 @@ private final class MapWebView: WKWebView {
             return
         }
         Task { @MainActor in
+            // Fetch first: clearing before the await would leave the
+            // pasteboard empty (and other apps seeing that) meanwhile.
+            let data = await self.imageData(from: image)
             let board = NSPasteboard.general
             board.clearContents()
-            if let data = await self.imageData(from: image) {
+            if let data {
                 let jpeg = image.lowercased().contains(".jpg") || image.lowercased().contains("image/jpeg")
                 board.setData(data, forType: jpeg ? Self.jpegType : .png)
             }
@@ -1381,103 +1384,27 @@ private final class MapWebView: WKWebView {
                 self.evaluateJavaScript("window.__rmsClipboardPaste&&window.__rmsClipboardPaste(\(Self.jsonString(text)))")
                 return
             }
-            if let payload = self.pasteboardImagePayload() {
-                self.pasteImage(payload)
-                return
+            Task { @MainActor in
+                if let payload = await self.pasteboardImagePayload() {
+                    self.pasteImage(payload)
+                    return
+                }
+                guard !text.isEmpty else { return }
+                _ = try? await self.evaluateJavaScript("window.__rmsClipboardPaste&&window.__rmsClipboardPaste(\(Self.jsonString(text)))")
             }
-            guard !text.isEmpty else { return }
-            self.evaluateJavaScript("window.__rmsClipboardPaste&&window.__rmsClipboardPaste(\(Self.jsonString(text)))")
         }
     }
 
-    private struct PasteImage {
-        let data: Data
-        let mime: String
-    }
+    private typealias PasteImage = PasteboardImageDecoder.Image
 
     private static let jpegType = NSPasteboard.PasteboardType("public.jpeg")
-    private static let gifType = NSPasteboard.PasteboardType("public.gif")
-    private static let webpType = NSPasteboard.PasteboardType("public.webp")
 
-    private static let imageFileExtensions: Set<String> = [
-        "png", "jpg", "jpeg", "gif", "webp", "heic", "heif", "tif", "tiff", "bmp",
-    ]
-
-    private func pasteboardImagePayload() -> PasteImage? {
-        let board = NSPasteboard.general
-        var best: (data: Data, mime: String, pixels: Int)?
-
-        func consider(_ data: Data?, mime: String) {
-            guard let data, data.count > 32 else { return }
-            let pixels: Int
-            if let rep = NSBitmapImageRep(data: data) {
-                pixels = max(0, rep.pixelsWide * rep.pixelsHigh)
-            } else {
-                pixels = 0
-            }
-            if pixels > (best?.pixels ?? -1) || (pixels == (best?.pixels ?? -1) && data.count > (best?.data.count ?? 0)) {
-                best = (data, mime, pixels)
-            }
-        }
-
-        consider(board.data(forType: .png), mime: "image/png")
-        consider(board.data(forType: Self.jpegType), mime: "image/jpeg")
-        consider(board.data(forType: Self.gifType), mime: "image/gif")
-        consider(board.data(forType: Self.webpType), mime: "image/webp")
-        if let tiff = board.data(forType: .tiff), let png = Self.pngData(from: tiff) {
-            consider(png, mime: "image/png")
-        }
-        if let image = NSImage(pasteboard: board) {
-            for rep in image.representations {
-                guard let bitmap = rep as? NSBitmapImageRep,
-                      let png = bitmap.representation(using: .png, properties: [:]) else { continue }
-                consider(png, mime: "image/png")
-            }
-        }
-        if let urls = board.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) {
-            for case let url as URL in urls {
-                let ext = url.pathExtension.lowercased()
-                guard Self.imageFileExtensions.contains(ext) else { continue }
-                if ["heic", "heif", "tif", "tiff", "bmp"].contains(ext) {
-                    if let data = try? Data(contentsOf: url), let png = Self.pngData(from: data) {
-                        consider(png, mime: "image/png")
-                    } else if let image = NSImage(contentsOf: url), let png = Self.pngData(from: image) {
-                        consider(png, mime: "image/png")
-                    }
-                    continue
-                }
-                consider(try? Data(contentsOf: url), mime: Self.mime(for: ext))
-            }
-        }
-        guard let best else { return nil }
-        return PasteImage(data: best.data, mime: best.mime)
-    }
-
-    private static func mime(for ext: String) -> String {
-        switch ext {
-        case "jpg", "jpeg": return "image/jpeg"
-        case "gif": return "image/gif"
-        case "webp": return "image/webp"
-        default: return "image/png"
-        }
-    }
-
-    private static func pngData(from image: NSImage) -> Data? {
-        var best: NSBitmapImageRep?
-        for rep in image.representations {
-            guard let bitmap = rep as? NSBitmapImageRep else { continue }
-            if best == nil || bitmap.pixelsWide * bitmap.pixelsHigh > best!.pixelsWide * best!.pixelsHigh {
-                best = bitmap
-            }
-        }
-        if let best, let png = best.representation(using: .png, properties: [:]) { return png }
-        guard let tiff = image.tiffRepresentation else { return nil }
-        return pngData(from: tiff)
-    }
-
-    private static func pngData(from data: Data) -> Data? {
-        guard let rep = NSBitmapImageRep(data: data) else { return nil }
-        return rep.representation(using: .png, properties: [:])
+    /// PNG/JPEG already on the pasteboard is used as-is. Anything that needs
+    /// decoding (TIFF, PDF, HEIC files, …) is converted off the main actor.
+    private func pasteboardImagePayload() async -> PasteImage? {
+        let snapshot = PasteboardImageDecoder.Snapshot(board: NSPasteboard.general)
+        if let direct = snapshot.directImage { return direct }
+        return await Task.detached(priority: .userInitiated) { snapshot.decode() }.value
     }
 
     private func pasteImage(_ payload: PasteImage) {
