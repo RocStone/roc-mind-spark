@@ -85,4 +85,37 @@ final class LauncherHUDSnapshotTests: XCTestCase {
         XCTAssertFalse(LauncherHUDSnapshot.isLauncherHudMetrics(width: 279, height: 48, alpha: 1))
         XCTAssertFalse(LauncherHUDSnapshot.isLauncherHudMetrics(width: 800, height: 80, alpha: 0.01))
     }
+
+    func testOwnerNamePrefilterAcceptsOnlyKnownLaunchers() {
+        XCTAssertTrue(LauncherHUDSnapshot.isLauncherOwnerName("Raycast"))
+        XCTAssertTrue(LauncherHUDSnapshot.isLauncherOwnerName("Alfred"))
+        XCTAssertTrue(LauncherHUDSnapshot.isLauncherOwnerName("Alfred Preferences"))
+        XCTAssertTrue(LauncherHUDSnapshot.isLauncherOwnerName("Spotlight"))
+        XCTAssertFalse(LauncherHUDSnapshot.isLauncherOwnerName("Spotlight Helper"))
+        XCTAssertFalse(LauncherHUDSnapshot.isLauncherOwnerName("Finder"))
+        XCTAssertFalse(LauncherHUDSnapshot.isLauncherOwnerName("Roc Mind Spark"))
+        XCTAssertFalse(LauncherHUDSnapshot.isLauncherOwnerName(""))
+    }
+
+    func testPIDBundleCacheResolvesEachPidOnceAndDropsGonePids() {
+        final class Counter: @unchecked Sendable { var calls: [Int32] = [] }
+        let counter = Counter()
+        let cache = PIDBundleCache { pid in
+            counter.calls.append(pid)
+            return pid == 7 ? nil : "bundle.\(pid)"
+        }
+
+        let first = cache.lookup(pids: [5, 5, 7, 0])
+        XCTAssertEqual(first[5], .some("bundle.5"))
+        XCTAssertEqual(first[7], .some(nil))
+        XCTAssertNil(first[0])
+        XCTAssertEqual(counter.calls, [5, 7])
+
+        _ = cache.lookup(pids: [5, 7])
+        XCTAssertEqual(counter.calls, [5, 7], "cached pids, including ones without a bundle id, are not resolved again")
+
+        _ = cache.lookup(pids: [7])
+        _ = cache.lookup(pids: [5])
+        XCTAssertEqual(counter.calls, [5, 7, 5], "a pid that disappeared is resolved afresh")
+    }
 }
