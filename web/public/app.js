@@ -4724,6 +4724,82 @@ function formatCitation(c){
 // Import / manage layout presets. Shows the current map's layout as JSON so a
 // user can copy it, tweak it, and paste it back as a new preset — which is the
 // realistic way anyone produces one of these.
+// Shared by the JSON import dialog and the shipped presets: validate, refuse a
+// built-in id, save on this device (re-importing replaces). {preset} or {error}.
+function importLayoutPreset(parsed){
+  const preset = validateLayoutPreset(parsed);
+  if(!preset){
+    return {error:'Not a usable layout. It needs an "id" (letters, digits and dashes), '
+      + 'a "name", and an "engine" that is one of: ' + LAYOUT_ENGINES.join(', ') + '.'};
+  }
+  if(BUILTIN_LAYOUTS.some(b=>b.id===preset.id)){
+    return {error:`"${preset.id}" is a built-in layout name \u2014 please choose another id.`};
+  }
+  const list = loadCustomLayouts().filter(c=>c.id!==preset.id);   // re-importing replaces
+  list.push(preset);
+  if(!saveCustomLayouts(list)) return {error:'Could not save \u2014 this browser\u2019s storage may be full.'};
+  return {preset};
+}
+// The layout presets shipped in public/layouts/ (listed by index.json). Loaded
+// the first time the layout picker opens, then cached for the session.
+let _shippedLayouts=null;
+function loadShippedLayouts(){
+  if(_shippedLayouts) return _shippedLayouts;
+  const get=path=>fetch(path, {cache:'no-cache'}).then(r=>{ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); });
+  _shippedLayouts=get('layouts/index.json').then(idx=>{
+    const files=(idx && Array.isArray(idx.files) ? idx.files : []).filter(f=>/^[a-z0-9-]+\.json$/i.test(f));
+    return Promise.all(files.map(f=>get('layouts/'+f).catch(()=>null)));
+  }).then(list=>list.filter(raw=>raw && validateLayoutPreset(raw)))
+    .catch(e=>{ _shippedLayouts=null; throw e; });
+  return _shippedLayouts;
+}
+// Presets reuse the thumbnail of the layout family they tune.
+function layoutThumbId(raw){
+  if(!raw) return '';
+  if(raw.engine) return raw.engine;
+  const p=raw.params||{};
+  return ({tree: p.axis==='y' ? 'down' : (p.dir===-1 ? 'left' : 'right'), chain:'timeline', radial:'radial', grid:'grid'})[raw.strategy] || raw.id;
+}
+function fillLayoutPresetRow(panel, curLayout){
+  const row=panel && panel.querySelector('.tp-preset-row');
+  if(!row) return;
+  const importTile=`<button class="theme-opt tp-import" data-cat="layout-import" title="${escapeHtml(rmsTr('layoutImportTitle','Paste a layout as JSON'))}">
+      <span class="style-thumb tp-import-thumb">\uFF0B</span><span class="theme-name">${escapeHtml(rmsTr('layoutImport','Import\u2026'))}</span>
+    </button>`;
+  const wire=()=>{
+    const imp=row.querySelector('.tp-import');
+    if(imp) imp.onclick=ev=>{ ev.stopPropagation(); closeThemePanel(); showLayoutImportForm(); };
+  };
+  loadShippedLayouts().then(list=>{
+    if(!row.isConnected) return;
+    const ids=new Set(list.map(raw=>raw.id));
+    // A preset imported earlier would otherwise show twice.
+    panel.querySelectorAll('.theme-opt[data-cat="layout"]').forEach(o=>{ if(ids.has(o.dataset.id)) o.remove(); });
+    row.innerHTML=list.map(raw=>`
+      <button class="theme-opt${raw.id===curLayout?' active':''}" data-cat="layout-preset" data-id="${escapeHtml(raw.id)}" title="${escapeHtml(raw.desc||'')}">
+        ${buildLayoutThumb(layoutThumbId(raw))}<span class="theme-name">${escapeHtml(raw.name)}</span>
+      </button>`).join('')+importTile;
+    row.querySelectorAll('.theme-opt[data-cat="layout-preset"]').forEach((opt,i)=>{
+      opt.onclick=ev=>{
+        ev.stopPropagation();
+        if(!map || READONLY) return;
+        const res=importLayoutPreset(list[i]);
+        if(res.error){ toast(res.error, 6000); return; }
+        applyMapLayout(res.preset.id);
+        panel.querySelectorAll('.theme-opt[data-cat="layout"], .theme-opt[data-cat="layout-preset"]').forEach(o=>o.classList.remove('active'));
+        opt.classList.add('active');
+      };
+    });
+    wire();
+    const act=row.querySelector('.theme-opt.active');
+    if(act) act.scrollIntoView({block:'nearest', inline:'nearest'});
+    row.dispatchEvent(new Event('scroll'));
+  }).catch(()=>{
+    if(!row.isConnected) return;
+    row.innerHTML=`<span class="tp-hint tp-preset-msg">${escapeHtml(rmsTr('layoutPresetsFailed','Could not load the presets'))}</span>`+importTile;
+    wire();
+  });
+}
 function showLayoutImportForm(){
   document.querySelectorAll('.var-form').forEach(p=>p.remove());
   const cur = map ? (findLayout(map.layoutPreset || map.layout) || BUILTIN_LAYOUTS[0]) : BUILTIN_LAYOUTS[0];
@@ -4766,17 +4842,9 @@ function showLayoutImportForm(){
     let parsed;
     try{ parsed = JSON.parse(ta.value); }
     catch(e){ return fail('Not valid JSON: '+e.message); }
-    const preset = validateLayoutPreset(parsed);
-    if(!preset){
-      return fail('Not a usable layout. It needs an "id" (letters, digits and dashes), '
-        + 'a "name", and an "engine" that is one of: ' + LAYOUT_ENGINES.join(', ') + '.');
-    }
-    if(BUILTIN_LAYOUTS.some(b=>b.id===preset.id)){
-      return fail(`"${preset.id}" is a built-in layout name — please choose another id.`);
-    }
-    const list = loadCustomLayouts().filter(c=>c.id!==preset.id);   // re-importing replaces
-    list.push(preset);
-    if(!saveCustomLayouts(list)) return fail('Could not save — this browser\u2019s storage may be full.');
+    const res = importLayoutPreset(parsed);
+    if(res.error) return fail(res.error);
+    const preset = res.preset;
     close(); toast(`Layout \u201c${preset.name}\u201d imported`);
     try{ $('#themeBtn').click(); }catch(_){}   // reopen so the new entry is visible
   };
@@ -12919,10 +12987,14 @@ $('#themeBtn').onclick=(e)=>{
       </div>
       <div class="tp-grid tp-scroll-row">
         ${allLayouts().map(l=>`
-          <button class="theme-opt${l.id===curLayout?' active':''}" data-cat="layout" data-id="${l.id}" title="${l.desc}">
-            ${buildLayoutThumb(l.id)}<span class="theme-name">${l.name}</span>
+          <button class="theme-opt${l.id===curLayout?' active':''}" data-cat="layout" data-id="${escapeHtml(l.id)}" title="${escapeHtml(l.desc||'')}">
+            ${buildLayoutThumb(l.id)}<span class="theme-name">${escapeHtml(l.name)}</span>
           </button>`).join('')}
       </div>
+    </div>
+    <div class="tp-section">
+      <div class="tp-label">${rmsTr('themeLayoutPresets','Layout presets')}</div>
+      <div class="tp-grid tp-scroll-row tp-preset-row"><span class="tp-hint tp-preset-msg">${rmsTr('layoutPresetsLoading','Loading\u2026')}</span></div>
     </div>
     <div class="tp-section">
       <div class="tp-label">${rmsTr('themeSize','Display size')} <span class="tp-hint">${rmsTr('themeSizeHint','scales the whole interface')}</span></div>
@@ -12947,6 +13019,7 @@ $('#themeBtn').onclick=(e)=>{
   // through the category dispatch below.
   const cog = themePanel.querySelector('.tp-cog');
   if(cog) cog.onclick = ev => { ev.stopPropagation(); closeThemePanel(); showLayoutConfigForm(); };
+  fillLayoutPresetRow(themePanel, curLayout);
 
   themePanel.querySelectorAll('.tp-scroll-row').forEach(row=>{
     const sync=()=>{
@@ -12986,7 +13059,8 @@ $('#themeBtn').onclick=(e)=>{
       // its own category rather than sharing 'theme' — but scoping by
       // data-cat across the whole panel is the more general, robust
       // approach regardless of how many sections a category happens to span.
-      themePanel.querySelectorAll(`.theme-opt[data-cat="${cat}"]`).forEach(o=>o.classList.remove('active'));
+      const sameCat = cat==='layout' ? '.theme-opt[data-cat="layout"], .theme-opt[data-cat="layout-preset"]' : `.theme-opt[data-cat="${cat}"]`;
+      themePanel.querySelectorAll(sameCat).forEach(o=>o.classList.remove('active'));
       opt.classList.add('active');
     };
   });

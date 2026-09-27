@@ -1,4 +1,4 @@
-// The shipped layout library (layouts/*.json).
+// The shipped layout library (public/layouts/*.json, served at /layouts/).
 //
 // These files are meant to be copied by other people, so a broken one is worse
 // than a missing one: it teaches the wrong schema. This checks each file
@@ -11,7 +11,7 @@ import { dirname, join } from 'node:path';
 import { loadFns, extractConst } from './helpers/load-app-fns.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const DIR = join(here, '..', 'layouts');
+const DIR = join(here, '..', 'public', 'layouts');
 
 const fns = loadFns(
   ['validateLayoutConfig', 'validateLayoutParams', 'validateLayoutPreset',
@@ -37,7 +37,7 @@ test('the engine map covers every strategy the app declares', () => {
   }
 });
 
-const FILES = readdirSync(DIR).filter(f => f.endsWith('.json'));
+const FILES = readdirSync(DIR).filter(f => f.endsWith('.json') && f !== 'index.json');
 const TREE = { root:['a','b','c'], a:['a1','a2'], b:[], c:['c1'], a1:[], a2:[], c1:[] };
 const buildNodes = () => {
   const nodes = {};
@@ -50,6 +50,11 @@ const buildNodes = () => {
 describe('shipped layout library', () => {
   test('there are layouts to ship', () => {
     assert.ok(FILES.length > 0, 'layouts/ contains no JSON files');
+  });
+
+  test('index.json lists exactly the shipped files (the picker loads from it)', () => {
+    const index = JSON.parse(readFileSync(join(DIR, 'index.json'), 'utf8'));
+    assert.deepEqual([...index.files].sort(), [...FILES].sort());
   });
 
   for (const file of FILES) {

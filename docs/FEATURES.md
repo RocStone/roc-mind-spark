@@ -58,7 +58,7 @@ What Roc Mind Spark can do today, as a **macOS overlay**. This is the product ca
 ## Look and layout
 
 - Colour themes, map styles (modern / classic / others), and a handwritten / office / coffee-shop look.
-- Layouts: balanced tree, left, right, down, org-chart up, timeline, fishbone, radial, grid, matrix. Import a layout JSON from `web/layouts/`.
+- Layouts: balanced tree, left, right, down, org-chart up, timeline, fishbone, radial, grid, matrix. The 🎨 panel's **Layout presets** row lists the presets shipped in `web/public/layouts/`; click one to apply it. Its last tile, **Import…**, takes your own layout JSON.
 - Interface language: English or 中文. This does not translate the words you type into nodes.
 - Display size for chrome density. Scroll to zoom the map, drag empty canvas to pan, Fit to frame every topic, minimap to jump.
 - Focus mode to work on one branch. Presentation mode to step through topics.

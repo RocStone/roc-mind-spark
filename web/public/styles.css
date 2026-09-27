@@ -860,6 +860,8 @@
   }
   /* A focused option must never be hidden behind a fade. */
   .theme-panel-large .tp-grid.tp-scroll-row > .theme-opt:focus-visible{ outline-offset:-2px; }
+  .tp-import-thumb{display:flex;align-items:center;justify-content:center;font-size:22px;color:var(--ink-soft)}
+  .theme-panel .tp-preset-msg{margin-left:0;padding:10px 4px}
   .style-thumb{
     width:62px; height:36px; border-radius:6px; border:1px solid var(--line);
     background:var(--paper); display:inline-flex; align-items:center; justify-content:center;
