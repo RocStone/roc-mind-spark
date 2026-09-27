@@ -22,7 +22,6 @@ rsync -a \
   --exclude 'data' \
   --exclude 'test' \
   --exclude 'docs' \
-  --exclude 'worker' \
   --exclude '.git' \
   --exclude '.github' \
   --exclude 'node_modules' \
@@ -31,6 +30,8 @@ rsync -a \
   "$ROOT/web/server.js" "$CONTENTS/Resources/web/server.js"
 cp "$ROOT/web/ops-log.js" "$CONTENTS/Resources/web/ops-log.js"
 cp "$ROOT/web/map-images.js" "$CONTENTS/Resources/web/map-images.js"
+cp "$ROOT/web/image-gc.js" "$CONTENTS/Resources/web/image-gc.js"
+cp "$ROOT/web/import-spec.js" "$CONTENTS/Resources/web/import-spec.js"
 cp "$ROOT/web/listen-bind.js" "$CONTENTS/Resources/web/listen-bind.js"
 rsync -a "$ROOT/web/public/" "$CONTENTS/Resources/web/public/"
 

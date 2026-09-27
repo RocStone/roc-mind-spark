@@ -8,7 +8,6 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { extractConst } from './helpers/load-app-fns.mjs';
-import { buildMapFromSpec } from '../worker/import-core.js';
 
 const MARKERS = extractConst('MARKERS');
 
@@ -63,47 +62,5 @@ describe('MARKERS palette', () => {
     assert.equal(finding && finding.c, '\u{1F48E}');
     assert.equal(MARKERS.some(m => m.label === 'Key takeaway'), false);
     assert.equal(MARKERS.some(m => m.label === 'Conclusion'), false);
-  });
-});
-
-describe('import endpoint carries markers', () => {
-  const spec = markerValue => ({
-    nodes: [
-      { id: 'r', text: 'Root', parent: null },
-      { id: 'a', text: 'Child', parent: 'r', marker: markerValue },
-    ],
-  });
-
-  test('a valid marker survives import', () => {
-    const m = buildMapFromSpec(spec('\u2B50'));
-    assert.equal(m.nodes.a.marker, '\u2B50');
-  });
-
-  test('an astral-plane emoji survives (two UTF-16 units, one character)', () => {
-    const m = buildMapFromSpec(spec('\u{1F6A9}'));
-    assert.equal(m.nodes.a.marker, '\u{1F6A9}');
-  });
-
-  test('surrounding whitespace is trimmed', () => {
-    assert.equal(buildMapFromSpec(spec('  \u2B50  ')).nodes.a.marker, '\u2B50');
-  });
-
-  test('a long string is rejected rather than becoming a second text field', () => {
-    assert.equal(buildMapFromSpec(spec('not a marker at all')).nodes.a.marker, undefined);
-  });
-
-  test('an empty or whitespace-only marker is dropped', () => {
-    assert.equal(buildMapFromSpec(spec('')).nodes.a.marker, undefined);
-    assert.equal(buildMapFromSpec(spec('   ')).nodes.a.marker, undefined);
-  });
-
-  test('a non-string marker is ignored rather than coerced', () => {
-    assert.equal(buildMapFromSpec(spec(42)).nodes.a.marker, undefined);
-    assert.equal(buildMapFromSpec(spec({ c: '\u2B50' })).nodes.a.marker, undefined);
-  });
-
-  test('nodes without a marker do not gain one', () => {
-    const m = buildMapFromSpec({ nodes: [{ id: 'r', text: 'Root', parent: null }] });
-    assert.equal(m.nodes.r.marker, undefined);
   });
 });

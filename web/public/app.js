@@ -186,8 +186,10 @@ let _opLogQ=[], _opLogT=0;
 function opLog(op, extra){
   const rec={t:Date.now(), op:String(op||'?').slice(0,32)};
   try{ if(map && map.id) rec.map=map.id; }catch(e){}
+  // Diagnostics only: ids, counts and view settings. Never node text or map
+  // titles, so ops.log holds no user content.
   if(extra && typeof extra==='object'){
-    for(const k of ['id','parent','sel','from','to','key','layout','look','theme','zoom','dir','mode','text']){
+    for(const k of ['id','parent','sel','from','to','key','layout','look','theme','zoom','dir','mode','count']){
       if(extra[k]==null || extra[k]==='') continue;
       rec[k]=typeof extra[k]==='string' ? String(extra[k]).replace(/\s+/g,' ').trim().slice(0,40) : extra[k];
     }

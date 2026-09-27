@@ -10,6 +10,4 @@ Product docs, install, hotkeys, privacy, and contributing start at the repositor
 - [README.zh.md](../README.zh.md)
 - [CONTRIBUTING.md](../CONTRIBUTING.md)
 
-`worker/auth-core.js` and `worker/import-core.js` remain because unit tests import them. They are inherited MindSpark code, not a supported cloud deploy.
-
 The Mac app starts `server.js` on `127.0.0.1:3034`. That bind is loopback-only.

@@ -9,7 +9,7 @@ import http from 'node:http';
 
 const webRoot = dirname(fileURLToPath(new URL('../../server.js', import.meta.url)));
 
-export async function startApiServer({ prepareDb } = {}) {
+export async function startApiServer({ prepareDb, env: extraEnv } = {}) {
   const temp = mkdtempSync(join(tmpdir(), 'rms-server-api-'));
   if (prepareDb) prepareDb(join(temp, 'mindspark.db'));
   const env = {
@@ -21,6 +21,7 @@ export async function startApiServer({ prepareDb } = {}) {
   };
   delete env.ROC_MINDSPARK_MANAGED_STDIN;
   delete env.IMPORT_TOKEN;
+  Object.assign(env, extraEnv || {});
   const child = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', join(webRoot, 'server.js')], {
     cwd: webRoot, env, stdio: ['ignore', 'pipe', 'pipe'],
   });

@@ -99,7 +99,7 @@ macOS 会把这份 App 保存为例外，以后可以正常双击。公司或学
   mindspark.db          SQLite 地图
   maps/                 拖到图上的图片
   server.log            Node 标准输出 / 错误
-  ops.log               短操作日志（可能含地图标题、节点文字前 40 字）
+  ops.log               短操作日志（只有操作名、id 和布局/主题等设置，不含节点文字）
   overlay.log           原生浮层事件
 ```
 
@@ -152,7 +152,7 @@ Roc Mind Spark 是本机浮层。它 **不是**“完全离线”，也 **不会
 
 - **保存在这台 Mac：** 地图、图片、日志、语言、快捷键、登录时启动
 - **在界面里显示：** 你编辑的图、设置、菜单栏
-- **给人工诊断：** `server.log`、`ops.log`、`overlay.log`（ops 行可能含标题和节点文字片段）
+- **给人工诊断：** `server.log`、`ops.log`、`overlay.log`（ops 行只有操作名和 id，不含节点文字）
 - **只有你主动触发才会出机器：** LLM 调用（API key 在 WKWebView `localStorage`）、DOI 查询（Crossref）、网站图标（DuckDuckGo）、以及你打开的 http(s) 链接，包括 GitHub 仓库/issue 链接。Mac 产品不启用继承来的 GitHub cloud 或 OAuth。
 
 第一次启动会打开 **登录时启动**。到设置里可以关。完整说明见 [PRIVACY.md](PRIVACY.md)。
@@ -178,7 +178,6 @@ Roc Mind Spark 是本机浮层。它 **不是**“完全离线”，也 **不会
 | `web/server.js` | 只监听回环的 Node + SQLite 服务 |
 | `scripts/` | 打包和安装 `.app` |
 | `web/test/` | 画布单测 |
-| `web/worker/` | 测试会用到的 inherited/internal 代码，**不是**受支持的部署面 |
 | `docs/FEATURES.md` | 产品功能清单（英文） |
 | `docs/FEATURES.zh.md` | 产品功能清单（中文） |
 | `docs/RELEASING.md` | 维护者发布清单 |

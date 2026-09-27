@@ -1,8 +1,9 @@
 'use strict';
 /**
  * Append-only operation log for reproducing bugs from the overlay App.
- * One short line per action. Rotation: every 7 days, if the file is over
- * 10MB, keep only the last 100 lines.
+ * One short line per action, with ids and settings but no user text.
+ * Rotation: every 7 days, if the file is over 10MB, keep only the last
+ * 100 lines.
  */
 const fs = require('node:fs');
 const path = require('node:path');
@@ -24,11 +25,12 @@ function formatOp(ev) {
   const t = Number.isFinite(ev.t) ? new Date(ev.t) : new Date();
   const iso = Number.isNaN(t.getTime()) ? new Date().toISOString() : t.toISOString();
   const parts = [iso, clip(ev.op || '?', 32)];
-  for (const k of ['map', 'id', 'parent', 'sel', 'from', 'to', 'key', 'layout', 'look', 'theme', 'zoom', 'dir', 'mode']) {
+  // Ids, counts and view settings only. A `text` field (sent by older
+  // canvases) is ignored: the log must not hold node text or map titles.
+  for (const k of ['map', 'id', 'parent', 'sel', 'from', 'to', 'key', 'layout', 'look', 'theme', 'zoom', 'dir', 'mode', 'count']) {
     if (ev[k] == null || ev[k] === '') continue;
     parts.push(k + '=' + clip(ev[k], 40));
   }
-  if (ev.text) parts.push('"' + clip(ev.text, 40).replace(/"/g, '') + '"');
   return parts.join(' ').slice(0, 240);
 }
 
