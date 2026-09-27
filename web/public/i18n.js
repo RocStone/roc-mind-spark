@@ -286,6 +286,7 @@
       kbEsc: 'Save the edit / close a popup',
       kbUndo: 'Undo',
       kbRedo: 'Redo',
+      pastedNodes: 'Pasted {n} nodes',
     },
     zh: {
       brand: 'Roc Mind Spark',
@@ -567,6 +568,7 @@
       kbEsc: '保存编辑 / 关闭弹层',
       kbUndo: '撤销',
       kbRedo: '重做',
+      pastedNodes: '已粘贴 {n} 个节点',
     },
   };
 

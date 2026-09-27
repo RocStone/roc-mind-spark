@@ -3761,7 +3761,7 @@ function selectionMarkdownPayload(){
   return buildSelectionMarkdown([...multiSel], map.nodes, map.rootId);
 }
 function copySelectionAsMarkdown(){
-  const md=selectionMarkdownPayload();
+  const md=typeof nodeSelectionClipboard==='function' && multiSel && multiSel.size>=2 ? nodeSelectionClipboard().text : selectionMarkdownPayload();
   if(!md) return false;
   if(typeof writeClipboardText==='function' && writeClipboardText(md)){
     toast(rmsTr('copiedAsMd','Copied as Markdown'));
@@ -4005,6 +4005,166 @@ function buildSelectionMarkdown(ids, nodes, rootId){
   };
   roots.forEach(id=>walk(id, 0));
   return lines.join('\n');
+}
+
+/* ============================================================
+   Node clipboard — copy/paste whole subtrees.
+   Text on the clipboard is always the Markdown outline (portable,
+   works through the native shell which only carries a string). A JSON
+   snapshot rides along as NODE_CLIP_MIME where the browser allows it
+   and in memory (lastNodeClip) so pasting what we just copied keeps
+   notes, markers, colors and links exactly.
+   ============================================================ */
+const NODE_CLIP_MIME='application/x-rms-nodes';
+let _lastNodeClip=null;   // {text, clip}
+function rememberNodeClip(text, clip){ _lastNodeClip = text && clip ? {text:String(text), clip} : null; }
+function lastNodeClipFor(text){
+  if(!_lastNodeClip || text==null) return null;
+  const norm=s=>String(s).replace(/\r\n?/g,'\n').trim();
+  return norm(text)===norm(_lastNodeClip.text) ? _lastNodeClip.clip : null;
+}
+// Snapshot of the subtrees under `rootIds`. With `onlyIds`, only those nodes
+// are kept (a multi-selection copies what is selected, like its Markdown).
+function serializeNodeClip(rootIds, nodes, onlyIds, links){
+  const out={v:1, roots:[], nodes:{}, links:[]};
+  if(!nodes) return out;
+  const only=onlyIds ? new Set(onlyIds) : null;
+  const kids={};
+  for(const k in nodes){ const p=nodes[k] && nodes[k].parent; if(p!=null) (kids[p]||(kids[p]=[])).push(k); }
+  const walk=id=>{
+    if(out.nodes[id] || !nodes[id] || (only && !only.has(id))) return;
+    const c={...nodes[id]};
+    delete c.x; delete c.y;
+    out.nodes[id]=c;
+    (kids[id]||[]).forEach(walk);
+  };
+  (rootIds||[]).forEach(id=>{
+    if(!nodes[id] || out.nodes[id]) return;
+    out.roots.push(id);
+    walk(id);
+  });
+  out.roots.forEach(id=>{ if(out.nodes[id]) out.nodes[id].parent=null; });
+  (links||[]).forEach(l=>{ if(l && out.nodes[l.from] && out.nodes[l.to]) out.links.push({...l}); });
+  return out;
+}
+function isNodeClip(clip){
+  return !!(clip && Array.isArray(clip.roots) && clip.roots.length && clip.nodes && typeof clip.nodes==='object'
+    && clip.roots.every(r=>clip.nodes[r]));
+}
+// Clone a clip under `parentId` with fresh ids. Mutates `nodes` (and `links`
+// when given). Returns the new ids in document order; the first is the first root.
+function cloneNodeClipInto(clip, parentId, nodes, makeId, links){
+  if(!isNodeClip(clip) || !nodes || !nodes[parentId]) return [];
+  const parent=nodes[parentId];
+  const parentIsRoot=parent.parent==null;
+  let sideCount=0;
+  if(parentIsRoot) for(const k in nodes) if(nodes[k] && nodes[k].parent===parentId) sideCount++;
+  const kids={};
+  for(const k in clip.nodes){ const p=clip.nodes[k] && clip.nodes[k].parent; if(p!=null) (kids[p]||(kids[p]=[])).push(k); }
+  const idMap={}, created=[], now=Date.now();
+  const place=(oldId, newParent, side)=>{
+    const src=clip.nodes[oldId];
+    if(!src || idMap[oldId]) return;
+    const id=makeId();
+    idMap[oldId]=id;
+    const n={...src, id, parent:newParent, side, x:parent.x||0, y:parent.y||0, created:now, updated:now};
+    nodes[id]=n;
+    created.push(id);
+    (kids[oldId]||[]).forEach(k=>place(k, id, side));
+  };
+  clip.roots.forEach(r=>{
+    const side=parentIsRoot ? (sideCount++%2 ? 'left' : 'right') : (parent.side && parent.side!=='root' ? parent.side : 'right');
+    place(r, parentId, side);
+  });
+  if(parent.collapsed) parent.collapsed=false;
+  if(links && Array.isArray(clip.links)){
+    clip.links.forEach(l=>{ if(l && idMap[l.from] && idMap[l.to]) links.push({...l, from:idMap[l.from], to:idMap[l.to]}); });
+  }
+  return created;
+}
+// Is this clipboard text an outline (bullets / headings / indented lines)
+// rather than one piece of text to put in a node?
+function isOutlineClipboardText(text){
+  const lines=String(text==null?'':text).replace(/\r\n?/g,'\n').split('\n').filter(l=>l.trim());
+  if(lines.length<2) return false;
+  const structural=l=>/^\s*(?:[-*+]|\d+[.)])\s+\S/.test(l) || /^#{1,6}\s+\S/.test(l);
+  const count=lines.filter(structural).length;
+  if(count>=2) return true;
+  if(count>=1 && /^#{1,6}\s+\S/.test(lines[0])) return true;
+  // A plain indented outline (tabs/spaces, no bullets), as other outliners copy it.
+  return count===0 && /^\S/.test(lines[0]) && lines.some(l=>/^[ \t]+\S/.test(l));
+}
+// Parse outline text into a clip (same shape as serializeNodeClip).
+function outlineTextToNodeClip(text){
+  let src=String(text==null?'':text).replace(/\r\n?/g,'\n');
+  const lines=src.split('\n');
+  const anyStructural=lines.some(l=>/^\s*(?:[-*+]|\d+[.)])\s+\S/.test(l) || /^#{1,6}\s+\S/.test(l));
+  if(!anyStructural){
+    src=lines.filter(l=>l.trim()).map(l=>{
+      const ind=(l.match(/^[ \t]*/)||[''])[0].replace(/\t/g,'  ');
+      return ind+'- '+l.trim();
+    }).join('\n');
+  }
+  // "1) item" is a list in most outliners; the Markdown parser wants "1."
+  src=src.replace(/^(\s*)(\d+)\)\s+/gm, '$1$2. ');
+  const SENT='⁣rms-paste';
+  const parsed=parseMarkdownOutline(src, SENT);
+  const nodes=parsed.nodes;
+  const root=nodes[parsed.rootId];
+  let roots;
+  if(root && root.text===SENT){
+    roots=Object.keys(nodes).filter(k=>nodes[k].parent===parsed.rootId);
+    delete nodes[parsed.rootId];
+  } else roots=[parsed.rootId];
+  roots.forEach(r=>{ if(nodes[r]) nodes[r].parent=null; });
+  return {v:1, roots, nodes, links:[]};
+}
+// What ⌘C puts on the clipboard for the node selection (no editor open):
+// the Markdown outline, plus a snapshot that paste can clone from.
+function nodeSelectionClipboard(){
+  if(typeof map==='undefined' || !map || !map.nodes) return {text:'', clip:null};
+  const nodes=map.nodes;
+  if(typeof multiSel!=='undefined' && multiSel && multiSel.size>=2){
+    const ids=[...multiSel].filter(id=>nodes[id]);
+    const text=buildSelectionMarkdown(ids, nodes, map.rootId);
+    const roots=[];
+    if(ids.includes(map.rootId)) roots.push(map.rootId);
+    selectionMoveRoots(orderIdsByNodeKeys(ids, nodes), nodes, map.rootId).forEach(id=>{ if(!roots.includes(id)) roots.push(id); });
+    const clip=serializeNodeClip(roots, nodes, ids, map.links);
+    rememberNodeClip(text, clip);
+    return {text, clip};
+  }
+  if(typeof sel==='undefined' || !sel || !nodes[sel]) return {text:'', clip:null};
+  const clip=serializeNodeClip([sel], nodes, null, map.links);
+  const ids=Object.keys(clip.nodes);
+  const text=ids.length>1 ? buildSelectionMarkdown(ids, nodes, null) : nodeClipboardPlain(nodes[sel]);
+  rememberNodeClip(text, clip);
+  return {text, clip};
+}
+// ⌘V on a selected node with no editor open: paste a copied subtree or a
+// Markdown outline as children. Returns false when the text should go into
+// the node as plain text (today's single-line behavior).
+function pasteNodesAsChildren(text, clip){
+  if(typeof READONLY!=='undefined' && READONLY) return false;
+  if(!map || !map.nodes || !sel || !map.nodes[sel]) return false;
+  const parentId=sel;
+  const parentNode=map.nodes[parentId];
+  if(parentNode.hr) return false;
+  if(!isNodeClip(clip)) clip=lastNodeClipFor(text);
+  if(!isNodeClip(clip)){
+    if(!isOutlineClipboardText(text)) return false;
+    try{ clip=outlineTextToNodeClip(text); }catch(_){ return false; }
+    if(!isNodeClip(clip)) return false;
+  }
+  if(!map.links) map.links=[];
+  const created=cloneNodeClipInto(clip, parentId, map.nodes, uid, map.links);
+  if(!created.length) return false;
+  opLog('pasteNodes', {parent:parentId, count:created.length});
+  pushHistory();
+  autoLayout();
+  select(created[0]);
+  toast(rmsTr('pastedNodes','Pasted {n} nodes').replace('{n}', created.length));
+  return true;
 }
 
 /* ============================================================
@@ -5886,11 +6046,16 @@ function onEditorClipboardKeydown(e){
 }
 function editorClipboardPayload(textEl){
   if(textEl){
+    if(typeof rememberNodeClip==='function') rememberNodeClip(null);
     return editorCopyPayload({
       selectedText: editorSelectedText(textEl),
       allText: textEl.value != null && textEl.tagName === 'TEXTAREA' ? textEl.value : (textEl.textContent || ''),
       selectAllPending: peekEditReplaceAll()
     });
+  }
+  if(typeof nodeSelectionClipboard==='function'){
+    const c=nodeSelectionClipboard();
+    if(c.text) return c.text;
   }
   if(typeof selectionMarkdownPayload==='function'){
     const md=selectionMarkdownPayload();
@@ -5908,6 +6073,10 @@ function onEditorCopyCut(e, isCut){
   if(!payload) return;
   if(e.clipboardData){
     try{ e.clipboardData.setData('text/plain', payload); }catch(_){}
+    if(!textEl && typeof lastNodeClipFor==='function'){
+      const clip=lastNodeClipFor(payload);
+      if(clip) try{ e.clipboardData.setData(NODE_CLIP_MIME, JSON.stringify(clip)); }catch(_){}
+    }
     e.preventDefault();
   } else {
     writeClipboardText(payload);
@@ -5946,6 +6115,11 @@ function onEditorPaste(e){
     return;
   }
   if(typeof sel === 'undefined' || !sel || typeof map === 'undefined' || !map || !map.nodes || !map.nodes[sel]) return;
+  if(typeof pasteNodesAsChildren === 'function'){
+    let clip=null;
+    try{ const raw=dt && dt.getData ? dt.getData(NODE_CLIP_MIME) : ''; if(raw) clip=JSON.parse(raw); }catch(_){ clip=null; }
+    if(pasteNodesAsChildren(text, clip)){ e.preventDefault(); return; }
+  }
   if(map.nodes[sel].hr || map.nodes[sel].html) return;
   e.preventDefault();
   if(typeof startEdit === 'function'){
@@ -5970,6 +6144,7 @@ function rmsClipboardCopy(){
   if(valueField) return fieldSelectedText(valueField);
   const target = openClipboardTarget();
   if(target){
+    if(typeof rememberNodeClip==='function') rememberNodeClip(null);
     const inNotes = !!(target.closest && target.closest('.notes-popup'));
     const selected = editorSelectedText(target);
     return editorCopyPayload({
@@ -5977,6 +6152,10 @@ function rmsClipboardCopy(){
       allText: target.textContent || '',
       selectAllPending: inNotes ? !selected : peekEditReplaceAll()
     }) || '';
+  }
+  if(typeof nodeSelectionClipboard==='function' && typeof multiSel!=='undefined' && multiSel && multiSel.size>=2){
+    const c=nodeSelectionClipboard();
+    if(c.text) return c.text;
   }
   if(typeof selectionMarkdownPayload==='function'){
     const md=selectionMarkdownPayload();
@@ -6063,6 +6242,7 @@ function rmsClipboardPaste(text){
     return true;
   }
   if(typeof sel === 'undefined' || !sel || typeof map === 'undefined' || !map || !map.nodes || !map.nodes[sel]) return false;
+  if(typeof pasteNodesAsChildren === 'function' && pasteNodesAsChildren(str, null)) return true;
   if(map.nodes[sel].hr || map.nodes[sel].html) return false;
   if(typeof startEdit === 'function'){
     startEdit(sel);
