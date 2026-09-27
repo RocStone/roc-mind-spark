@@ -402,7 +402,9 @@ async function initStore(){
 
 /* ---------- helpers ---------- */
 const $=s=>document.querySelector(s);
-const uid=()=>Math.random().toString(36).slice(2,9);
+// Letter prefix: an all-digit id is an "array index" key, and JS objects
+// enumerate those first in numeric order — that would reorder siblings.
+const uid=()=>'n'+Math.random().toString(36).slice(2,9);
 // Per-node marker badges (issue #13). A deliberately small, curated set
 // rather than a full emoji keyboard: these are meant to be scannable at a
 // glance across a whole map, which stops working once there are hundreds of

@@ -68,6 +68,11 @@ describe('restore() keeps the selection pointing at real nodes', () => {
   });
 });
 
+test('uid() never yields an all-digit id (object key order)', () => {
+  const uid = extractConst('uid');
+  for (let i = 0; i < 2000; i++) assert.match(uid(), /^[a-z]/);
+});
+
 describe('history snapshot covers layout settings', () => {
   test('MAP_HISTORY_KEYS includes the layout fields and not pinned', () => {
     const keys = extractConst('MAP_HISTORY_KEYS');
