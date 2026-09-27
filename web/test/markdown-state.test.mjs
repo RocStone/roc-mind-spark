@@ -4,7 +4,7 @@ import { loadFns, extractFunction, extractConst } from './helpers/load-app-fns.m
 
 function parser(){
   let counter=0;
-  return loadFns(['parseMarkdownOutline','mdInlineToHtml','escapeHtml'],{uid:()=>`new-${++counter}`,INLINE_HTML_RE:extractConst('INLINE_HTML_RE')}).parseMarkdownOutline;
+  return loadFns(['parseMarkdownOutline','mdInlineToHtml','escapeHtml','safeColor'],{uid:()=>`new-${++counter}`,INLINE_HTML_RE:extractConst('INLINE_HTML_RE'),SAFE_COLOR_NAMES:extractConst('SAFE_COLOR_NAMES')}).parseMarkdownOutline;
 }
 
 describe('Markdown editor node identity',()=>{

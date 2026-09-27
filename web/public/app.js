@@ -1233,13 +1233,44 @@ const ENTITY_RE = /&(#\d+|#x[0-9a-fA-F]+|[a-zA-Z][a-zA-Z0-9]+);/;
 const hasInlineMarkup = t => INLINE_HTML_RE.test(t||'') || ENTITY_RE.test(t||'');
 // Sanitize HTML: keep only a small inline-formatting whitelist; strip everything else
 const SAFE_TAGS = new Set(['b','i','u','s','strong','em','br','a','span','font','div','ul','ol','li','p','sub','sup','code','kbd','mark','ins','del','small','abbr']);
-function sanitizeInlineHTML(html, extraTags){
+// Colors from the map model end up inside style="" / fill="" attributes and canvas
+// fillStyle, so only well-formed color literals pass. Returns '' for anything else.
+const SAFE_COLOR_NAMES = new Set(['transparent','currentcolor','black','white','red','green','blue','yellow',
+  'orange','purple','pink','gray','grey','brown','cyan','magenta','navy','teal','olive','maroon','lime',
+  'aqua','fuchsia','silver','gold','indigo','violet','coral','salmon','tomato','crimson','khaki','beige']);
+function safeColor(c){
+  if(typeof c!=='string') return '';
+  const v=c.trim();
+  if(/^#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(v)) return v;
+  const num='\\s*[+-]?(?:\\d+\\.?\\d*|\\.\\d+)(?:%|deg)?\\s*';
+  const fn=new RegExp('^(?:rgba?|hsla?)\\(('+num+')(?:,('+num+')){2,3}\\)$','i');
+  const fnSpace=new RegExp('^(?:rgba?|hsla?)\\((?:'+num+'){3}(?:/'+num+')?\\)$','i');
+  if(fn.test(v) || fnSpace.test(v)) return v;
+  if(SAFE_COLOR_NAMES.has(v.toLowerCase())) return v;
+  return '';
+}
+// Only these link schemes may become clickable (<a href>) or be handed to the
+// native opener: javascript:/file:/custom app schemes render as plain text.
+function isSafeLinkUrl(url, allowMailto){
+  const u=String(url==null?'':url).trim();
+  if(/^https?:\/\/[^\s]/i.test(u)) return true;
+  return allowMailto!==false && /^mailto:[^\s]/i.test(u);
+}
+// opts (all optional): { img:true } keeps <img> src/alt when the src is http(s),
+// data:image/ or a same-origin /api/ path; { mailto:true } also accepts mailto: links;
+// { classes:RegExp } keeps class names matching it; { style:RegExp } narrows the
+// allowed inline-style properties (default: the formatting set below).
+function sanitizeInlineHTML(html, extraTags, opts){
   // Parse INERTLY via <template>: its contents live in a document with no
   // browsing context, so smuggled resource-loaders like <img src=x onerror=…>
   // never fetch/fire during parsing. (A detached <div>.innerHTML still would.)
   const tpl = document.createElement('template');
   tpl.innerHTML = html || '';
+  const o = opts || {};
   const allow = extraTags ? new Set([...SAFE_TAGS, ...extraTags]) : SAFE_TAGS;
+  const styleRe = o.style || /^(color|background-color|font-weight|font-style|text-decoration|font-size|text-align)$/i;
+  const hrefOk = v => isSafeLinkUrl(v, !!o.mailto);
+  const srcOk = v => /^(https?:\/\/|data:image\/|\/api\/)/i.test(String(v||'').trim());
   const walk = (node) => {
     [...node.childNodes].forEach(child => {
       if(child.nodeType === 1){
@@ -1256,19 +1287,28 @@ function sanitizeInlineHTML(html, extraTags){
         [...child.attributes].forEach(attr => {
           const n = attr.name.toLowerCase();
           if(n.startsWith('on')) child.removeAttribute(attr.name);
-          else if(tag==='a' && n==='href'){
-            if(!/^https?:\/\//i.test(attr.value)) child.removeAttribute(attr.name);
+          else if(n==='href'){
+            if(tag!=='a' || !hrefOk(attr.value)) child.removeAttribute(attr.name);
+          }
+          else if(tag==='img' && o.img && (n==='src' || n==='alt')){
+            if(n==='src' && !srcOk(attr.value)) child.removeAttribute(attr.name);
+          }
+          else if(n==='class' && o.classes){
+            const keep = attr.value.split(/\s+/).filter(c => c && o.classes.test(c)).join(' ');
+            if(keep) child.setAttribute('class', keep); else child.removeAttribute('class');
           }
           else if(n==='style'){
             // Allow only color / background-color / font-weight / font-style / text-decoration / font-size / text-align
+            // (or the narrower opts.style set); url()/expression() values are never kept.
             const safe = attr.value
               .split(';').map(s=>s.trim()).filter(Boolean)
-              .filter(s=>/^(color|background-color|font-weight|font-style|text-decoration|font-size|text-align)\s*:/i.test(s))
+              .filter(s=>{ const i=s.indexOf(':'); return i>0 && styleRe.test(s.slice(0,i).trim()) && !/url\s*\(|expression\s*\(|[\\<>]/i.test(s.slice(i+1)); })
               .join('; ');
             if(safe) child.setAttribute('style', safe); else child.removeAttribute('style');
           }
-          else if(!['href','target','rel','color','face','size'].includes(n)) child.removeAttribute(attr.name);   // note: class removed — pasted HTML must not claim app CSS classes
+          else if(!['target','rel','color','face','size','title','colspan','rowspan'].includes(n)) child.removeAttribute(attr.name);   // note: class removed — pasted HTML must not claim app CSS classes
         });
+        if(tag==='img' && !(o.img && child.getAttribute('src'))){ node.removeChild(child); return; }
         if(tag==='a'){ child.setAttribute('target','_blank'); child.setAttribute('rel','noopener noreferrer'); }
         walk(child);
       } else if(child.nodeType === 8){
@@ -1288,6 +1328,73 @@ const NOTES_TAGS = ['h1','h2','h3','blockquote','pre','code','table','thead','tb
 // promote a hidden <script> to the top level where a snapshotted loop misses it.
 const DROP_TAGS = new Set(['script','style','iframe','object','embed','noscript','svg','math','template','link','meta','base','frame','frameset','title','xmp']);
 function sanitizeNotes(html){ return sanitizeInlineHTML(html, NOTES_TAGS); }
+
+// ---- Map-level sanitizing: every map that enters from outside (import, store,
+// share link, live peer) passes through here before anything renders it.
+const SAFE_NODE_ID_RE = /^[\w-]+$/;
+// Block nodes (n.html) legitimately hold tables, code blocks, frontmatter tables and
+// raw Markdown HTML blocks; keep those tags so Markdown export still round-trips.
+const NODE_HTML_TAGS = ['h1','h2','h3','h4','h5','h6','blockquote','pre','code','hr','img','table','thead','tbody','tr','th','td','details','summary','figure','figcaption'];
+// Only rewrite stored HTML when sanitizing actually removed something: harmless
+// content keeps its exact bytes (entities, spacing) so nothing drifts on load.
+function _sanitizeStoredHtml(html, clean){
+  if(typeof html!=='string' || !html) return html;
+  const tpl=document.createElement('template'); tpl.innerHTML=html;
+  const holder=document.createElement('div'); holder.appendChild(tpl.content);
+  return clean===holder.innerHTML ? html : clean;
+}
+function sanitizeMapNode(n){
+  if(!n || typeof n!=='object') return null;
+  for(const f of ['color','textColor','highlight']){
+    if(n[f]==null || n[f]==='') continue;
+    const c=safeColor(n[f]);
+    if(c) n[f]=c; else delete n[f];
+  }
+  // n.text is plain text unless hasInlineMarkup() says HTML (see renderNodeText);
+  // plain text is always rendered as text, so only the HTML form needs cleaning.
+  if(typeof n.text==='string' && /</.test(n.text) && hasInlineMarkup(n.text)) n.text=_sanitizeStoredHtml(n.text, sanitizeInlineHTML(n.text));
+  else if(n.text!=null && typeof n.text!=='string') n.text=String(n.text);
+  if(typeof n.notes==='string' && /</.test(n.notes)) n.notes=_sanitizeStoredHtml(n.notes, sanitizeNotes(n.notes));
+  else if(n.notes!=null && typeof n.notes!=='string') delete n.notes;
+  if(typeof n.html==='string' && n.html) n.html=_sanitizeStoredHtml(n.html, sanitizeInlineHTML(n.html, NODE_HTML_TAGS, { img:true, mailto:true, classes:/^[\w-]+$/ }));
+  else if(n.html!=null && typeof n.html!=='string') delete n.html;
+  return n;
+}
+function sanitizeMap(m){
+  if(!m || typeof m!=='object') return m;
+  if(m.color!=null) m.color=safeColor(m.color)||'#e0613a';
+  const src=(m.nodes && typeof m.nodes==='object') ? m.nodes : {};
+  // Node ids end up in data-id attributes and CSS selectors, so they must be plain
+  // word characters; anything else gets a fresh id with its references updated.
+  const keys=Object.keys(src);
+  const used=new Set(keys.filter(k=>SAFE_NODE_ID_RE.test(k)));
+  const remap={};
+  keys.forEach(k=>{
+    if(SAFE_NODE_ID_RE.test(k)) return;
+    let id; do{ id=uid(); }while(used.has(id));
+    used.add(id); remap[k]=id;
+  });
+  const fix=ref=>{
+    if(ref==null) return ref;
+    const r=String(ref);
+    if(Object.prototype.hasOwnProperty.call(remap, r)) return remap[r];
+    return SAFE_NODE_ID_RE.test(r) ? ref : null;
+  };
+  const nodes={};
+  keys.forEach(k=>{
+    const n=sanitizeMapNode(src[k]); if(!n) return;
+    const id=remap[k]||k;
+    n.id=id;
+    if(n.parent!=null) n.parent=fix(n.parent);
+    nodes[id]=n;
+  });
+  m.nodes=nodes;
+  if(m.rootId!=null) m.rootId=fix(m.rootId);
+  if(Array.isArray(m.links)){
+    m.links=m.links.filter(l=>l && typeof l==='object').map(l=>({ ...l, from:fix(l.from), to:fix(l.to) })).filter(l=>l.from!=null && l.to!=null);
+  }
+  return m;
+}
 
 function isTableNode(n){
   if(!n || n.frontmatter) return false;
@@ -3045,16 +3152,17 @@ function renderMdList(items, itemFn){
 // (via the existing dependency-free latexToMathML(), same one the canvas nodes use). Used by
 // mdToHtml() for the Markdown preview and PDF export — NOT by the parser: node text must keep
 // math as literal $...$ source (see htmlToInlineMd's comment) so it stays editable/round-trips.
-function mdInlineToHtmlWithMath(txt){
+function mdInlineToHtmlWithMath(txt, slotsOut){
   if(!txt || txt.indexOf('$')<0) return mdInlineToHtml(txt);
   const re=new RegExp(MATH_DELIM_RE.source,'g');
-  const slots=[];
+  const slots=slotsOut || [];
   const masked = txt.replace(re, (full,dd,inl)=>{
     const tex = dd!=null ? dd : inl, display = dd!=null;
     let mathml=null; try{ mathml=latexToMathML(tex, display); }catch(e){ mathml=null; }
     slots.push(mathml!=null ? mathml : escapeHtml(full));   // fall back to the raw text if it doesn't parse as LaTeX
     return '\uE000'+(slots.length-1)+'\uE001';               // PUA placeholder survives markdown/HTML processing untouched
   });
+  if(slotsOut) return mdInlineToHtml(masked);   // caller substitutes after sanitizing (see mdToHtml)
   return mdInlineToHtml(masked).replace(/\uE000(\d+)\uE001/g, (m,idx)=> slots[+idx]!=null ? slots[+idx] : '');
 }
 function mdToHtml(md){
@@ -3071,19 +3179,21 @@ function mdToHtml(md){
     break;
   }
   const L=md.split('\n'); const out=frontHtml?[frontHtml]:[]; let i=0;
+  const mathSlots=[];   // rendered MathML, spliced back in only after sanitizing (see end)
+  const inl=x=>mdInlineToHtmlWithMath(x, mathSlots);
   const esc=x=>x.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-  const item=x=>mdInlineToHtmlWithMath(x.replace(/^\s*([-*+]|\d+\.)\s+/,'').replace(/^\[[ ]\]\s/,'\u2610 ').replace(/^\[[xX]\]\s/,'\u2611 '));
+  const item=x=>inl(x.replace(/^\s*([-*+]|\d+\.)\s+/,'').replace(/^\[[ ]\]\s/,'\u2610 ').replace(/^\[[xX]\]\s/,'\u2611 '));
   const cells=r=>r.replace(/^\s*\|?/,'').replace(/\|?\s*$/,'').split('|').map(c=>c.trim());
-  const tbl=rows=>'<table><thead><tr>'+cells(rows[0]).map(h=>'<th>'+mdInlineToHtmlWithMath(h)+'</th>').join('')+'</tr></thead><tbody>'+rows.slice(2).map(r=>'<tr>'+cells(r).map(c=>'<td>'+mdInlineToHtmlWithMath(c)+'</td>').join('')+'</tr>').join('')+'</tbody></table>';
+  const tbl=rows=>'<table><thead><tr>'+cells(rows[0]).map(h=>'<th>'+inl(h)+'</th>').join('')+'</tr></thead><tbody>'+rows.slice(2).map(r=>'<tr>'+cells(r).map(c=>'<td>'+inl(c)+'</td>').join('')+'</tr>').join('')+'</tbody></table>';
   while(i<L.length){
     let line=L[i];
     if(!line.trim()){ i++; continue; }
     let fm=line.match(/^\s*(```+|~~~+)(.*)$/);
     if(fm){ const buf=[]; let j=i+1; while(j<L.length && !/^\s*(```+|~~~+)\s*$/.test(L[j])){ buf.push(L[j]); j++; } out.push('<pre class="mp-code"><code>'+esc(buf.join('\n'))+'</code></pre>'); i=j+1; continue; }
     let h=line.match(/^(#{1,6})\s+(.*)$/);
-    if(h){ out.push('<h'+h[1].length+'>'+mdInlineToHtmlWithMath(h[2])+'</h'+h[1].length+'>'); i++; continue; }
+    if(h){ out.push('<h'+h[1].length+'>'+inl(h[2])+'</h'+h[1].length+'>'); i++; continue; }
     if(/^\s*([-*_])(?:[ \t]*\1){2,}[ \t]*$/.test(line)){ out.push('<hr>'); i++; continue; }
-    if(/^\s*>/.test(line)){ const buf=[]; while(i<L.length && /^\s*>/.test(L[i])){ buf.push(L[i].replace(/^\s*>\s?/,'')); i++; } out.push('<blockquote>'+mdInlineToHtmlWithMath(buf.join('<br>'))+'</blockquote>'); continue; }
+    if(/^\s*>/.test(line)){ const buf=[]; while(i<L.length && /^\s*>/.test(L[i])){ buf.push(L[i].replace(/^\s*>\s?/,'')); i++; } out.push('<blockquote>'+inl(buf.join('<br>'))+'</blockquote>'); continue; }
     if(line.includes('|') && i+1<L.length && /-/.test(L[i+1]) && /^[\s|:\-]+$/.test(L[i+1])){ const rows=[]; while(i<L.length && L[i].includes('|') && L[i].trim()){ rows.push(L[i]); i++; } out.push(tbl(rows)); continue; }
     if(/^\s*<(table|div|details|figure|section|img|hr|blockquote|p|h[1-6]|ul|ol)\b/i.test(line)){ const tm=line.match(/^\s*<([a-z0-9]+)/i), tag=tm?tm[1].toLowerCase():''; const buf=[line];
       const VOID=/^(img|hr|br|input|source|col|area|embed|track|wbr|link|meta)$/;
@@ -3093,10 +3203,42 @@ function mdToHtml(md){
     if(im){ out.push('<img alt="'+esc(im[1])+'" src="'+esc(im[2])+'">'); i++; continue; }
     if(/^\s*([-*+]|\d+\.)\s+/.test(line)){ const items=[]; while(i<L.length && (/^\s*([-*+]|\d+\.)\s+/.test(L[i]) || (L[i].trim() && /^\s{2,}\S/.test(L[i])))){ items.push(L[i]); i++; } out.push(renderMdList(items,item)); continue; }
     const buf=[line]; i++; while(i<L.length && L[i].trim() && !/^\s*(#{1,6}\s|[-*+]\s|\d+\.\s|>|```|~~~|\||<)/.test(L[i])){ buf.push(L[i]); i++; }
-    out.push('<p>'+mdInlineToHtmlWithMath(buf.join(' '))+'</p>');
+    out.push('<p>'+inl(buf.join(' '))+'</p>');
   }
-  // final safety: strip event handlers / javascript: URLs
-  return out.join('\n').replace(/\son\w+="[^"]*"/gi,'').replace(/javascript:/gi,'');
+  // Final safety: whitelist-sanitize everything (raw HTML blocks included). A regex
+  // blacklist missed unquoted handlers like <img/src=x/onerror=1>.
+  return mdPreviewSanitize(out.join('\n'), mathSlots);
+}
+// Tags/attributes the Markdown preview and PDF may contain. Everything else is
+// unwrapped or dropped by sanitizeInlineHTML; <img> keeps only a safe src.
+const MD_PREVIEW_TAGS = ['h1','h2','h3','h4','h5','h6','blockquote','pre','code','hr','img',
+  'table','thead','tbody','tr','th','td','details','summary','figure','figcaption'];
+function mdPreviewSanitize(html, mathSlots){
+  const safe = sanitizeInlineHTML(html, MD_PREVIEW_TAGS,
+    { img:true, mailto:true, classes:/^mp-code$/, style:/^text-align$/i });
+  if(!mathSlots || !mathSlots.length || safe.indexOf('\uE000')<0) return safe;
+  // Math placeholders (\uE000n\uE001) survive sanitizing as plain text. Swap them for
+  // the MathML built by latexToMathML (every literal escaped there), but only inside
+  // text nodes, never inside an attribute value.
+  const PH=/\uE000(\d+)\uE001/g;
+  const tpl=document.createElement('template'); tpl.innerHTML=safe;
+  const walk=node=>{
+    [...node.childNodes].forEach(ch=>{
+      if(ch.nodeType===3){
+        const v=ch.nodeValue||''; if(v.indexOf('\uE000')<0) return;
+        const parts=v.split(/\uE000(\d+)\uE001/);
+        const htmlPart=parts.map((p,k)=> k%2 ? (mathSlots[+p]!=null ? mathSlots[+p] : '') : escapeHtml(p)).join('');
+        const t2=document.createElement('template'); t2.innerHTML=htmlPart;
+        node.insertBefore(t2.content, ch); node.removeChild(ch);
+      } else if(ch.nodeType===1){
+        [...ch.attributes].forEach(at=>{ if(at.value.indexOf('\uE000')>=0) ch.setAttribute(at.name, at.value.replace(PH,'')); });
+        walk(ch);
+      }
+    });
+  };
+  walk(tpl.content);
+  const outEl=document.createElement('div'); outEl.appendChild(tpl.content);
+  return outEl.innerHTML;
 }
 function mdWrapSel(before, after){ const ed=document.getElementById('mdEditor'); if(!ed) return; const s=ed.selectionStart,e=ed.selectionEnd,sel=ed.value.slice(s,e);
   ed.value=ed.value.slice(0,s)+before+sel+after+ed.value.slice(e);
@@ -4345,6 +4487,8 @@ function isRmsWk(){
 }
 function openExternalUrl(url){
   if(!url) return false;
+  // Same rule as Markdown links: only http(s)/mailto are handed to the native opener.
+  if(!isSafeLinkUrl(url)) return false;
   // WK: window.open(_blank) already goes through createWebViewWith →
   // NSWorkspace.open. createWebViewWith returns nil, so window.open is null
   // even though the page already opened. A fallback <a> click would open it
@@ -5202,14 +5346,26 @@ function renderGlobalResults(results, q){
   // Group by map
   const byMap={};
   results.forEach(r=>{ (byMap[r.mapId]=byMap[r.mapId]||{title:r.mapTitle, items:[]}).items.push(r); });
-  const re=new RegExp('('+q.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+')','ig');
+  // Highlight on the PLAIN snippet, then escape each piece: running the regex over
+  // already-escaped HTML could split an entity (&amp;) or match inside one.
+  const ql=String(q||'').toLowerCase();
+  const hl=snip=>{
+    const s=String(snip||''), low=s.toLowerCase();
+    if(!ql || low.length!==s.length) return escapeHtml(s);
+    let out='', from=0, at;
+    while((at=low.indexOf(ql, from))>=0){
+      out+=escapeHtml(s.slice(from,at))+'<mark>'+escapeHtml(s.slice(at,at+ql.length))+'</mark>';
+      from=at+ql.length;
+    }
+    return out+escapeHtml(s.slice(from));
+  };
   panel.innerHTML=`<div class="gs-head">${(results.length===1?rmsTr('matchAcross','%s match across %s map'):rmsTr('matchesAcross','%s matches across %s maps')).replace('%s', results.length).replace('%s', Object.keys(byMap).length)}</div>`+
     Object.entries(byMap).map(([mid,g])=>`
       <div class="gs-group">
         <div class="gs-map">${escapeHtml(g.title)}${mid===(map&&map.id)?' <span class="gs-cur">(current)</span>':''}</div>
         ${g.items.slice(0,8).map(it=>`
-          <button class="gs-item" data-map="${mid}" data-node="${it.nodeId}">
-            ${escapeHtml(it.snippet).replace(re,'<mark>$1</mark>')}
+          <button class="gs-item" data-map="${escapeHtml(String(mid))}" data-node="${escapeHtml(String(it.nodeId))}">
+            ${hl(it.snippet)}
           </button>`).join('')}
         ${g.items.length>8?`<div class="gs-more">+${g.items.length-8} more…</div>`:''}
       </div>`).join('');
@@ -5625,11 +5781,12 @@ function clipboardPlainText(dt){
   if(plain) return plain;
   let html = '';
   try{ html = dt.getData('text/html') || ''; }catch(_){}
-  if(!html || typeof document === 'undefined' || !document.createElement) return '';
+  if(!html || typeof DOMParser === 'undefined') return '';
   try{
-    const d = document.createElement('div');
-    d.innerHTML = html;
-    return (d.textContent || '').replace(/\u00A0/g, ' ');
+    // Inert parse: a DOMParser document has no browsing context, so clipboard HTML
+    // like <img src=x onerror=…> never loads or runs (a live <div> would).
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    return ((doc.body && doc.body.textContent) || '').replace(/\u00A0/g, ' ');
   }catch(_){ return ''; }
 }
 function nodeClipboardPlain(n){
@@ -6714,8 +6871,8 @@ function positionNodeBar(){
   const isRoot=sel===map.rootId;
   const hasKids=childrenOf(sel).length>0;
   const fs = n.fontSize || (isRoot?19:15);
-  const tc = n.textColor || (isRoot?'#ffffff':'#23201b');
-  const hl = n.highlight || 'transparent';
+  const tc = safeColor(n.textColor) || (isRoot?'#ffffff':'#23201b');
+  const hl = safeColor(n.highlight) || 'transparent';
 
   const bar=document.createElement('div'); bar.className='nodebar'; bar.id='nodebar';
   bar.innerHTML=`
@@ -6726,7 +6883,7 @@ function positionNodeBar(){
       <button data-a="edit" title="${chordTitle('scEditNode','editNode','Edit node')}">✎</button>
       <button data-a="notes" class="${(n.notes||'').trim()?'on':''}" title="${(n.notes||'').trim()?rmsTr('actNotesEdit','Edit notes'):rmsTr('actNotesAdd','Add notes')}">📝</button>
       <button data-a="task" class="${n.task?'on':''}" title="${rmsTr('actTask','Todo state')}">☑</button>
-      <button data-a="marker" class="${n.marker?'on':''}" title="${n.marker?rmsTr('actMarkerChange','Change marker'):rmsTr('actMarkerAdd','Add a marker')}">${n.marker||'\u2B50'}</button>
+      <button data-a="marker" class="${n.marker?'on':''}" title="${n.marker?rmsTr('actMarkerChange','Change marker'):rmsTr('actMarkerAdd','Add a marker')}">${n.marker?escapeHtml(String(n.marker)):'\u2B50'}</button>
       <button data-a="cite" class="${n.ref?'on':''}" title="${rmsTr('actCite','Cite')}">📖</button>
       <button data-a="href" class="${n.url?'on':''}" title="${n.url?rmsTr('actHrefEdit','Edit hyperlink'):rmsTr('actHrefAdd','Add hyperlink')}">🔗</button>
       <button data-a="image" class="${n.image?'on':''}" title="${rmsTr('actImage','Image')}">🖼</button>
@@ -8225,8 +8382,9 @@ function updateMinimap(){
     const n=map.nodes[id];
     const x=ox+(n.x-minx)*scale, y=oy+(n.y-miny)*scale;
     const w=Math.max(2,(n.w||120)*scale), h=Math.max(2,(n.h||40)*scale);
-    const col = id===map.rootId ? (map.color||'#e0613a')
-      : (n.color && n.color!=='#fff' && n.color!=='#ffffff') ? n.color : 'var(--line-2)';
+    const nc = safeColor(n.color);
+    const col = id===map.rootId ? (safeColor(map.color)||'#e0613a')
+      : (nc && nc!=='#fff' && nc!=='#ffffff') ? nc : 'var(--line-2)';
     return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" rx="1.5" fill="${col}" ${id===sel?'class="mm-sel"':''}/>`;
   }).join('');
   mm.innerHTML=`<svg viewBox="0 0 ${MM_W} ${MM_H}" width="${MM_W}" height="${MM_H}">${rects}<rect id="mmView" fill="none"/></svg>`;
@@ -8273,7 +8431,7 @@ function updateBreadcrumb(){
   bc.innerHTML=path.map((id,i)=>{
     const label=nodeTextPlain(map.nodes[id].text||'')||'(untitled)';
     const short=label.length>22 ? label.slice(0,22)+'…' : label;
-    const crumb=`<button class="bc-crumb${id===sel?' current':''}" data-id="${id}" title="${escapeHtml(label)}">${escapeHtml(short)}</button>`;
+    const crumb=`<button class="bc-crumb${id===sel?' current':''}" data-id="${escapeHtml(String(id))}" title="${escapeHtml(label)}">${escapeHtml(short)}</button>`;
     return crumb + (i<path.length-1 ? '<span class="bc-sep">›</span>' : '');
   }).join('');
   bc.querySelectorAll('.bc-crumb').forEach(b=>b.onclick=()=>{ select(b.dataset.id,false); centreOn(b.dataset.id); });
@@ -8329,6 +8487,7 @@ function openRowMenu(btn, m){
       const ed=document.getElementById('mdEditor'); if(ed) ed.value='';
     }
     refreshList(); toast(rmsTr('mapDeleted','Map deleted'));
+    try{ localStorage.removeItem('mindspark:vars:'+m.id); }catch(_){}
   };
   _rowPop=pop;
   _rowPopOut=(e)=>{ if(_rowPop && (!e || e.type!=='mousedown' || !_rowPop.contains(e.target))) closeRowMenu(); };
@@ -8361,7 +8520,7 @@ async function refreshList(){
   (idx||[]).forEach(m=>{
     const el=document.createElement('div');
     el.className='map-item'+(map&&m.id===map.id?' active':'')+(m.pinned?' pinned':'');
-    el.innerHTML=`<span class="dot" style="background:${m.color||'#e0613a'}"></span><span class="nm">${escapeHtml(m.title||rmsTr('untitled','Untitled'))}</span><button class="row-menu" title="${rmsTr('more','More')}" aria-haspopup="true" aria-label="${rmsTr('moreActions','More actions')}">\u22ee</button>`;
+    el.innerHTML=`<span class="dot" style="background:${safeColor(m.color)||'#e0613a'}"></span><span class="nm">${escapeHtml(m.title||rmsTr('untitled','Untitled'))}</span><button class="row-menu" title="${rmsTr('more','More')}" aria-haspopup="true" aria-label="${rmsTr('moreActions','More actions')}">\u22ee</button>`;
     el.style.cursor='pointer';
     el.onclick=()=>{ if(!map || map.id!==m.id) loadMap(m.id); };
     el.querySelector('.row-menu').onclick=ev=>{ ev.stopPropagation(); openRowMenu(ev.currentTarget, m); };
@@ -8387,7 +8546,7 @@ async function refreshList(){
       const badge = sm.mine
         ? '<span class="shared-badge" title="'+rmsTr('sharedByYou','Shared by you')+'">\uD83D\uDD17</span>'
         : '<span class="shared-badge" title="'+(sm.token?rmsTr('sharedWithYouEdit','Shared with you · editable'):rmsTr('sharedWithYouView','Shared with you · view only'))+'">'+(sm.token?'\u270F\uFE0F':'\uD83D\uDC41')+'</span>';
-      el.innerHTML='<span class="dot" style="background:'+(sm.color||'#e0613a')+'"></span>'+
+      el.innerHTML='<span class="dot" style="background:'+(safeColor(sm.color)||'#e0613a')+'"></span>'+
         '<span class="nm">'+escapeHtml(sm.title||'Shared map')+'</span>'+badge+
         '<button class="row-menu" title="'+rmsTr('more','More')+'" aria-haspopup="true" aria-label="'+rmsTr('moreActions','More actions')+'">\u22ee</button>';
       el.style.cursor='pointer';
@@ -8919,6 +9078,7 @@ async function loadMap(id){
   catch(e){ if(generation===_mapLoadGeneration) toast(rmsTr('couldNotOpenMap','Could not open map')); return false; }
   if(generation!==_mapLoadGeneration) return false;
   if(!m){ toast('Map not found'); return false; }
+  sanitizeMap(m);
   // Legacy migration: old maps may still store `comment` — promote it to `notes`
   for(const n of Object.values(m.nodes||{})){
     if(n.comment && !n.notes){
@@ -9291,9 +9451,9 @@ async function restoreVersion(mapId, ref){
 // Unknown top-level fields (layoutConfig, layoutParams, layoutPreset,
 // frontmatter, …) are carried over so a restore doesn't silently drop them.
 function normalizeLoadedMap(m){
-  return { ...m, id:m.id, title:m.title||'Untitled map', titleAuto:!!m.titleAuto, color:m.color||'#e0613a',
+  return sanitizeMap({ ...m, id:m.id, title:m.title||'Untitled map', titleAuto:!!m.titleAuto, color:m.color||'#e0613a',
            rootId:m.rootId, sameLevelColors:m.sameLevelColors, style:m.style, layout:m.layout||'balanced',
-           nodes:m.nodes||{}, links:m.links||[], vars:m.vars||{} };
+           nodes:m.nodes||{}, links:m.links||[], vars:m.vars||{} });
 }
 
 /* ============================================================
@@ -9679,6 +9839,7 @@ function importFile(){
         else { m=parseMarkdownOutline(t, f.name); }   // .md, .markdown, .txt
       }
       if(!m || !m.nodes || !m.rootId) throw new Error('No recognizable outline');
+      m=sanitizeMap(m);
       // Start collapsed so the user sees a clean top-level overview (unless the
       // format already carries its own expand state, e.g. .gmind).
       if(!preserveState){
@@ -9704,7 +9865,10 @@ function importFile(){
 function mdInlineToHtml(t){
   const hasHtml = INLINE_HTML_RE.test(t);    // raw inline HTML (<b>, <sub>, <a>, ...) present?
   const hasMd = /!\[[^\]]*\]\([^)]+\)|\*\*[^*]+\*\*|(?:^|[^*])\*[^*]+\*|~~[^~]+~~|`[^`]+`|(?:^|[^!])\[[^\]]+\]\([^)]+\)/.test(t);
-  if(!hasHtml && !hasMd) return t;            // plain text stays plain
+  // Plain text stays plain, except a literal "<" is escaped: callers put this output
+  // into innerHTML (Markdown preview/PDF) or store it as node HTML, so "<img onerror>"
+  // typed as text must never turn into a tag. Text without "<" is returned unchanged.
+  if(!hasHtml && !hasMd) return String(t==null?'':t).replace(/</g,'&lt;');
   // keep any raw formatting HTML (sanitized) rather than escaping it to literal text
   let s = hasHtml ? sanitizeInlineHTML(t) : escapeHtml(t);
   // Code spans are masked out before the other inline rules run, and restored verbatim
@@ -9719,7 +9883,12 @@ function mdInlineToHtml(t){
   s = s.replace(/(^|[^*])\*([^*]+)\*/g, '$1<i>$2</i>');
   s = s.replace(/~~([^~]+)~~/g, '<s>$1</s>');
   s = s.replace(/!\[([^\]]*)\]\(([^)\s]+)[^)]*\)/g, (m,alt,src)=>'<img alt="'+alt.replace(/"/g,'&quot;')+'" src="'+src.replace(/"/g,'&quot;')+'" loading="lazy">');   // inline image
-  s = s.replace(/(^|[^!])\[([^\]]+)\]\(([^)]+)\)/g, '$1<a href="$3" target="_blank" rel="noopener noreferrer">$2</a>');
+  // Links: only http(s)/mailto become <a>; any other scheme (javascript:, file:, app
+  // schemes) stays visible as its literal Markdown text. Quotes are escaped so a crafted
+  // URL cannot close the href attribute and add its own.
+  s = s.replace(/(^|[^!])\[([^\]]+)\]\(([^)]+)\)/g, (m,p,label,url)=> isSafeLinkUrl(url.replace(/&amp;/g,'&'))
+    ? p+'<a href="'+url.trim().replace(/"/g,'&quot;')+'" target="_blank" rel="noopener noreferrer">'+label+'</a>'
+    : m);
   s = s.replace(/\uE010(\d+)\uE011/g, (m,idx)=>'<code>'+codeSlots[+idx]+'</code>');
   return s;
 }
@@ -10060,12 +10229,12 @@ function parseMarkdownOutline(text, filename, editorState){
     const kidsOrd = pid => Object.values(nodes).filter(n=>n.parent===pid);   // document order (matches export)
     const applyMeta=(id,path)=>{ const mm=_meta.nodes[path], n=nodes[id];
       if(mm && n){
-        if(mm.color) n.color=mm.color; if(mm.textColor) n.textColor=mm.textColor;
+        if(safeColor(mm.color)) n.color=safeColor(mm.color); if(safeColor(mm.textColor)) n.textColor=safeColor(mm.textColor);
         if(mm.w){ n.width=mm.w; n.w=mm.w; } if(mm.h){ n.height=mm.h; n.h=mm.h; }
         if(mm.collapsed) n.collapsed=true;
         if(mm.underline) n.underline=true;   // bold/italic/strike round-trip via visible **/*/~~ syntax instead (see buildMarkdown)
         if(mm.fontSize) n.fontSize=mm.fontSize; if(mm.listType) n.listType=mm.listType;
-        if(mm.highlight) n.highlight=mm.highlight; if(mm.align) n.align=mm.align;
+        if(safeColor(mm.highlight)) n.highlight=safeColor(mm.highlight); if(mm.align) n.align=mm.align;
         if(mm.image) n.image=mm.image; if(mm.url) n.url=mm.url; if(mm.ref) n.ref=true; if(mm.citation) n.citation=mm.citation;
         if(mm.created) n.created=mm.created; if(mm.updated) n.updated=mm.updated;
       }
@@ -10073,7 +10242,7 @@ function parseMarkdownOutline(text, filename, editorState){
     };
     applyMeta(finalRoot, '0');
   }
-  const out = { id:uid(), title, titleAuto:false, color:(_meta&&_meta.color)||'#e0613a', rootId:finalRoot, nodes };
+  const out = { id:uid(), title, titleAuto:false, color:(_meta&&safeColor(_meta.color))||'#e0613a', rootId:finalRoot, nodes };
   if(_frontmatter) out.frontmatter=_frontmatter;
   if(_meta&&_meta.layout) out.layout=_meta.layout;
   if(_meta&&_meta.vars) out.vars=_meta.vars;
@@ -10862,7 +11031,9 @@ function showVariableForm(varNames, defaults, mapId, done){
   const close = () => m.remove();
   const collect = () => {
     const out = {};
-    m.querySelectorAll('.vf-input').forEach(ta => { out[ta.dataset.name] = ta.value; });
+    // Skip blank fields: an empty value would otherwise replace the placeholder with
+    // nothing and be remembered as if the user had chosen "".
+    m.querySelectorAll('.vf-input').forEach(ta => { if(ta.value.trim() !== '') out[ta.dataset.name] = ta.value; });
     // Remember per-map for next time
     try { localStorage.setItem('mindspark:vars:'+mapId, JSON.stringify(out)); } catch(e){}
     return out;
@@ -10900,13 +11071,17 @@ function exportAsPrompt(){
     finish(null);
     return;
   }
-  // Build defaults: map-level variables first (the "official" defaults defined
-  // once via the Variables panel), then any per-session localStorage values on top.
-  const defaults = { ...(map.vars || {}) };
-  try {
-    const saved = JSON.parse(localStorage.getItem('mindspark:vars:'+map.id) || '{}');
-    Object.assign(defaults, saved);
-  } catch(e){}
+  // Build defaults: values remembered from the last export form (localStorage) first,
+  // then the map-level variables on top — map.vars is what the Variables panel edits,
+  // so a stale remembered value must never override it. Empty strings don't count.
+  const nonEmpty = o => {
+    const out = {};
+    if(o && typeof o === 'object') Object.keys(o).forEach(k => { if(o[k] != null && String(o[k]).trim() !== '') out[k] = o[k]; });
+    return out;
+  };
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem('mindspark:vars:'+map.id) || '{}'); } catch(e){}
+  const defaults = { ...nonEmpty(saved), ...nonEmpty(map.vars) };
   // If every detected variable already has a non-empty map-level default, skip the
   // form entirely and export straight away — that's the whole point of map vars.
   const allCovered = vars.every(v => (map.vars||{})[v] != null && String((map.vars||{})[v]).trim() !== '');
@@ -11033,7 +11208,10 @@ function mathToImgTag(tex, fontPx, color){
     const w=Math.max(1,Math.ceil(lay.w+pad*2)), h=Math.max(1,Math.ceil(lay.asc+lay.desc+pad*2));
     const cv=document.createElement('canvas'); cv.width=w*scale; cv.height=h*scale;
     const ctx=cv.getContext('2d'); ctx.scale(scale,scale);
-    lay.draw(pad, pad+lay.asc);
+    // The layout's draw closures are bound to the context it was built with, so
+    // lay.draw() would paint onto the throwaway measuring canvas and leave `cv`
+    // blank. Lay out again against the real output context and draw that.
+    _layoutMath(ctx, mathEl, fontPx, 'serif', color).draw(pad, pad+lay.asc);
     // CSS height stays at the UNSCALED size — scale only adds pixel density, not display size.
     return `<img src="${cv.toDataURL('image/png')}" style="vertical-align:middle;height:${h}px" alt="${escapeHtml(tex)}">`;
   }catch(e){ return null; }
@@ -11292,13 +11470,18 @@ async function exportPNG(){
   // object, not the data-URL string, so this has to finish before the drawing
   // pass below runs. A per-image timeout means one slow/corrupt image can't hang
   // the whole export; that node just falls back to no image, like before.
+  // Remote (http/https) images load with crossOrigin='anonymous' for the same reason
+  // as favicons below: a tainted canvas makes toBlob() throw and kills the whole
+  // export. A host without CORS just fails the load, and that node draws no image.
   const loadImg = src => new Promise(resolve=>{
+    if(!src){ resolve(null); return; }
     const img=new Image();
     let done=false; const finish=v=>{ if(!done){ done=true; resolve(v); } };
+    if(/^(https?:)?\/\//i.test(String(src))) img.crossOrigin='anonymous';
     img.onload=()=>finish(img);
     img.onerror=()=>finish(null);
     setTimeout(()=>finish(null), 4000);
-    img.src=src;
+    try{ img.src=src; }catch(_){ finish(null); }
   });
   const imgMap={};
   await Promise.all(ids.filter(i=>map.nodes[i].image).map(async i=>{ imgMap[i]=await loadImg(nodeImageSrc(map.nodes[i])); }));
@@ -11509,7 +11692,28 @@ async function exportPNG(){
     // Render with inline B/I/U/S support, list bullets, line wrapping.
     // Nodes with $...$ math go through the canvas math renderer so equations
     // export as laid-out math instead of raw LaTeX source.
-    if(containsMath(n.text||'')){
+    // Mirror render(): divider nodes draw a rule, block/table nodes draw a cell grid,
+    // formula nodes draw their computed value (render() above refreshed the cache).
+    const exportBlocks = n.hr ? null : exportNodeBlocks(n);
+    const formulaSrc = (n.hr || n.html) ? '' : nodeTextPlain(n.text||'').trim();
+    if(n.hr){
+      ctx.save(); ctx.strokeStyle=textFill; ctx.globalAlpha=0.55; ctx.lineWidth=2;
+      ctx.beginPath(); ctx.moveTo(textX, textCenterY); ctx.lineTo(textX+textMaxWidth, textCenterY); ctx.stroke();
+      ctx.restore();
+    } else if(exportBlocks){
+      drawExportBlocks(ctx, exportBlocks, {
+        x: textX, y: n.y+imgDrawH+6, w: textMaxWidth, h: h-imgDrawH-12,
+        fontPx, color: textFill, lineColor: themeLine, family: '"PingFang SC", sans-serif'
+      });
+    } else if(formulaSrc.startsWith('=')){
+      const val = computeNodeValue(i);
+      const shown = (val && typeof val==='object' && val.error) ? '#ERROR' : formatFormulaResult(val);
+      drawFormattedText(ctx, escapeHtml(String(shown==null?'':shown)), {
+        favicons, x: textX, y: textCenterY, maxWidth: textMaxWidth, fontPx, color: textFill,
+        family: '"PingFang SC", sans-serif', baseBold: !!n.bold || isRoot, baseItalic: !!n.italic,
+        baseUnderline: !!n.underline, baseStrike: !!n.strike, align: n.align || 'center', listType: null
+      });
+    } else if(containsMath(n.text||'')){
       drawNodeMath(ctx, n.text||'', {
         x: textX, y: textCenterY, maxWidth: textMaxWidth,
         fontPx, color: textFill, family: '"PingFang SC", sans-serif',
@@ -11581,6 +11785,74 @@ async function exportPNG(){
   }
 }
 
+// PNG export: what a block node (n.html) or a GFM-table node shows, as drawable
+// blocks — {type:'table', grid} or {type:'text', lines}. null = ordinary text node.
+function exportNodeBlocks(n){
+  if(!n || n.hr) return null;
+  if(n.html){
+    const grid=htmlTableToGrid(sanitizeNotes(n.html));
+    if(grid) return [{ type:'table', grid }];
+    const tpl=document.createElement('template'); tpl.innerHTML=sanitizeNotes(n.html);
+    tpl.content.querySelectorAll('br').forEach(br=>br.replaceWith(document.createTextNode('\n')));
+    const txt=(tpl.content.textContent||'').replace(/\u00A0/g,' ').replace(/\n{3,}/g,'\n\n').trim();
+    return txt ? [{ type:'text', lines:txt.split('\n') }] : null;
+  }
+  const text=n.text||'';
+  if(!nodeTextHasGfmTable(text)) return null;
+  const blocks=[];
+  splitTextWithGfmTables(text).forEach(p=>{
+    if(p.type==='table' && p.grid){
+      const plain=c=>nodeTextPlain(formatNodeTableCell(c)).trim();   // same inline Markdown as the live cell, drawn as text
+      blocks.push({ type:'table', grid:{ headers:p.grid.headers.map(plain), rows:p.grid.rows.map(r=>r.map(plain)), aligns:p.grid.aligns } });
+    } else if(p.value){
+      const t=nodeTextPlain(p.value).trim();
+      if(t) blocks.push({ type:'text', lines:t.split('\n') });
+    }
+  });
+  return blocks.length ? blocks : null;
+}
+// Draw exportNodeBlocks() output inside the box {x,y,w,h}: text lines, then each
+// table as an equal-width grid with a bold header row. Rows shrink to fit the box.
+function drawExportBlocks(ctx, blocks, o){
+  const rowsNeeded=blocks.reduce((k,b)=> k + (b.type==='table' ? 1+b.grid.rows.length : b.lines.length), 0);
+  if(!rowsNeeded) return;
+  const rowH=Math.max(6, Math.min(o.fontPx*1.7, o.h/rowsNeeded));
+  const fontPx=Math.max(6, Math.min(o.fontPx, rowH/1.45));
+  const fit=(str, maxW)=>{
+    let t=String(str==null?'':str);
+    if(ctx.measureText(t).width<=maxW) return t;
+    while(t.length>1 && ctx.measureText(t+'\u2026').width>maxW) t=t.slice(0,-1);
+    return t+'\u2026';
+  };
+  let y=o.y + Math.max(0, (o.h - rowsNeeded*rowH)/2);
+  ctx.save();
+  ctx.textBaseline='middle'; ctx.fillStyle=o.color;
+  blocks.forEach(b=>{
+    if(b.type==='text'){
+      ctx.font='500 '+fontPx+'px '+o.family; ctx.textAlign='center';
+      b.lines.forEach(line=>{ ctx.fillText(fit(line, o.w), o.x+o.w/2, y+rowH/2); y+=rowH; });
+      return;
+    }
+    const g=b.grid, cols=g.headers.length, cw=o.w/cols, top=y;
+    const pad=Math.min(6, cw*0.1);
+    [g.headers, ...g.rows].forEach((row, ri)=>{
+      ctx.font=(ri===0?'700 ':'500 ')+fontPx+'px '+o.family;
+      row.forEach((cell, ci)=>{
+        const al=(g.aligns && g.aligns[ci]) || 'left';
+        ctx.textAlign=al==='right'?'right':(al==='center'?'center':'left');
+        const cx=al==='right' ? o.x+(ci+1)*cw-pad : al==='center' ? o.x+ci*cw+cw/2 : o.x+ci*cw+pad;
+        ctx.fillText(fit(cell, cw-pad*2), cx, y+rowH/2);
+      });
+      y+=rowH;
+    });
+    ctx.strokeStyle=o.lineColor||o.color; ctx.lineWidth=1;
+    ctx.beginPath();
+    for(let r=0; r<=1+g.rows.length; r++){ ctx.moveTo(o.x, top+r*rowH); ctx.lineTo(o.x+o.w, top+r*rowH); }
+    for(let c=0; c<=cols; c++){ ctx.moveTo(o.x+c*cw, top); ctx.lineTo(o.x+c*cw, y); }
+    ctx.stroke();
+  });
+  ctx.restore();
+}
 // Render text (possibly containing inline <b>/<i>/<u>/<s>/<a>/<br>/<ul>/<ol>/<li>)
 // onto a canvas context at the given centre point, with word-wrap and per-line
 // alignment. This is what makes the PNG export look like the browser render.
@@ -11588,8 +11860,13 @@ function drawFormattedText(ctx, html, opts){
   const { x, y, maxWidth, fontPx, color, family, baseBold, baseItalic, baseUnderline, baseStrike, align, listType } = opts;
   // Step 1: walk the HTML, collecting "runs" each with a formatting state.
   // \n separators come from <br>, end-of-li, and end-of-p/div blocks.
-  const tmp = document.createElement('div');
-  tmp.innerHTML = (html || '').toString();
+  // Inert, sanitized parse (a live <div>.innerHTML would fire <img onerror> during
+  // PNG export). Plain node text is plain text, as in renderNodeText.
+  const src = (html || '').toString();
+  const tpl = document.createElement('template');
+  if(hasInlineMarkup(src)) tpl.innerHTML = sanitizeInlineHTML(src);
+  else tpl.content.appendChild(document.createTextNode(src));
+  const tmp = tpl.content;
   const runs = [];
   // legacy listType (whole-node bullets) — render as if each line of plain text
   // were wrapped in a <li>
@@ -13083,9 +13360,9 @@ async function tryEnterSharedView(){
   catch(e){ console.error('bad share link',e); return false; }
   READONLY=true;
   document.body.classList.add('shared-view');
-  map={ id:'shared', title:payload.title||'Shared map', color:payload.color||'#e0613a',
+  map=sanitizeMap({ id:'shared', title:payload.title||'Shared map', color:payload.color||'#e0613a',
         style:payload.style, layout:payload.layout, rootId:payload.rootId,
-        nodes:payload.nodes||{}, links:payload.links||[], vars:payload.vars||{} };
+        nodes:payload.nodes||{}, links:payload.links||[], vars:payload.vars||{} });
   sel=null;
   $('#mapTitle').value=map.title; $('#mapTitle').readOnly=true;
   // Grow the title <input> to fit the whole title (it clips to its width) so a
@@ -13128,9 +13405,9 @@ async function consumePendingImport(){
   try{ sessionStorage.removeItem('mindspark:pendingImport'); }catch(e){}
   let p; try{ p=JSON.parse(raw); }catch(e){ return false; }
   const id=uid();
-  map={ id, title:(p.title||'Shared map')+' (copy)', titleAuto:false, color:p.color||'#e0613a',
+  map=sanitizeMap({ id, title:(p.title||'Shared map')+' (copy)', titleAuto:false, color:p.color||'#e0613a',
         style:p.style, layout:p.layout, rootId:p.rootId, nodes:p.nodes||{},
-        links:p.links||[], vars:p.vars||{}, updated:Date.now() };
+        links:p.links||[], vars:p.vars||{}, updated:Date.now() });
   sel=map.rootId; history=[]; hpos=-1; pushHistory();
   $('#mapTitle').value=map.title;
   render(); fit();
@@ -13238,6 +13515,7 @@ const Collab = (function(){
       if(s.layout) map.layout=s.layout;
       if(s.vars)  map.vars=clone(s.vars);
       if('style' in s) map.style=s.style;
+      sanitizeMap(map);              // peer data is untrusted: same checks as an import
       shadow=snap();
       if(typeof autoLayout==='function') autoLayout();
       render();
@@ -13249,9 +13527,9 @@ const Collab = (function(){
     applying=true;
     try{
       for(const op of ops){
-        if(op.t==='node') map.nodes[op.id]=op.n;
+        if(op.t==='node'){ if(SAFE_NODE_ID_RE.test(String(op.id))){ const sn=sanitizeMapNode(op.n); if(sn){ sn.id=op.id; map.nodes[op.id]=sn; } } }
         else if(op.t==='del'){ delete map.nodes[op.id]; if(sel===op.id) sel=null; }
-        else if(op.t==='meta'){ if(op.k==='title'){ map.title=op.v; const t=$('#mapTitle'); if(t) t.value=op.v; } else map[op.k]=op.v; }
+        else if(op.t==='meta'){ if(op.k==='title'){ map.title=op.v; const t=$('#mapTitle'); if(t) t.value=op.v; } else if(op.k==='color') map.color=safeColor(op.v)||map.color; else map[op.k]=op.v; }
       }
       shadow=snap(); render();
     } finally { applying=false; }    // same guarantee — a malformed op or a render() edge case must not permanently wedge sync
@@ -13759,9 +14037,9 @@ function _applySharedMap(id, token, data){
   document.body.classList.remove('cloud-edit','shared-view');
   document.body.classList.add(editable?'cloud-edit':'shared-view');
   document.body.classList.add('no-banner');   // compact themed pill instead of a full-width banner
-  map={ id:'shared-'+id, title:data.title||'Shared map', color:data.color||'#e0613a',
+  map=sanitizeMap({ id:'shared-'+id, title:data.title||'Shared map', color:data.color||'#e0613a',
         style:data.style, layout:data.layout||'balanced', rootId:data.rootId,
-        nodes:data.nodes||{}, links:data.links||[], vars:data.vars||{} };
+        nodes:data.nodes||{}, links:data.links||[], vars:data.vars||{} });
   map._cloudView=id;
   map._opening=true;                 // opening a shared map isn't an edit — suppress the save pill until it settles
   if(editable){ map._cloudEdit={ id, token }; }
