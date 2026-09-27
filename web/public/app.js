@@ -11504,8 +11504,13 @@ function drawFormattedText(ctx, html, opts){
   const { x, y, maxWidth, fontPx, color, family, baseBold, baseItalic, baseUnderline, baseStrike, align, listType } = opts;
   // Step 1: walk the HTML, collecting "runs" each with a formatting state.
   // \n separators come from <br>, end-of-li, and end-of-p/div blocks.
-  const tmp = document.createElement('div');
-  tmp.innerHTML = (html || '').toString();
+  // Inert, sanitized parse (a live <div>.innerHTML would fire <img onerror> during
+  // PNG export). Plain node text is plain text, as in renderNodeText.
+  const src = (html || '').toString();
+  const tpl = document.createElement('template');
+  if(hasInlineMarkup(src)) tpl.innerHTML = sanitizeInlineHTML(src);
+  else tpl.content.appendChild(document.createTextNode(src));
+  const tmp = tpl.content;
   const runs = [];
   // legacy listType (whole-node bullets) — render as if each line of plain text
   // were wrapped in a <li>
