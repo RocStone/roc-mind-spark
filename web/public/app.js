@@ -9018,11 +9018,43 @@ function showNotesEditor(nodeId, opts){
    TEMPLATES and TEMPLATE_CATEGORIES are defined there; the
    functions that use them stay here.
    ============================================================ */
+// Built-in templates are English in templates.js; templates.zh.js holds a
+// Chinese overlay keyed by template id and node key k. Only name/desc and each
+// node's text/notes/html are overridden — structure stays in TEMPLATES.
+function mergeTemplateZh(tpl, zh){
+  if(!tpl || !zh) return tpl;
+  const zn = zh.nodes || {};
+  return Object.assign({}, tpl, {
+    name: zh.name || tpl.name,
+    desc: zh.desc || tpl.desc,
+    nodes: (tpl.nodes||[]).map(n => {
+      const o = zn[n.k];
+      if(!o) return n;
+      const m = Object.assign({}, n);
+      if(typeof o.text === 'string') m.text = o.text;
+      if(o.notes !== undefined) m.notes = o.notes;
+      if(o.html !== undefined) m.html = o.html;
+      return m;
+    })
+  });
+}
+function templateUiIsZh(){
+  try{ if(typeof window!=='undefined' && typeof window.rmsLang==='function') return window.rmsLang()==='zh'; }catch(_){}
+  try{ return document.documentElement.classList.contains('lang-zh'); }catch(_){ return false; }
+}
+// The template as it should appear in the current UI language. User-saved
+// templates ("My templates") have no overlay and come back as stored.
+function templateForLang(id){
+  const tpl = TEMPLATES[id];
+  if(!tpl || tpl._user || !templateUiIsZh()) return tpl;
+  const zh = (typeof TEMPLATES_ZH !== 'undefined') ? TEMPLATES_ZH[id] : null;
+  return mergeTemplateZh(tpl, zh);
+}
 async function createMapFromTemplate(templateId){
   ++_mapLoadGeneration;
   resetMapViewState();
   closeNotesPopup();
-  const tpl = TEMPLATES[templateId];
+  const tpl = templateForLang(templateId);
   if(!tpl){ createMap(); return; }
   const id = uid();
   const keyToId = {};      // template key -> real uid
@@ -9196,12 +9228,12 @@ function showTemplatesMenu(){
     pop.innerHTML = `
       <button class="tpl-back" data-act="back">‹ ${escapeHtml(rmsTr('tplAllCats','All categories'))}</button>
       <div class="tpl-head" style="padding-top:2px">${escapeHtml(tplCatLabel(cat))}</div>
-      ${entries.map(([id,t])=>`
+      ${entries.map(([id,t0])=>{ const t = templateForLang(id) || t0; return `
         <button class="tpl-item" data-id="${id}">
           <span class="tpl-ic" style="background:${t.color}">${t.icon || '⊟'}</span>
           <span><b>${escapeHtml(t.name)}</b><i>${escapeHtml(tplDesc(t))}</i></span>
           ${t._user?`<span class="tpl-del" data-del="${id}" title="${escapeHtml(rmsTr('tplDelete','Delete template'))}">✕</span>`:''}
-        </button>`).join('')}`;
+        </button>`; }).join('')}`;
     pop.querySelector('[data-act="back"]').onclick = renderRoot;
     pop.querySelectorAll('.tpl-item[data-id]').forEach(b => b.onclick = (e) => {
       if(e.target.classList.contains('tpl-del')){
