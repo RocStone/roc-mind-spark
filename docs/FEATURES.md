@@ -75,6 +75,6 @@ What Roc Mind Spark can do today, as a **macOS overlay**. This is the product ca
 
 ## What this Mac app does not claim
 
-- Live collaboration and cloud share need the hosted MindSpark cloud path. The Mac overlay does not enable GitHub OAuth or that worker.
+- No live collaboration, cloud share, or GitHub sign-in. That inherited hosted-product code has been removed from the Mac canvas.
 - Windows, Linux, Docker, Cloudflare, GitHub Pages, and a standalone web app are not supported products of this repository.
 - Optional outbound calls (LLM with your own key, Crossref DOI, favicons, opened http(s) links) are documented in [PRIVACY.md](../PRIVACY.md).

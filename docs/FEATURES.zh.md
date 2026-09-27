@@ -78,6 +78,6 @@ Roc Mind Spark **作为 macOS 浮层**今天能做什么。这是给 GitHub 看�
 
 ## 这款 Mac 应用不声称的事
 
-- 实时协作和云分享走的是托管版 MindSpark 的 cloud 路径。Mac 浮层不启用 GitHub OAuth，也不启用那个 worker。
+- 没有实时协作、云分享和 GitHub 登录。这些继承自托管版的代码已从 Mac 画布中移除。
 - Windows、Linux、Docker、Cloudflare、GitHub Pages，以及单独的网页产品，都不是这个仓库的受支持产品。
 - 可选的出站请求（自带 key 的 LLM、Crossref DOI、网站图标、你打开的 http(s) 链接）写在 [PRIVACY.md](../PRIVACY.md)。
